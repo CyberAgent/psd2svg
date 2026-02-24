@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Multimedia :: Graphics :: Graphics Conversion",
 ]
 dependencies = [
-    "pillow",
+    "pillow>=12.1.1",
     "numpy",
     "psd-tools>=1.12.0",
     "resvg-py>=0.2.5",
