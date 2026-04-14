@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from psd_tools import PSDImage
+from psd_tools.api.adjustments import ColorBalance, Levels
 
 from psd2svg import convert
 from psd2svg.core.converter import Converter
@@ -688,6 +689,7 @@ def test_adjustment_colorbalance_noop() -> None:
             break
 
     assert colorbalance_layer is not None, "ColorBalance layer not found in fixture"
+    assert isinstance(colorbalance_layer, ColorBalance)
 
     # Verify parameters are all zero
     assert colorbalance_layer.shadows == (0, 0, 0)
@@ -758,6 +760,7 @@ def test_adjustment_levels_noop() -> None:
             break
 
     assert levels_layer is not None, "Levels layer not found in fixture"
+    assert isinstance(levels_layer, Levels)
 
     # Verify parameters are identity
     for i in range(4):
