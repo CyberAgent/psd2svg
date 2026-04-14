@@ -55,8 +55,8 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/kyamagu/psd2svg"
-Repository = "https://github.com/kyamagu/psd2svg"
+Homepage = "https://github.com/CyberAgent/psd2svg"
+Repository = "https://github.com/CyberAgent/psd2svg"
 
 [project.scripts]
 psd2svg = "psd2svg.__main__:main"

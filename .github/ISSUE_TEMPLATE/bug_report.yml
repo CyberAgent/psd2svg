@@ -14,11 +14,11 @@ body:
       label: Pre-submission Checklist
       description: Please verify the following before submitting
       options:
-        - label: I have searched the [existing issues](https://github.com/kyamagu/psd2svg/issues) and this bug has not been reported
+        - label: I have searched the [existing issues](https://github.com/CyberAgent/psd2svg/issues) and this bug has not been reported
           required: true
         - label: I have reviewed the [Known Limitations](https://psd2svg.readthedocs.io/en/latest/limitations.html) and this is not a known limitation
           required: true
-        - label: This is not a security vulnerability (those should be reported via [SECURITY.md](https://github.com/kyamagu/psd2svg/blob/main/SECURITY.md))
+        - label: This is not a security vulnerability (those should be reported via [SECURITY.md](https://github.com/CyberAgent/psd2svg/blob/main/SECURITY.md))
           required: true
 
   - type: textarea

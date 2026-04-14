@@ -18,7 +18,7 @@ Clone the Repository
 
 .. code-block:: bash
 
-   git clone https://github.com/kyamagu/psd2svg.git
+   git clone https://github.com/CyberAgent/psd2svg.git
    cd psd2svg
 
 Install Dependencies
@@ -498,6 +498,6 @@ Manual publishing is not necessary as the release workflow handles this automati
 Getting Help
 ------------
 
-* **Issues**: Report bugs and ask questions on `GitHub Issues <https://github.com/kyamagu/psd2svg/issues>`_
+* **Issues**: Report bugs and ask questions on `GitHub Issues <https://github.com/CyberAgent/psd2svg/issues>`_
 * **Documentation**: Refer to `psd2svg.readthedocs.io <https://psd2svg.readthedocs.io/>`_
-* **Security**: Report vulnerabilities privately following `SECURITY.md <https://github.com/kyamagu/psd2svg/blob/main/SECURITY.md>`_
+* **Security**: Report vulnerabilities privately following `SECURITY.md <https://github.com/CyberAgent/psd2svg/blob/main/SECURITY.md>`_

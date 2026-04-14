@@ -14,7 +14,7 @@ body:
       label: Pre-submission Checklist
       description: Please verify the following before submitting
       options:
-        - label: I have searched the [existing issues](https://github.com/kyamagu/psd2svg/issues) and this feature has not been requested
+        - label: I have searched the [existing issues](https://github.com/CyberAgent/psd2svg/issues) and this feature has not been requested
           required: true
         - label: I have reviewed the [documentation](https://psd2svg.readthedocs.io/) and this feature doesn't already exist
           required: true

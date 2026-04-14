@@ -701,7 +701,7 @@ If you encounter issues not listed here:
 
 1. Check if it's a known limitation
 2. Test with simplified PSD files
-3. Report issues at: https://github.com/kyamagu/psd2svg/issues
+3. Report issues at: https://github.com/CyberAgent/psd2svg/issues
 
 Include:
 
