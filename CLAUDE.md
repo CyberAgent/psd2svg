@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Quick Reference
 
 ### Essential Commands
@@ -77,25 +75,9 @@ src/psd2svg/
 │   └── morisawa_fonts.json    # Morisawa font mappings (~4,042 fonts)
 └── tools/                     # CLI tools
     └── generate_font_mapping.py  # Generate custom font mappings
-
-tests/                         # Test suite
-docs/                          # Sphinx documentation
 ```
 
 For detailed architecture documentation, see [docs/development.rst](docs/development.rst).
-
-## Important Considerations
-
-For detailed information about SVG features, text layer conversion, font embedding, and advanced configuration options, see:
-
-- **Configuration**: [docs/configuration.rst](docs/configuration.rst)
-- **Limitations**: [docs/limitations.rst](docs/limitations.rst)
-- **Font embedding**: [docs/fonts.rst](docs/fonts.rst)
-- **Rasterization**: [docs/rasterizers.rst](docs/rasterizers.rst)
-
-## Testing
-
-For test setup, font requirements, and pytest markers, see [docs/development.rst](docs/development.rst).
 
 ## CI/CD
 
@@ -145,26 +127,11 @@ gh pr create --title "My Change" --body "Description"
 ### When Making Changes
 
 1. **Create a git branch** - Always work on a feature branch, never directly on main
-2. **Read files before modifying** - Understand existing patterns
-3. **Avoid over-engineering** - Keep changes focused and minimal
-4. **Security** - Watch for command injection, XSS, SQL injection
-5. **Avoid backwards-compatibility hacks** - Delete unused code completely
-6. **No time estimates** - Provide concrete steps, not timelines
-
-### File Operations
-
-Prefer specialized tools over bash:
-
-- **Read** for reading files (not `cat`/`head`/`tail`)
-- **Edit** for editing (not `sed`/`awk`)
-- **Write** for creating files (not `echo >` or `cat <<EOF`)
-- **Glob** for finding files (not `find`)
-- **Grep** for searching content (not `grep`/`rg`)
+2. **Avoid backwards-compatibility hacks** - Delete unused code completely
 
 ### Documentation Structure
 
 - **README.md** - Quick start guide, basic usage
-- **CLAUDE.md** (this file) - Development guidance for Claude Code
 - **docs/** - Full Sphinx documentation (comprehensive details)
 
 For detailed feature documentation, configuration options, and usage examples, refer to the [full documentation](https://psd2svg.readthedocs.io/).
