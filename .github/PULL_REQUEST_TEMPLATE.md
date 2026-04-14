@@ -23,7 +23,7 @@ Closes #
 
 <!-- Verify all items before submitting. All checks must pass for merge. -->
 
-- [ ] I have read the [CONTRIBUTING.md](https://github.com/kyamagu/psd2svg/blob/main/CONTRIBUTING.md) guidelines
+- [ ] I have read the [CONTRIBUTING.md](https://github.com/CyberAgent/psd2svg/blob/main/CONTRIBUTING.md) guidelines
 - [ ] My code follows the project's code quality standards
 - [ ] I have run `uv run ruff format src/ tests/` to format the code
 - [ ] I have run `uv run ruff check src/ tests/` and fixed all linting issues

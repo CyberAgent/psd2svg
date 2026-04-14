@@ -478,8 +478,8 @@ Security Updates
 
 Security features and fixes are documented in the changelog. Subscribe to:
 
-- **GitHub Security Advisories**: https://github.com/kyamagu/psd2svg/security/advisories
-- **Release Notes**: https://github.com/kyamagu/psd2svg/releases
+- **GitHub Security Advisories**: https://github.com/CyberAgent/psd2svg/security/advisories
+- **Release Notes**: https://github.com/CyberAgent/psd2svg/releases
 - **Dependabot Alerts**: Enable for your repository
 
 Reporting Security Issues
@@ -490,6 +490,6 @@ See ``SECURITY.md`` in the repository root for instructions on reporting securit
 Additional Resources
 ====================
 
-- `SECURITY.md <https://github.com/kyamagu/psd2svg/blob/main/SECURITY.md>`_ - Security policy
+- `SECURITY.md <https://github.com/CyberAgent/psd2svg/blob/main/SECURITY.md>`_ - Security policy
 - `OWASP Secure Coding Practices <https://owasp.org/www-project-secure-coding-practices-quick-reference-guide/>`_
 - `CWE Top 25 <https://cwe.mitre.org/top25/archive/2023/2023_top25_list.html>`_

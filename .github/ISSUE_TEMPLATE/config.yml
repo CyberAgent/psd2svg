@@ -4,7 +4,7 @@ contact_links:
     url: https://psd2svg.readthedocs.io/
     about: Read the full documentation for usage guides and API reference
   - name: Security Vulnerability
-    url: https://github.com/kyamagu/psd2svg/security/advisories/new
+    url: https://github.com/CyberAgent/psd2svg/security/advisories/new
     about: Report security vulnerabilities privately (do not open a public issue)
   - name: Known Limitations
     url: https://psd2svg.readthedocs.io/en/latest/limitations.html

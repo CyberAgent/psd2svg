@@ -21,7 +21,7 @@ Please **do not** create a public GitHub issue for security vulnerabilities. Pub
 
 ### 2. Report Privately
 
-Report security vulnerabilities by opening a [GitHub Security Advisory](https://github.com/kyamagu/psd2svg/security/advisories/new).
+Report security vulnerabilities by opening a [GitHub Security Advisory](https://github.com/CyberAgent/psd2svg/security/advisories/new).
 
 Alternatively, you can email the maintainer directly. Check the repository for contact information.
 
@@ -69,7 +69,7 @@ This project uses automated security scanning:
 - **Safety**: Dependency security checker
 - **Trivy**: Comprehensive security scanner
 
-Security scan results are available in the [Security tab](https://github.com/kyamagu/psd2svg/security).
+Security scan results are available in the [Security tab](https://github.com/CyberAgent/psd2svg/security).
 
 ## Acknowledgments
 
@@ -77,4 +77,4 @@ We appreciate security researchers who responsibly disclose vulnerabilities. Con
 
 ## Questions?
 
-If you have questions about this security policy, please open an issue in the [Issues tab](https://github.com/kyamagu/psd2svg/issues) with the "question" label.
+If you have questions about this security policy, please open an issue in the [Issues tab](https://github.com/CyberAgent/psd2svg/issues) with the "question" label.

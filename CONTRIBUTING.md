@@ -10,7 +10,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ### Reporting Bugs
 
-Before creating a bug report, check the [existing issues](https://github.com/kyamagu/psd2svg/issues) and review the [Known Limitations](https://psd2svg.readthedocs.io/en/latest/limitations.html).
+Before creating a bug report, check the [existing issues](https://github.com/CyberAgent/psd2svg/issues) and review the [Known Limitations](https://psd2svg.readthedocs.io/en/latest/limitations.html).
 
 Use the [Bug Report template](.github/ISSUE_TEMPLATE/bug_report.yml) which will guide you through providing:
 
@@ -40,7 +40,7 @@ Quick setup:
 
 ```bash
 # Clone and install dependencies
-git clone https://github.com/kyamagu/psd2svg.git
+git clone https://github.com/CyberAgent/psd2svg.git
 cd psd2svg
 uv sync
 
@@ -116,7 +116,7 @@ For detailed standards, architecture information, and development practices, see
 ## Getting Help
 
 - **Documentation**: [psd2svg.readthedocs.io](https://psd2svg.readthedocs.io/)
-- **Issues**: [GitHub Issues](https://github.com/kyamagu/psd2svg/issues)
+- **Issues**: [GitHub Issues](https://github.com/CyberAgent/psd2svg/issues)
 - **Questions**: Open an issue with the "question" label
 
 ## License
