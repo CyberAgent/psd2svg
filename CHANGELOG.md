@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-08
+
+### Added
+
+- **Stroke blend mode support for paint strokes** (#287)
+  - Paint strokes now honor the layer's stroke blend mode
+
+### Changed
+
+- **Merge tspans differing only in dx/dy into coordinate lists** (#305)
+  - Consecutive tspans that differ only in `dx`/`dy` are now emitted as
+    coordinate lists, producing more compact text output
+
+### Fixed
+
+- **CVE-2026-25990**: upgrade Pillow to >=12.1.1 (#288)
+
+### Dependencies
+
+- Numerous dependency and CI action bumps (tornado, urllib3, idna, requests,
+  psd-tools, pillow, actions/checkout, actions/upload-artifact,
+  softprops/action-gh-release)
+
 ## [0.11.0] - 2026-01-06
 
 ### Status Update
@@ -293,6 +316,7 @@ See [limitations.rst](https://psd2svg.readthedocs.io/en/latest/limitations.html)
 
 Previous releases - see git history for details.
 
+[0.12.0]: https://github.com/CyberAgent/psd2svg/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/CyberAgent/psd2svg/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/CyberAgent/psd2svg/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/CyberAgent/psd2svg/compare/v0.9.0...v0.10.0
