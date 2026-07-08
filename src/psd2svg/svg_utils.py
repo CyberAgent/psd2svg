@@ -855,6 +855,208 @@ def merge_consecutive_siblings(element: ET.Element) -> None:
             i += 1
 
 
+# Attributes that can be expressed as per-character coordinate lists on an SVG
+# element. Every other attribute is treated as "style" and must match exactly
+# for two elements to be merged by merge_offset_siblings.
+_POSITIONAL_ATTRS = ("x", "y", "dx", "dy")
+
+
+def _non_positional_attrib(element: ET.Element) -> dict[str, str]:
+    """Return an element's attributes excluding positional coordinate ones."""
+    return {
+        key: value
+        for key, value in element.attrib.items()
+        if key not in _POSITIONAL_ATTRS
+    }
+
+
+def _has_combining_marks(text: str) -> bool:
+    """Return True if text contains Unicode combining marks (Mn/Mc/Me).
+
+    Combining marks make Python's ``len(text)`` diverge from the number of
+    addressable characters an SVG renderer counts, which would misalign the
+    per-character coordinate lists built by merge_offset_siblings. Groups that
+    contain them are therefore left unmerged.
+    """
+    return any(unicodedata.category(char) in ("Mn", "Mc", "Me") for char in text)
+
+
+def _serialize_relative_offsets(values: list[str | None]) -> str | None:
+    """Serialize a relative (dx/dy) coordinate list.
+
+    Unset entries default to 0 and trailing zeros are trimmed, since a relative
+    offset defaults to 0 for characters past the end of the list.
+
+    Returns:
+        The space-separated list, or None if every entry is zero/unset.
+    """
+    last_nonzero = -1
+    for index, value in enumerate(values):
+        if value is not None and float(value) != 0.0:
+            last_nonzero = index
+    if last_nonzero < 0:
+        return None
+    return " ".join(values[index] or "0" for index in range(last_nonzero + 1))
+
+
+def _serialize_absolute_offsets(
+    values: list[str | None],
+) -> tuple[bool, str | None]:
+    """Serialize an absolute (x/y) coordinate list.
+
+    Unlike relative offsets, an absolute coordinate list has no way to express
+    an "unset" character in the middle of the list (there is no natural-advance
+    sentinel). A group that would require such a gap cannot be merged.
+
+    Returns:
+        A ``(ok, value)`` tuple. ``ok`` is False when an internal gap would be
+        required. ``value`` is None when no entry is set.
+    """
+    last_set = -1
+    for index, value in enumerate(values):
+        if value is not None:
+            last_set = index
+    if last_set < 0:
+        return True, None
+    prefix = values[: last_set + 1]
+    if any(value is None for value in prefix):
+        return False, None
+    return True, " ".join(value for value in prefix if value is not None)
+
+
+def _merge_offset_group(parent: ET.Element, group: list[ET.Element]) -> bool:
+    """Merge a run of leaf siblings into the first element with position lists.
+
+    Args:
+        parent: The parent element that owns the group.
+        group: Consecutive leaf siblings sharing identical non-positional
+            attributes.
+
+    Returns:
+        True if the group was merged (positional attributes rewritten as lists
+        and the remaining members removed). False if the group cannot be safely
+        merged, in which case the tree is left unchanged.
+    """
+    texts = [element.text or "" for element in group]
+
+    # Combining marks make len(text) diverge from the addressable-character
+    # count, which would misalign the coordinate lists.
+    if any(_has_combining_marks(text) for text in texts):
+        return False
+
+    # Build per-character value lists (None marks an unset position).
+    per_char: dict[str, list[str | None]] = {attr: [] for attr in _POSITIONAL_ATTRS}
+    for element, text in zip(group, texts):
+        char_count = len(text)
+        for attr in _POSITIONAL_ATTRS:
+            value = element.attrib.get(attr)
+            if char_count == 0:
+                # An empty span hosts no character, so a coordinate on it is
+                # ambiguous and the group cannot be merged safely.
+                if value is not None:
+                    return False
+                continue
+            per_char[attr].append(value)
+            per_char[attr].extend([None] * (char_count - 1))
+
+    serialized: dict[str, str | None] = {}
+    for attr in ("dx", "dy"):
+        serialized[attr] = _serialize_relative_offsets(per_char[attr])
+    for attr in ("x", "y"):
+        ok, value = _serialize_absolute_offsets(per_char[attr])
+        if not ok:
+            return False
+        serialized[attr] = value
+
+    merged = group[0]
+    merged.text = "".join(texts) or None
+    for attr in _POSITIONAL_ATTRS:
+        value = serialized[attr]
+        if value is None:
+            merged.attrib.pop(attr, None)
+        else:
+            merged.attrib[attr] = value
+    # Only the last member may carry a tail (see merge_offset_siblings), so
+    # preserving it keeps any following content in place.
+    merged.tail = group[-1].tail
+    for element in group[1:]:
+        parent.remove(element)
+    return True
+
+
+def merge_offset_siblings(element: ET.Element) -> None:
+    """Recursively merge consecutive siblings that differ only in position.
+
+    Photoshop kerning is emitted as a ``dx`` value on individual per-character
+    <tspan> elements, so merge_consecutive_siblings (which only merges elements
+    with identical attributes) leaves them unmerged. This function consolidates
+    such runs into a single element carrying per-character coordinate lists,
+    turning e.g.
+
+        <tspan>a</tspan><tspan dx="0.1">b</tspan><tspan>c</tspan>
+
+    into
+
+        <tspan dx="0 0.1">abc</tspan>
+
+    The ``x``/``y``/``dx``/``dy`` attributes become space-separated lists whose
+    n-th value applies to the n-th character of the merged text.
+
+    Args:
+        element: The XML element to process recursively.
+
+    Note:
+        - Only leaf elements (no child elements) are merged.
+        - Non-positional attributes must be identical across the whole group.
+        - ``dx``/``dy`` are relative (default 0), so gaps are filled with 0 and
+          trailing zeros are trimmed.
+        - ``x``/``y`` are absolute; a group that would need an internal unset
+          gap is left unmerged.
+    """
+    # First, recursively process all children
+    for child in list(element):
+        merge_offset_siblings(child)
+
+    children = list(element)
+    if len(children) < 2:
+        return
+
+    i = 0
+    while i < len(children):
+        current = children[i]
+
+        # Skip elements with children (don't merge complex structures)
+        if len(current) > 0:
+            i += 1
+            continue
+
+        current_style = _non_positional_attrib(current)
+
+        # Collect a run of mergeable leaf siblings with matching style.
+        group = [current]
+        j = i + 1
+        while j < len(children):
+            next_elem = children[j]
+            if len(next_elem) > 0:
+                break
+            if next_elem.tag != current.tag:
+                break
+            if _non_positional_attrib(next_elem) != current_style:
+                break
+            # A non-empty tail carries content that merging would drop, so stop
+            # the run before crossing it.
+            if group[-1].tail:
+                break
+            group.append(next_elem)
+            j += 1
+
+        if len(group) >= 2 and _merge_offset_group(element, group):
+            # The merged element remains at index i; refresh and re-scan.
+            children = list(element)
+        else:
+            i += 1
+
+
 def merge_singleton_children(element: ET.Element) -> None:
     """Recursively merge singleton child nodes into their parent nodes.
 

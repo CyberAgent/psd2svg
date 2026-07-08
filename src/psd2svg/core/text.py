@@ -210,6 +210,7 @@ class TextConverter(ConverterProtocol):
                     excludes={"x", "y", "dx", "dy", "transform"},
                 )
                 svg_utils.merge_consecutive_siblings(child)
+                svg_utils.merge_offset_siblings(child)
                 svg_utils.merge_singleton_children(child)
                 svg_utils.merge_attribute_less_children(child)
         else:
@@ -218,6 +219,7 @@ class TextConverter(ConverterProtocol):
                 excludes={"x", "y", "dx", "dy", "transform"},
             )
             svg_utils.merge_consecutive_siblings(text_node)
+            svg_utils.merge_offset_siblings(text_node)
             svg_utils.merge_singleton_children(text_node)
             svg_utils.merge_attribute_less_children(text_node)
         return text_node

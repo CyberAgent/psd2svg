@@ -404,23 +404,37 @@ def test_text_style_tracking() -> None:
 
 
 def test_text_style_kerning() -> None:
-    """Test kerning using dx attributes."""
+    """Test kerning using dx attributes.
+
+    Consecutive per-character tspans that differ only in their kerning are
+    merged into a single tspan whose ``dx`` attribute is a space-separated
+    per-character offset list (see merge_offset_siblings).
+    """
     svg = convert_psd_to_svg("texts/style-kerning-manual.psd")
 
-    # Find all tspan elements with dx attributes (kerning applied)
+    # Kerning collapses into a per-character dx list on the paragraph tspan.
     tspans_with_dx = svg.findall(".//tspan[@dx]")
-
-    # Second paragraph has 8 characters with non-zero kerning
-    # Expected characters with kerning: 'o', 'r', 'e', 'm', 'p', 's', 'u', 'm'
-    assert len(tspans_with_dx) >= 8, (
-        f"Expected at least 8 tspans with dx, got {len(tspans_with_dx)}"
+    assert len(tspans_with_dx) == 1, (
+        f"Expected kerning to merge into a single tspan, got {len(tspans_with_dx)}"
     )
 
-    # Verify dx values are negative (tighter spacing)
-    # All kerning values in the fixture are negative
-    for tspan in tspans_with_dx:
-        dx_value = float(tspan.attrib.get("dx", "0"))
-        assert dx_value < 0, f"Expected negative dx for tighter kerning, got {dx_value}"
+    # The dx list has at most one value per character of the merged text.
+    # It may be shorter because trailing zero offsets are trimmed (dx defaults
+    # to 0 for characters past the end of the list).
+    tspan = tspans_with_dx[0]
+    dx_values = [float(value) for value in tspan.attrib["dx"].split()]
+    assert 0 < len(dx_values) <= len(tspan.text or ""), (
+        "dx list should carry no more values than there are merged characters"
+    )
+
+    # The second paragraph has 8 characters with non-zero (tighter) kerning;
+    # all kerning values in the fixture are negative.
+    nonzero = [value for value in dx_values if value != 0.0]
+    assert len(nonzero) >= 8, (
+        f"Expected at least 8 non-zero dx offsets, got {len(nonzero)}"
+    )
+    for value in nonzero:
+        assert value < 0, f"Expected negative dx for tighter kerning, got {value}"
 
 
 def test_text_style_tsume() -> None:
