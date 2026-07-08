@@ -1509,7 +1509,7 @@ wheels = [
 
 [[package]]
 name = "psd2svg"
-version = "0.11.0"
+version = "0.12.0"
 source = { editable = "." }
 dependencies = [
     { name = "fontconfig-py", marker = "sys_platform != 'win32'" },
