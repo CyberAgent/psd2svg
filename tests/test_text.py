@@ -418,11 +418,13 @@ def test_text_style_kerning() -> None:
         f"Expected kerning to merge into a single tspan, got {len(tspans_with_dx)}"
     )
 
-    # The dx list carries one value per character of the merged text.
+    # The dx list has at most one value per character of the merged text.
+    # It may be shorter because trailing zero offsets are trimmed (dx defaults
+    # to 0 for characters past the end of the list).
     tspan = tspans_with_dx[0]
     dx_values = [float(value) for value in tspan.attrib["dx"].split()]
-    assert len(dx_values) == len(tspan.text or ""), (
-        "dx list length should match the number of merged characters"
+    assert 0 < len(dx_values) <= len(tspan.text or ""), (
+        "dx list should carry no more values than there are merged characters"
     )
 
     # The second paragraph has 8 characters with non-zero (tighter) kerning;
