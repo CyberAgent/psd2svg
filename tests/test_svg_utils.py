@@ -777,6 +777,165 @@ class TestMergeConsecutiveSiblings:
         assert text[0].text == "Only child"
 
 
+class TestMergeOffsetSiblings:
+    """Tests for merge_offset_siblings utility function."""
+
+    def test_merge_dx_into_list(self) -> None:
+        """Consecutive tspans differing only in dx merge into a dx list."""
+        text = ET.fromstring(
+            '<text><tspan>a</tspan><tspan dx="0.1">b</tspan><tspan>c</tspan></text>'
+        )
+
+        svg_utils.merge_offset_siblings(text)
+
+        assert len(text) == 1
+        assert text[0].text == "abc"
+        # Trailing zero for 'c' is trimmed (dx defaults to 0 past the list end).
+        assert text[0].attrib["dx"] == "0 0.1"
+
+    def test_merge_dy_into_list(self) -> None:
+        """dy offsets are merged the same way as dx."""
+        text = ET.fromstring(
+            '<text><tspan>a</tspan><tspan dy="2">b</tspan>'
+            '<tspan dy="3">c</tspan></text>'
+        )
+
+        svg_utils.merge_offset_siblings(text)
+
+        assert len(text) == 1
+        assert text[0].text == "abc"
+        assert text[0].attrib["dy"] == "0 2 3"
+
+    def test_multi_character_spans(self) -> None:
+        """A dx applies only to the first char of a multi-character span."""
+        text = ET.fromstring('<text><tspan>ab</tspan><tspan dx="-1">cd</tspan></text>')
+
+        svg_utils.merge_offset_siblings(text)
+
+        assert len(text) == 1
+        assert text[0].text == "abcd"
+        # Chars: a=0, b=0, c=-1, d=0(trimmed) -> "0 0 -1".
+        assert text[0].attrib["dx"] == "0 0 -1"
+
+    def test_first_span_keeps_absolute_position(self) -> None:
+        """x/y on the first char and dx on the rest merge together."""
+        text = ET.fromstring(
+            '<text><tspan x="10" y="20">L</tspan>'
+            '<tspan dx="-0.8">o</tspan><tspan dx="-3.2">r</tspan></text>'
+        )
+
+        svg_utils.merge_offset_siblings(text)
+
+        assert len(text) == 1
+        merged = text[0]
+        assert merged.text == "Lor"
+        assert merged.attrib["x"] == "10"
+        assert merged.attrib["y"] == "20"
+        assert merged.attrib["dx"] == "0 -0.8 -3.2"
+
+    def test_no_merge_on_absolute_gap(self) -> None:
+        """An internal unset x cannot be expressed as a list, so no merge."""
+        text = ET.fromstring(
+            '<text><tspan x="10">ab</tspan><tspan x="50">c</tspan></text>'
+        )
+
+        svg_utils.merge_offset_siblings(text)
+
+        # 'b' would need an unset (natural-advance) x between the two set
+        # values, which an SVG coordinate list cannot express.
+        assert len(text) == 2
+
+    def test_no_merge_different_style(self) -> None:
+        """Spans differing in a non-positional attribute are not merged."""
+        text = ET.fromstring(
+            '<text><tspan fill="red" dx="1">a</tspan>'
+            '<tspan fill="blue" dx="2">b</tspan></text>'
+        )
+
+        svg_utils.merge_offset_siblings(text)
+
+        assert len(text) == 2
+
+    def test_all_zero_dx_omitted(self) -> None:
+        """Merging identical spans produces no positional attribute."""
+        text = ET.fromstring("<text><tspan>a</tspan><tspan>b</tspan></text>")
+
+        svg_utils.merge_offset_siblings(text)
+
+        assert len(text) == 1
+        assert text[0].text == "ab"
+        assert "dx" not in text[0].attrib
+        assert "dy" not in text[0].attrib
+
+    def test_empty_span_with_offset_blocks_merge(self) -> None:
+        """An empty span carrying a positional attribute is ambiguous."""
+        text = ET.fromstring(
+            '<text><tspan>a</tspan><tspan dx="1" /><tspan>b</tspan></text>'
+        )
+
+        svg_utils.merge_offset_siblings(text)
+
+        # The empty span hosts no character, so the group cannot be merged.
+        assert len(text) == 3
+
+    def test_empty_span_without_offset_dropped(self) -> None:
+        """An empty span without a positional attribute is merged away."""
+        text = ET.fromstring(
+            '<text><tspan dx="1">a</tspan><tspan /><tspan>b</tspan></text>'
+        )
+
+        svg_utils.merge_offset_siblings(text)
+
+        assert len(text) == 1
+        assert text[0].text == "ab"
+        assert text[0].attrib["dx"] == "1"
+
+    def test_combining_marks_block_merge(self) -> None:
+        """Combining marks make len(text) diverge from addressable chars."""
+        text = ET.Element("text")
+        tspan1 = ET.SubElement(text, "tspan")
+        # 'e' + U+0301 COMBINING ACUTE ACCENT: two code points, one glyph.
+        tspan1.text = "e\u0301"
+        tspan2 = ET.SubElement(text, "tspan", attrib={"dx": "1"})
+        tspan2.text = "a"
+
+        svg_utils.merge_offset_siblings(text)
+
+        assert len(text) == 2
+
+    def test_no_merge_across_tail(self) -> None:
+        """A non-empty tail on a non-last member stops the run."""
+        text = ET.Element("text")
+        tspan1 = ET.SubElement(text, "tspan", attrib={"dx": "1"})
+        tspan1.text = "a"
+        tspan1.tail = " gap"
+        tspan2 = ET.SubElement(text, "tspan", attrib={"dx": "2"})
+        tspan2.text = "b"
+
+        svg_utils.merge_offset_siblings(text)
+
+        # The tail between them is real content, so they are not merged.
+        assert len(text) == 2
+        assert text[0].tail == " gap"
+
+    def test_recursive_processing(self) -> None:
+        """Nested children are processed recursively."""
+        text = ET.fromstring(
+            '<text><tspan x="1" dy="2"><tspan>L</tspan>'
+            '<tspan dx="-1">o</tspan></tspan></text>'
+        )
+
+        svg_utils.merge_offset_siblings(text)
+
+        paragraph = text[0]
+        assert len(paragraph) == 1
+        assert paragraph[0].text == "Lo"
+        assert paragraph[0].attrib["dx"] == "0 -1"
+        # The paragraph wrapper's own position is untouched.
+        assert paragraph.attrib["x"] == "1"
+        assert paragraph.attrib["dy"] == "2"
+
+
 class TestMergeSingletonChildren:
     """Tests for merge_singleton_children utility function."""
 
