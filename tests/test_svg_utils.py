@@ -593,6 +593,53 @@ class TestMergeCommonChildAttributes:
 class TestMergeConsecutiveSiblings:
     """Tests for merge_consecutive_siblings utility function."""
 
+    @pytest.mark.parametrize("attribute", ["x", "y", "dx", "dy"])
+    @pytest.mark.parametrize("value", ["-10", "0", "10", "10 20"])
+    def test_preserve_positioned_siblings(self, attribute: str, value: str) -> None:
+        """Identical positions apply at each span boundary, not just once."""
+        text = ET.fromstring(
+            f'<text><tspan {attribute}="{value}">AB</tspan>'
+            f'<tspan {attribute}="{value}">CD</tspan></text>'
+        )
+        original = ET.tostring(text)
+
+        svg_utils.merge_consecutive_siblings(text)
+
+        assert ET.tostring(text) == original
+
+    @pytest.mark.parametrize("attribute", ["x", "y", "dx", "dy"])
+    def test_positioned_siblings_survive_merge_pipeline(self, attribute: str) -> None:
+        """The position-aware pass must receive both original adjustments."""
+        text = ET.fromstring(
+            f'<text><tspan {attribute}="-3.92">0</tspan>'
+            f'<tspan {attribute}="-3.92">0</tspan></text>'
+        )
+
+        svg_utils.merge_consecutive_siblings(text)
+        svg_utils.merge_offset_siblings(text)
+
+        assert len(text) == 1
+        assert text[0].text == "00"
+        assert text[0].get(attribute) == "-3.92 -3.92"
+
+    @pytest.mark.parametrize("attribute", ["x", "y", "dx", "dy"])
+    @pytest.mark.parametrize("value", ["10 20", "10,20", "10, 20"])
+    @pytest.mark.parametrize("second_value", ["10 20", "30"])
+    def test_coordinate_lists_survive_merge_pipeline(
+        self, attribute: str, value: str, second_value: str
+    ) -> None:
+        """Existing coordinate lists must stay intact through both merge passes."""
+        text = ET.fromstring(
+            f'<text><tspan {attribute}="{value}">AB</tspan>'
+            f'<tspan {attribute}="{second_value}">CD</tspan></text>'
+        )
+        original = ET.tostring(text)
+
+        svg_utils.merge_consecutive_siblings(text)
+        svg_utils.merge_offset_siblings(text)
+
+        assert ET.tostring(text) == original
+
     def test_merge_identical_consecutive_tspans(self) -> None:
         """Test merging consecutive tspans with identical attributes."""
 

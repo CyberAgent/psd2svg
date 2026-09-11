@@ -786,6 +786,8 @@ def merge_consecutive_siblings(element: ET.Element) -> None:
         - Only merges elements with identical attribute sets
         - Preserves document order
         - Does not merge elements with child elements
+        - Leaves x/y/dx/dy attributes to merge_offset_siblings, which preserves
+          per-character positioning
         - Empty elements (no text or tail) are removed
     """
     # First, recursively process all children
@@ -800,6 +802,12 @@ def merge_consecutive_siblings(element: ET.Element) -> None:
     i = 0
     while i < len(children):
         current = children[i]
+
+        # Equal coordinates still apply separately at each span boundary.
+        # Concatenating text would discard the later spans' positioning.
+        if any(attr in current.attrib for attr in _POSITIONAL_ATTRS):
+            i += 1
+            continue
 
         # Skip if current element has children (don't merge complex structures)
         if len(current) > 0:
@@ -950,6 +958,10 @@ def _merge_offset_group(parent: ET.Element, group: list[ET.Element]) -> bool:
         char_count = len(text)
         for attr in _POSITIONAL_ATTRS:
             value = element.attrib.get(attr)
+            # This pass handles one coordinate per span. Keep existing lists
+            # intact rather than treating a list as the first character's value.
+            if value is not None and len(re.split(r"[\s,]+", value.strip())) > 1:
+                return False
             if char_count == 0:
                 # An empty span hosts no character, so a coordinate on it is
                 # ambiguous and the group cannot be merged safely.
@@ -1007,6 +1019,7 @@ def merge_offset_siblings(element: ET.Element) -> None:
 
     Note:
         - Only leaf elements (no child elements) are merged.
+        - Groups containing existing coordinate lists are left unchanged.
         - Non-positional attributes must be identical across the whole group.
         - ``dx``/``dy`` are relative (default 0), so gaps are filled with 0 and
           trailing zeros are trimmed.
