@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fill opacity and blend mode lost on layers with effects** (#326)
+  - Clipping bases and text layers painted a bare `<use>` copy, rendering fully
+    opaque and unblended; shape and fill clipping bases rendered unpainted
+
+- **Fill opacity applied to layer groups** (#324)
+  - Group layers now honor fill opacity in addition to layer opacity
+
+- **Long string ID descriptor blend modes** (#323)
+  - PSDs saved by Photoshop 2026 with a layer effect aborted conversion with
+    "Unsupported blend mode"
+
+- **Glyph widths and text positions for non-uniform text scaling** (#320)
+  - Character scaling was encoded as a `<tspan>` transform that renderers
+    ignore, shifting following characters and aligned lines
+
+- **Positional adjustments lost when merging text spans** (#317)
+  - Spans carrying `x`/`y`/`dx`/`dy` are no longer concatenated
+
+### Security
+
+- **Pillow >= 12.3.0** (#309)
+  - Resolves 13 Dependabot alerts, including heap out-of-bounds writes and an
+    OS command injection in `WindowsViewer.get_command()`
+
 ## [0.12.0] - 2026-07-08
 
 ### Added
@@ -316,6 +342,7 @@ See [limitations.rst](https://psd2svg.readthedocs.io/en/latest/limitations.html)
 
 Previous releases - see git history for details.
 
+[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.12.0...HEAD
 [0.12.0]: https://github.com/CyberAgent/psd2svg/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/CyberAgent/psd2svg/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/CyberAgent/psd2svg/compare/v0.10.0...v0.10.1

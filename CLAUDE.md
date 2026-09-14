@@ -128,6 +128,16 @@ gh pr create --title "My Change" --body "Description"
 
 1. **Create a git branch** - Always work on a feature branch, never directly on main
 2. **Avoid backwards-compatibility hacks** - Delete unused code completely
+3. **Update the changelog for user-facing changes** - In the same pull
+   request, add an entry under `## [Unreleased]` in
+   [CHANGELOG.md](CHANGELOG.md) when a change affects users (new feature,
+   behavior change, bug fix, security fix). Skip it for refactors, test-only
+   changes, CI config, and dependency bumps - the release process collapses
+   dependency bumps into a single entry. Entries are grouped under
+   `### Added` / `### Changed` / `### Fixed` / `### Security` /
+   `### Dependencies` and reference the PR number:
+   `- **Short description** (#PR)`. Keep entries concise - one bold summary
+   line plus at most one short sub-bullet.
 
 ### Documentation Structure
 
