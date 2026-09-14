@@ -461,6 +461,33 @@ Resources
 * `Pillow Documentation <https://pillow.readthedocs.io/>`_
 * `Python Type Hints <https://docs.python.org/3/library/typing.html>`_
 
+Changelog Maintenance
+---------------------
+
+``CHANGELOG.md`` follows `Keep a Changelog <https://keepachangelog.com/en/1.0.0/>`_.
+
+Add an entry under ``## [Unreleased]`` in the same pull request whenever a
+change is user-facing - a new feature, a behavior change, a bug fix, or a
+security fix. Skip it for refactors, test-only changes, and CI configuration;
+dependency bumps are collapsed into a single entry during the release process
+rather than listed individually.
+
+Entries are grouped under ``### Added``, ``### Changed``, ``### Fixed``,
+``### Security``, and ``### Dependencies``, and reference the pull request
+number. Keep them concise - a bold summary line and at most one short
+sub-bullet naming the user-visible symptom, not a commit message:
+
+.. code-block:: markdown
+
+   ### Fixed
+
+   - **Fill opacity applied to layer groups** (#324)
+     - Group layers now honor fill opacity in addition to layer opacity
+
+At release time the ``## [Unreleased]`` section is reconciled against the merged
+pull requests, renamed to the new version, and a fresh empty ``## [Unreleased]``
+heading is left in its place.
+
 Release Process
 ---------------
 
@@ -473,7 +500,8 @@ For maintainers, this project follows a pull request workflow for all changes to
 
    # 2. Update version and changelog
    # - Edit version in pyproject.toml
-   # - Update CHANGELOG.md with release notes
+   # - Reconcile CHANGELOG.md [Unreleased] against merged PRs since the last tag
+   # - Rename [Unreleased] to the new version and add the compare link reference
 
    # 3. Sync dependencies to update lock file
    uv sync
