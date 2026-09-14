@@ -389,7 +389,7 @@ class LayerConverter(ConverterProtocol):
             with self.add_clip_path(layer) as clip_attrib:
                 # Create elements inside the clipping mask.
                 for clip_layer in layer.clip_layers:
-                    self.add_layer(clip_layer, depth=depth + 1, **clip_attrib)
+                    self.add_layer(clip_layer, ..., **clip_attrib)
 
         Args:
             layer: The shape layer to use as a clipping path.
