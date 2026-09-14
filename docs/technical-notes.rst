@@ -188,20 +188,29 @@ The requirement to implement the above conversion is the following two logic:
 1. Beginning of the clip section (mask or clipPath creation, fill, group)
 2. End of the clip section (stroke)
 
-This would be translated to the following conversion loop structure:
+Both halves belong to the same clipping base, so they are expressed as a
+context manager that yields the attribute the clipped layers carry:
 
 .. code-block:: python
 
-    for layer in psdimage:
-        if layer.has_clip_layers():
-            self.add_clip_target_begin(layer)
-            for clip_layer in layer.clip_layers:
-                self.add_layer(clip_layer)
-            self.add_clip_target_end(layer)
-        elif layer.clipping_layer:
-            pass  # Skip clipping layers
-        else:
-            self.add_layer(layer)
+    def add_children(self, group, depth=0):
+        for layer in group:
+            # Clip layers are converted through their base, not on their own.
+            if layer.clipping or not layer.is_visible():
+                continue
+
+            if layer.has_clip_layers(visible=True):
+                with self.add_clipping_target(layer, depth=depth) as attrib:
+                    for clip_layer in layer.clip_layers:
+                        self.add_layer(clip_layer, depth=depth + 1, **attrib)
+            else:
+                self.add_layer(layer, depth=depth)
+
+``add_clipping_target()`` opens the clip section before it yields and closes it
+afterwards, dispatching to ``add_clip_path()`` for a shape target without a
+mask and to ``add_clip_mask()`` otherwise. The clipping base itself is
+converted at ``depth``, the same depth a plain sibling gets, while the clip
+layers it carries are counted one level deeper.
 
 Overlay Filter Effects
 -----------------------
