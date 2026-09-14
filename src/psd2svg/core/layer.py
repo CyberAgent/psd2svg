@@ -462,11 +462,11 @@ class LayerConverter(ConverterProtocol):
         # in <defs> has to repeat its main fill here; referencing the bare
         # definition would drop the fill opacity, the blend mode and, for a
         # vector layer, the paint.
-        vector_base: layers.ShapeLayer | layers.FillLayer | None = None
+        vector_base: layers.ShapeLayer | adjustments.FillLayer | None = None
         if not self.has_separate_fill(layer):
             # The target itself carries the fill opacity and the blend mode.
             self.create_node("use", href=svg_utils.get_uri(target))
-        elif isinstance(layer, (layers.ShapeLayer, layers.FillLayer)):
+        elif isinstance(layer, (layers.ShapeLayer, adjustments.FillLayer)):
             vector_base = layer
             self.apply_vector_fill(layer, target)
         else:
