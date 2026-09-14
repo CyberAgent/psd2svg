@@ -99,7 +99,7 @@ class LayerConverter(ConverterProtocol):
         # when both are present the content has to be defined in <defs> and
         # referenced by a separate <use> carrying the fill opacity. Effects then
         # reference the definition and keep the original alpha.
-        if fill_opacity < 255 and layer.has_effects():
+        if self.has_separate_fill(layer):
             defs = self.create_node("defs")
             node = self.create_node(
                 "g",
@@ -231,7 +231,7 @@ class LayerConverter(ConverterProtocol):
 
         # When the layer has effects, we need to create a separate <image>
         # to handle fill opacity.
-        if layer.has_effects():
+        if self.has_separate_fill(layer):
             defs = self.create_node("defs")
             node = self.create_node(
                 "image",
@@ -274,13 +274,7 @@ class LayerConverter(ConverterProtocol):
         self, layer: layers.ShapeLayer, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a shape layer to the svg document."""
-        if (
-            layer.has_effects()
-            or (
-                # layer.origination is not None
-                # and any(b"Trnf" in o._data for o in layer.origination)
-            )
-        ):
+        if self.has_separate_fill(layer):
             # We need to split the shape definition and effects.
             defs = self.create_node("defs")
             with self.set_current(defs):
@@ -329,7 +323,7 @@ class LayerConverter(ConverterProtocol):
             return self.add_pixel(layer, depth=depth, **attrib)
 
         # Check if layer has effects
-        if layer.has_effects():
+        if self.has_separate_fill(layer):
             # Create defs section and target node with ID
             defs = self.create_node("defs")
             with self.set_current(defs):
@@ -349,12 +343,7 @@ class LayerConverter(ConverterProtocol):
             self.apply_background_effects(layer, node, insert_before_target=False)
 
             # Create main visible text using <use>
-            self.create_node(
-                "use",
-                parent=self.current,
-                class_="text-content",
-                href=svg_utils.get_uri(node),
-            )
+            self.apply_raster_fill(layer, node)
 
             self.apply_overlay_effects(layer, node)
             self.apply_stroke_effect(layer, node)
@@ -469,13 +458,43 @@ class LayerConverter(ConverterProtocol):
             target.set("id", self.auto_id("clippingbase"))
 
         self.apply_background_effects(layer, target, insert_before_target=False)
-        # Create a <use> element to reference the target object
-        # in the current context (outside the mask).
-        self.create_node("use", href=svg_utils.get_uri(target))
+        # Paint the base again outside the mask. A base that keeps its content
+        # in <defs> has to repeat its main fill here; referencing the bare
+        # definition would drop the fill opacity, the blend mode and, for a
+        # vector layer, the paint.
+        vector_base: layers.ShapeLayer | adjustments.FillLayer | None = None
+        if not self.has_separate_fill(layer):
+            # The target itself carries the fill opacity and the blend mode.
+            self.create_node("use", href=svg_utils.get_uri(target))
+        elif isinstance(layer, (layers.ShapeLayer, adjustments.FillLayer)):
+            vector_base = layer
+            self.apply_vector_fill(layer, target)
+        else:
+            self.apply_raster_fill(layer, target)
         self.apply_overlay_effects(layer, target)
         # Yield to the context block.
         yield {"mask": svg_utils.get_funciri(mask)}
+        if vector_base is not None:
+            # The stroke of the base paints over the clipped layers.
+            self.apply_vector_stroke(vector_base, target)
         self.apply_stroke_effect(layer, target)
+
+    def has_separate_fill(self, layer: layers.Layer) -> bool:
+        """Whether the layer keeps its content separate from its main fill.
+
+        A layer with effects keeps its content in <defs> so that the effects can
+        reference it at the original alpha, and paints a separate main fill that
+        carries the fill opacity, the blend mode and, for a vector layer, the
+        paint. A group only needs the split once its fill opacity is reduced.
+        """
+        if not layer.has_effects():
+            return False
+        if isinstance(layer, (layers.Artboard, layers.AdjustmentLayer)):
+            # Artboards and adjustments paint their content in place instead.
+            return False
+        if isinstance(layer, layers.Group):
+            return layer.tagged_blocks.get_data(Tag.BLEND_FILL_OPACITY, 255) < 255
+        return True
 
     def add_fill(
         self,
@@ -489,7 +508,7 @@ class LayerConverter(ConverterProtocol):
         viewbox = layer.bbox
         if viewbox == (0, 0, 0, 0):
             viewbox = (0, 0, self.psd.width, self.psd.height)
-        if layer.has_effects():
+        if self.has_separate_fill(layer):
             defs = self.create_node("defs", parent=self.current)
             node = self.create_node(
                 "rect",

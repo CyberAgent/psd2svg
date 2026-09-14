@@ -98,6 +98,13 @@ def test_layer_types_quality(psd_file: str, quality: float) -> None:
             marks=pytest.mark.xfail(reason="Stroke effect is inaccurate."),
         ),
         pytest.param("clipping/group-with-clip-stroke.psd", 0.02),
+        # Clipping bases that reduce the fill opacity or blend, with effects.
+        pytest.param("clipping/pixel-with-clip-fill-opacity.psd", 0.01),
+        pytest.param(
+            "clipping/group-with-clip-fill-opacity.psd",
+            0.03,
+        ),  # Loose like its sibling above, whose stroke effect is inaccurate
+        pytest.param("clipping/shape-mask-with-clip-stroke-effect.psd", 0.02),
         pytest.param("clipping/pixel-with-clip-stroke-effect.psd", 0.02),
         pytest.param("clipping/shape-with-clip-stroke-effect.psd", 0.02),
         pytest.param("clipping/shape-with-clip-stroke.psd", 0.02),
