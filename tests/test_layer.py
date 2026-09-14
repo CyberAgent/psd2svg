@@ -4,8 +4,10 @@ from xml.etree import ElementTree as ET
 
 import pytest
 from psd_tools import PSDImage
+from psd_tools.constants import BlendMode
 
 from psd2svg import SVGDocument
+from psd2svg.core.converter import Converter
 from tests.conftest import get_fixture
 
 SVG_NS = "{http://www.w3.org/2000/svg}"
@@ -91,3 +93,185 @@ class TestGroupFillOpacity:
         ]
         assert len(definitions) == 3
         assert all("isolation: isolate" in g.get("style", "") for g in definitions)
+
+
+class TestClippingBase:
+    """Test that a clipping base paints the same inside and outside the mask."""
+
+    @staticmethod
+    def build_clipping_svg(
+        psd_file: str, base_name: str, optimize: bool, **attributes: object
+    ) -> ET.Element:
+        """Convert a fixture after overriding attributes of the clipping base."""
+        psdimage = PSDImage.open(get_fixture(psd_file))
+        bases = [layer for layer in psdimage.descendants() if layer.name == base_name]
+        assert len(bases) == 1
+        for key, value in attributes.items():
+            setattr(bases[0], key, value)
+        document = SVGDocument.from_psd(psdimage)
+        return ET.fromstring(document.tostring(optimize=optimize))
+
+    @staticmethod
+    def split_fills(svg: ET.Element) -> tuple[list[ET.Element], list[ET.Element]]:
+        """Return the main fills inside and outside the clipping mask.
+
+        Effects reference the same definition through a filter, so the main
+        fill is the reference that carries no filter.
+        """
+        masks = [
+            mask
+            for mask in svg.iter(f"{SVG_NS}mask")
+            if mask.get("mask-type") == "alpha"
+        ]
+        assert len(masks) == 1
+        masked = set(masks[0].iter(f"{SVG_NS}use"))
+        fills = [use for use in svg.iter(f"{SVG_NS}use") if "filter" not in use.attrib]
+        return (
+            [use for use in fills if use in masked],
+            [use for use in fills if use not in masked],
+        )
+
+    @pytest.mark.parametrize("optimize", [False, True])
+    @pytest.mark.parametrize(
+        "psd_file, base_name",
+        [
+            ("clipping/pixel-with-clip-stroke-effect.psd", "Star 1"),
+            ("clipping/group-with-clip-stroke-effect.psd", "Group 1"),
+        ],
+    )
+    def test_fill_opacity_and_blend_mode_survive_clipping(
+        self, psd_file: str, base_name: str, optimize: bool
+    ) -> None:
+        """Test that the visible base keeps the fill opacity and the blend mode.
+
+        A base that has effects defines its content in <defs>, so the copy
+        painted outside the mask has to repeat the main fill instead of
+        referencing the bare definition.
+        """
+        svg = self.build_clipping_svg(
+            psd_file,
+            base_name,
+            optimize,
+            fill_opacity=64,
+            blend_mode=BlendMode.MULTIPLY,
+        )
+        masked, visible = self.split_fills(svg)
+        assert len(masked) == 1
+        assert len(visible) == 1
+        assert visible[0].get("href") == masked[0].get("href")
+        assert visible[0].get("opacity") == masked[0].get("opacity") == "0.25"
+        assert "mix-blend-mode: multiply" in visible[0].get("style", "")
+
+    @pytest.mark.parametrize("optimize", [False, True])
+    def test_fill_opacity_is_not_applied_twice_without_effects(
+        self, optimize: bool
+    ) -> None:
+        """Test that a base without effects keeps carrying its own attributes.
+
+        Without effects the layer node itself carries the fill opacity and the
+        blend mode, and the reference painted outside the mask must not apply
+        them a second time.
+        """
+        svg = self.build_clipping_svg(
+            "clipping/pixel-with-blend.psd",
+            "Rectangle 1",
+            optimize,
+            fill_opacity=64,
+            blend_mode=BlendMode.MULTIPLY,
+        )
+        masked, visible = self.split_fills(svg)
+        assert masked == []
+        assert len(visible) == 1
+        assert "opacity" not in visible[0].attrib
+        assert "mix-blend-mode" not in visible[0].get("style", "")
+        image = svg.find(f"{SVG_NS}mask/{SVG_NS}image") or svg.find(
+            f"{SVG_NS}defs/{SVG_NS}mask/{SVG_NS}image"
+        )
+        assert image is not None
+        assert image.get("opacity") == "0.25"
+        assert "mix-blend-mode: multiply" in image.get("style", "")
+
+    @pytest.mark.parametrize("optimize", [False, True])
+    def test_full_fill_opacity_group_references_the_definition(
+        self, optimize: bool
+    ) -> None:
+        """Test that a group base only splits its fill once it is reduced.
+
+        A group with effects keeps its content and its layer attributes on the
+        group node while the fill opacity is 100%, so the copy painted outside
+        the mask is a plain reference.
+        """
+        svg = self.build_clipping_svg(
+            "clipping/group-with-clip-stroke-effect.psd",
+            "Group 1",
+            optimize,
+            blend_mode=BlendMode.MULTIPLY,
+        )
+        masked, visible = self.split_fills(svg)
+        assert masked == []
+        assert len(visible) == 1
+        assert visible[0].attrib.keys() == {"href"}
+        groups = list(svg.iter(f"{SVG_NS}g"))
+        assert len(groups) == 1
+        assert "mix-blend-mode: multiply" in groups[0].get("style", "")
+
+    def test_vector_base_keeps_its_paint(self) -> None:
+        """Test that a shape base with effects is painted and stroked.
+
+        A shape layer that carries a layer mask is clipped through a <mask>,
+        where the shape definition holds no paint of its own.
+        """
+        psdimage = PSDImage.open(
+            get_fixture("clipping/shape-with-clip-stroke-effect.psd")
+        )
+        base = next(layer for layer in psdimage.descendants() if layer.name == "Star 1")
+        converter = Converter(psdimage)
+        with converter.add_clip_mask(base) as clip_attrib:
+            for clip_layer in base.clip_layers:
+                converter.add_layer(clip_layer, **clip_attrib)
+        svg = ET.fromstring(ET.tostring(converter.svg, encoding="unicode"))
+
+        # The shape definition holds the geometry only.
+        definitions = list(svg.iter(f"{SVG_NS}path"))
+        assert len(definitions) == 1
+        assert "fill" not in definitions[0].attrib
+
+        # The shape is painted, then stroked over the clipped layers.
+        masked, visible = self.split_fills(svg)
+        assert len(masked) == 2
+        fill, stroke = visible
+        assert fill.get("fill") == "#7f7f7f"
+        assert stroke.get("fill") == "none"
+        assert stroke.get("stroke") == "#000000"
+        clipped = svg.findall(f"{SVG_NS}image")
+        assert len(clipped) == 1
+        assert list(svg).index(clipped[0]) == list(svg).index(stroke) - 1
+
+
+class TestTextFill:
+    """Test the main fill of a text layer that has effects."""
+
+    @pytest.mark.parametrize("optimize", [False, True])
+    def test_fill_carries_fill_opacity_and_blend_mode(self, optimize: bool) -> None:
+        """Test that the text content is painted like any other main fill.
+
+        The content is defined in <defs> and referenced once for the text
+        itself and once per effect, so the fill opacity and the blend mode
+        belong to the reference that carries no filter.
+        """
+        psdimage = PSDImage.open(get_fixture("effects/stroke-3-text.psd"))
+        text = next(layer for layer in psdimage.descendants() if layer.has_effects())
+        text.fill_opacity = 64
+        text.blend_mode = BlendMode.MULTIPLY
+        svg = ET.fromstring(SVGDocument.from_psd(psdimage).tostring(optimize=optimize))
+
+        uses = list(svg.iter(f"{SVG_NS}use"))
+        fills = [use for use in uses if "filter" not in use.attrib]
+        effects = [use for use in uses if "filter" in use.attrib]
+        assert len(fills) == 1
+        assert fills[0].get("opacity") == "0.25"
+        assert "mix-blend-mode: multiply" in fills[0].get("style", "")
+        # Effects keep the original alpha and do not blend with the backdrop.
+        assert effects
+        assert all("opacity" not in use.attrib for use in effects)
+        assert all("mix-blend-mode" not in use.get("style", "") for use in effects)
