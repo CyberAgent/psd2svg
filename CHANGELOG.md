@@ -33,11 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Resolves 13 Dependabot alerts, including heap out-of-bounds writes and an
     OS command injection in `WindowsViewer.get_command()`
 
-### Dependencies
-
-- Dependency and CI action bumps (psd-tools, tornado, actions/setup-python,
-  github/codeql-action)
-
 ## [0.12.0] - 2026-07-08
 
 ### Added
