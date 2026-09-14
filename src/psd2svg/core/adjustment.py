@@ -42,7 +42,7 @@ class AdjustmentConverter(ConverterProtocol):
     """Mixin for adjustment layers."""
 
     def add_invert_adjustment(
-        self, layer: adjustments.Invert, **attrib: str
+        self, layer: adjustments.Invert, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add an invert adjustment layer to the svg document."""
         filter, use = self._create_filter(layer, name="invert", **attrib)
@@ -57,7 +57,7 @@ class AdjustmentConverter(ConverterProtocol):
         return use
 
     def add_posterize_adjustment(
-        self, layer: adjustments.Posterize, **attrib: str
+        self, layer: adjustments.Posterize, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a posterize adjustment layer to the svg document."""
         # Validate and clamp levels to valid range
@@ -96,7 +96,7 @@ class AdjustmentConverter(ConverterProtocol):
         return use
 
     def add_threshold_adjustment(
-        self, layer: adjustments.Threshold, **attrib: str
+        self, layer: adjustments.Threshold, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a threshold adjustment layer to the svg document.
 
@@ -106,6 +106,7 @@ class AdjustmentConverter(ConverterProtocol):
 
         Args:
             layer: The Threshold adjustment layer to convert.
+            depth: Current nesting depth (for resource limit checking).
             attrib: Additional attributes for the SVG element.
 
         Returns:
@@ -160,7 +161,7 @@ class AdjustmentConverter(ConverterProtocol):
         return use
 
     def add_hue_saturation_adjustment(
-        self, layer: adjustments.HueSaturation, **attrib: str
+        self, layer: adjustments.HueSaturation, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a hue/saturation adjustment layer to the svg document.
 
@@ -195,7 +196,7 @@ class AdjustmentConverter(ConverterProtocol):
         return use
 
     def add_exposure_adjustment(
-        self, layer: adjustments.Exposure, **attrib: str
+        self, layer: adjustments.Exposure, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add an exposure adjustment layer to the svg document.
 
@@ -210,6 +211,7 @@ class AdjustmentConverter(ConverterProtocol):
 
         Args:
             layer: The Exposure adjustment layer to convert.
+            depth: Current nesting depth (for resource limit checking).
             attrib: Additional attributes for the SVG element.
 
         Returns:
@@ -283,7 +285,7 @@ class AdjustmentConverter(ConverterProtocol):
         return use
 
     def add_brightness_contrast_adjustment(
-        self, layer: adjustments.BrightnessContrast, **attrib: str
+        self, layer: adjustments.BrightnessContrast, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a brightness/contrast adjustment layer to the svg document.
 
@@ -304,6 +306,7 @@ class AdjustmentConverter(ConverterProtocol):
 
         Args:
             layer: The BrightnessContrast adjustment layer to convert.
+            depth: Current nesting depth (for resource limit checking).
             attrib: Additional attributes for the SVG element.
 
         Returns:
@@ -379,7 +382,7 @@ class AdjustmentConverter(ConverterProtocol):
         return use
 
     def add_color_balance_adjustment(
-        self, layer: adjustments.ColorBalance, **attrib: str
+        self, layer: adjustments.ColorBalance, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a color balance adjustment layer to the svg document.
 
@@ -391,6 +394,7 @@ class AdjustmentConverter(ConverterProtocol):
 
         Args:
             layer: The ColorBalance adjustment layer to convert.
+            depth: Current nesting depth (for resource limit checking).
             attrib: Additional attributes for the SVG element.
 
         Returns:
@@ -465,7 +469,7 @@ class AdjustmentConverter(ConverterProtocol):
         return use
 
     def add_black_and_white_adjustment(
-        self, layer: adjustments.BlackAndWhite, **attrib: str
+        self, layer: adjustments.BlackAndWhite, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a black and white adjustment layer to the svg document.
 
@@ -478,7 +482,7 @@ class AdjustmentConverter(ConverterProtocol):
         return None
 
     def add_channel_mixer_adjustment(
-        self, layer: adjustments.ChannelMixer, **attrib: str
+        self, layer: adjustments.ChannelMixer, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a channel mixer adjustment layer to the svg document.
 
@@ -491,7 +495,7 @@ class AdjustmentConverter(ConverterProtocol):
         return None
 
     def add_color_lookup_adjustment(
-        self, layer: adjustments.ColorLookup, **attrib: str
+        self, layer: adjustments.ColorLookup, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a color lookup adjustment layer to the svg document.
 
@@ -504,7 +508,7 @@ class AdjustmentConverter(ConverterProtocol):
         return None
 
     def add_curves_adjustment(
-        self, layer: adjustments.Curves, **attrib: str
+        self, layer: adjustments.Curves, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a curves adjustment layer to the svg document.
 
@@ -515,6 +519,7 @@ class AdjustmentConverter(ConverterProtocol):
 
         Args:
             layer: The Curves adjustment layer to convert.
+            depth: Current nesting depth (for resource limit checking).
             attrib: Additional attributes for the SVG element.
 
         Returns:
@@ -568,7 +573,7 @@ class AdjustmentConverter(ConverterProtocol):
         return use
 
     def add_gradient_map_adjustment(
-        self, layer: adjustments.GradientMap, **attrib: str
+        self, layer: adjustments.GradientMap, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a gradient map adjustment layer to the svg document.
 
@@ -581,7 +586,7 @@ class AdjustmentConverter(ConverterProtocol):
         return None
 
     def add_levels_adjustment(
-        self, layer: adjustments.Levels, **attrib: str
+        self, layer: adjustments.Levels, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a levels adjustment layer to the svg document.
 
@@ -591,6 +596,7 @@ class AdjustmentConverter(ConverterProtocol):
 
         Args:
             layer: The Levels adjustment layer to convert.
+            depth: Current nesting depth (for resource limit checking).
             attrib: Additional attributes for the SVG element.
 
         Returns:
@@ -651,7 +657,7 @@ class AdjustmentConverter(ConverterProtocol):
         return use
 
     def add_photo_filter_adjustment(
-        self, layer: adjustments.PhotoFilter, **attrib: str
+        self, layer: adjustments.PhotoFilter, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a photo filter adjustment layer to the svg document.
 
@@ -664,7 +670,7 @@ class AdjustmentConverter(ConverterProtocol):
         return None
 
     def add_selective_color_adjustment(
-        self, layer: adjustments.SelectiveColor, **attrib: str
+        self, layer: adjustments.SelectiveColor, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a selective color adjustment layer to the svg document.
 
@@ -677,7 +683,7 @@ class AdjustmentConverter(ConverterProtocol):
         return None
 
     def add_vibrance_adjustment(
-        self, layer: adjustments.Vibrance, **attrib: str
+        self, layer: adjustments.Vibrance, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a vibrance adjustment layer to the svg document.
 
