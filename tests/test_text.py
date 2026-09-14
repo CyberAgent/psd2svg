@@ -877,10 +877,14 @@ def test_common_span_scale_ignores_paragraph_breaks() -> None:
 def test_text_style_scale_vertical_writing_direction_layer_wide(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Test layer-wide scaling of vertical text, whose inline axis is vertical."""
+    """Test layer-wide scaling of vertical text, whose inline axis is vertical.
+
+    Uses the upright fixture (``baselinedirection1``), where every glyph advances
+    along the vertical axis. Sideways runs are a documented limitation.
+    """
     monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
     svg = convert_psd_to_svg(
-        "texts/shapetype0-writingdirection2-baselinedirection2-justification0.psd"
+        "texts/shapetype0-writingdirection2-baselinedirection1-justification0.psd"
     )
 
     text = svg.find(".//text[@transform]")
@@ -897,6 +901,39 @@ def test_text_style_scale_vertical_writing_direction_layer_wide(
     assert _parse_translate(text.attrib["transform"]) == pytest.approx(
         (0.0, y * 0.5), abs=0.01
     )
+
+
+def test_text_letter_spacing_offset_with_layer_wide_scale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that the letter spacing offset stays absolute under a <text> scale.
+
+    Tracking and tsume are relative to the font size and should scale with the
+    text, but text_letter_spacing_offset is an absolute pixel value, so it is
+    divided by the scale the <text> element applies.
+    """
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    psdimage = PSDImage.open(get_fixture("texts/style-tracking.psd"))
+
+    baseline = SVGDocument.from_psd(psdimage, text_letter_spacing_offset=0.0)
+    offset = SVGDocument.from_psd(psdimage, text_letter_spacing_offset=-0.5)
+
+    text = baseline.svg.find(".//text[@transform]")
+    assert text is not None, "Layer-wide scale should be on the text element"
+    scale_x, _ = _parse_scale(text.attrib["transform"])
+    assert scale_x == pytest.approx(2.0)
+
+    without_offset = baseline.svg.findall(".//*[@letter-spacing]")
+    with_offsets = offset.svg.findall(".//*[@letter-spacing]")
+    assert without_offset, "Fixture should emit letter-spacing"
+    assert len(without_offset) == len(with_offsets)
+
+    for without, with_offset in zip(without_offset, with_offsets):
+        delta = float(with_offset.attrib["letter-spacing"]) - float(
+            without.attrib["letter-spacing"]
+        )
+        # The emitted value is pre-divided so that the rendered offset is -0.5px
+        assert delta * scale_x == pytest.approx(-0.5)
 
 
 def test_text_style_scale_warp_falls_back_to_spans(
@@ -918,7 +955,9 @@ def test_text_style_scale_warp_falls_back_to_spans(
     assert tspan is not None
     # The horizontal scale lives in the font-size, keeping the advance along the path
     assert float(tspan.attrib["font-size"]) == pytest.approx(64.0)
-    assert _parse_scale(tspan.attrib["transform"]) == pytest.approx((1.0, 0.5))
+    # Text on a path has no baseline to anchor the residual scale at, so it is
+    # dropped rather than emitted about a meaningless origin
+    assert "transform" not in tspan.attrib
 
 
 def test_text_style_scale_foreign_object(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -446,7 +446,11 @@ psd2svg therefore encodes the scaling in the ``font-size`` and in a transform on
 
 Only the last case is approximate, and only where the residual transform stays on the ``<tspan>``. Glyph advance widths, the position of the following characters and center/right alignment all match Photoshop, but renderers that ignore ``transform`` on ``<tspan>`` draw the run without the cross-axis scaling: glyphs of a horizontally scaled run are as tall as they are wide, and a vertically scaled run keeps its original height. A warning is logged during conversion.
 
-The per-span fallback is also used when the ``<text>`` element cannot carry the scale: warped text (``<textPath>``, where the transform would distort the warp path), Justify All paragraphs (where the transform would stretch the ``textLength``, and where ``lengthAdjust`` squeezes the scaled glyphs back to that length anyway), paragraphs whose anchor points differ, and multi-paragraph vertical text.
+The per-span fallback is also used when the ``<text>`` element cannot carry the scale: warped text (``<textPath>``, where the transform would distort the warp path), Justify All paragraphs (where the transform would stretch the ``textLength``, and where ``lengthAdjust`` squeezes the scaled glyphs back to that length anyway), paragraphs whose anchor points differ, and multi-paragraph vertical text. Warped text drops the cross-axis ``transform`` altogether, since text on a path has no baseline to anchor it at.
+
+**Sideways runs in vertical text:**
+
+In vertical writing mode the inline axis is taken to be the vertical one, which holds for upright glyphs - all glyphs when the layer uses upright orientation, and CJK glyphs in the default mixed orientation. Latin runs in mixed orientation are rotated, so their advance follows ``horizontal_scale`` instead, and psd2svg scales them along the wrong axis. Their glyph proportions are still correct; only the advance widths of such runs are off by the ratio of the two scale factors.
 
 Scaling the ``<text>`` element also scales the stroke width of stroked text and the geometry of layer effects, as any transform does.
 

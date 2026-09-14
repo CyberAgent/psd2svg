@@ -802,11 +802,17 @@ class TextConverter(ConverterProtocol):
             # the text. The optimizer may move this transform up to the <text>
             # element when the paragraph holds a single span, where renderers do
             # honor it; the anchor keeps that promotion correct.
-            svg_utils.append_attribute(
-                tspan,
-                "transform",
-                _scale_about(scaling.transform_scale, paragraph_origin),
-            )
+            #
+            # Text on a <textPath> follows the path instead of a paragraph baseline,
+            # so there is no origin to anchor at. Emitting the scale anyway would
+            # displace the run in a renderer that honors it, which is worse than
+            # leaving the cross axis unscaled.
+            if not text_setting.has_warp():
+                svg_utils.append_attribute(
+                    tspan,
+                    "transform",
+                    _scale_about(scaling.transform_scale, paragraph_origin),
+                )
 
         if (
             text_setting.writing_direction == WritingDirection.VERTICAL_RL
@@ -879,8 +885,11 @@ class TextConverter(ConverterProtocol):
 
         # Non-uniform scaling: split the scale between the inline and cross axes.
         # NOTE: For vertical text this assumes upright glyphs, whose advance follows
-        # the vertical scale. Runs rotated by the default "mixed" text orientation
-        # advance by their horizontal scale instead.
+        # the vertical scale. That holds for every glyph in upright orientation
+        # (baseline_direction 1) and for CJK glyphs in the default mixed
+        # orientation; Latin runs in mixed orientation are rotated and advance by
+        # their horizontal scale instead. Orientation is a per-character property
+        # there, so it cannot be decided per span. See docs/limitations.rst.
         if writing_direction == WritingDirection.HORIZONTAL_TB:
             inline_scale, cross_scale = horizontal_scale, vertical_scale
         else:
