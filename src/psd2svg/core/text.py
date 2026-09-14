@@ -25,6 +25,7 @@ Note: This module re-exports TypeSetting and TextWrappingMode for backward
 
 import logging
 import xml.etree.ElementTree as ET
+from typing import NamedTuple
 
 from psd_tools.api import layers
 
@@ -49,6 +50,84 @@ logger = logging.getLogger(__name__)
 # Sub-pixel values below this threshold don't meaningfully affect rendering
 # and are omitted to produce cleaner SVG output (avoiding "-0px" or "-0.005px").
 NEGLIGIBLE_MARGIN_THRESHOLD = 0.01
+
+# Tolerance for comparing scale factors.
+# Consistent with Transform.is_translation_only().
+SCALE_TOLERANCE = 1e-6
+
+
+class TextScaling(NamedTuple):
+    """Font-size decomposition of a PSD horizontal/vertical character scale.
+
+    Attributes:
+        font_size: Font size to emit on the span.
+        baseline_size: Reference size for offsets perpendicular to the writing
+            direction, such as superscript and subscript baseline shifts.
+        transform_scale: Residual (sx, sy) scale that could not be expressed with
+            the font size, or None when no transform is needed.
+    """
+
+    font_size: float
+    baseline_size: float
+    transform_scale: tuple[float, float] | None
+
+
+def _common_span_scale(paragraphs: list[Paragraph]) -> tuple[float, float] | None:
+    """Return the non-uniform scale shared by every span of a text layer.
+
+    When all spans agree on the same horizontal/vertical scale, the scaling can be
+    expressed as a transform on the ``<text>`` element, which every SVG renderer
+    supports. See :meth:`TextConverter._calculate_text_scaling` for the per-span
+    fallback used otherwise.
+
+    Args:
+        paragraphs: Paragraphs of the text layer.
+
+    Returns:
+        ``(horizontal_scale, vertical_scale)`` when all spans share the same valid
+        non-uniform scale, or None when the spans disagree, the scale is uniform
+        (handled by font-size alone), or the values are invalid.
+    """
+    # Paragraph breaks are separate runs carrying the default scale, and they draw
+    # nothing, so they must not defeat the comparison.
+    scales = {
+        (span.style.horizontal_scale, span.style.vertical_scale)
+        for paragraph in paragraphs
+        for span in paragraph
+        if span.text.strip()
+    }
+    if len(scales) != 1:
+        return None
+
+    horizontal_scale, vertical_scale = scales.pop()
+    if horizontal_scale <= 0 or vertical_scale <= 0:
+        return None
+    if abs(horizontal_scale - vertical_scale) < SCALE_TOLERANCE:
+        return None
+    return horizontal_scale, vertical_scale
+
+
+def _scale_about(scale: tuple[float, float], origin: tuple[float, float]) -> str:
+    """Build an SVG transform that scales about the given origin point.
+
+    ``transform-origin`` is a CSS property rather than a presentation attribute, so
+    the origin is baked into an explicit translation for portability.
+
+    Args:
+        scale: (sx, sy) scale factors.
+        origin: (ox, oy) point that must stay in place.
+
+    Returns:
+        SVG transform string, e.g. ``translate(12.75,0) scale(0.5,1)``.
+    """
+    sx, sy = scale
+    ox, oy = origin
+    tx, ty = ox * (1.0 - sx), oy * (1.0 - sy)
+    scale_str = f"scale({svg_utils.num2str(sx)},{svg_utils.num2str(sy)})"
+    if abs(tx) < SCALE_TOLERANCE and abs(ty) < SCALE_TOLERANCE:
+        return scale_str
+    translate_str = f"translate({svg_utils.num2str(tx)},{svg_utils.num2str(ty)})"
+    return f"{translate_str} {scale_str}"
 
 
 def _needs_whitespace_preservation(text: str) -> bool:
@@ -187,6 +266,12 @@ class TextConverter(ConverterProtocol):
         if text_setting.writing_direction == WritingDirection.VERTICAL_RL:
             svg_utils.set_attribute(text_node, "writing-mode", "vertical-rl")
 
+        # Non-uniform scaling shared by every span is applied to the <text> element,
+        # where transforms are honored by all renderers.
+        text_scale_applied = self._apply_text_element_scaling(
+            text_setting, text_node, paragraphs, uses_native_positioning
+        )
+
         container_node = text_node
         if text_setting.has_warp():
             container_node = self._create_text_path_node(text_setting, text_node)
@@ -200,7 +285,12 @@ class TextConverter(ConverterProtocol):
                     uses_native_positioning=uses_native_positioning,
                 )
                 for span in paragraph:
-                    self._add_text_span(text_setting, paragraph_node, span)
+                    self._add_text_span(
+                        text_setting,
+                        paragraph_node,
+                        span,
+                        text_scale_applied=text_scale_applied,
+                    )
 
         if text_setting.has_warp():
             # When there is <textPath>, we can only optimize at the paragraph level.
@@ -223,6 +313,89 @@ class TextConverter(ConverterProtocol):
             svg_utils.merge_singleton_children(text_node)
             svg_utils.merge_attribute_less_children(text_node)
         return text_node
+
+    def _apply_text_element_scaling(
+        self,
+        text_setting: TypeSetting,
+        text_node: ET.Element,
+        paragraphs: list[Paragraph],
+        uses_native_positioning: bool,
+    ) -> bool:
+        """Apply layer-wide non-uniform text scaling to the <text> element.
+
+        When every span shares the same non-uniform scale, the scaling can be
+        expressed as a transform on the ``<text>`` element instead of the spans.
+        Unlike ``transform`` on ``<tspan>`` (SVG 2.0 only, ignored by browsers and
+        resvg), this renders everywhere, so glyph proportions, advance widths and
+        text alignment all match Photoshop.
+
+        Only the inline (advance) axis is scaled here; the cross axis is carried by
+        ``font-size`` so that the explicit ``dy`` line offsets keep their leading.
+        The transform is anchored at the paragraph origin so that text alignment is
+        preserved.
+
+        Args:
+            text_setting: Type setting object with writing direction and transform.
+            text_node: The ``<text>`` element to scale.
+            paragraphs: Paragraphs of the text layer.
+            uses_native_positioning: Whether native x/y positioning is used.
+
+        Returns:
+            True when the scaling was applied to the ``<text>`` element, meaning
+            spans must only carry the cross-axis scale in their font-size.
+        """
+        # Warped text is laid out along a <textPath>; scaling the <text> element
+        # would distort the warp path itself.
+        if text_setting.has_warp():
+            return False
+
+        scale = _common_span_scale(paragraphs)
+        if scale is None:
+            return False
+
+        # Justify All sets textLength on the paragraph, which the scale would stretch.
+        if any(
+            paragraph.justification == Justification.JUSTIFY_ALL
+            for paragraph in paragraphs
+        ):
+            return False
+
+        is_horizontal = text_setting.writing_direction == WritingDirection.HORIZONTAL_TB
+
+        # Line offsets are always emitted as dy, even for vertical text, so scaling
+        # the vertical axis of a multi-paragraph layer would stretch the leading.
+        if not is_horizontal and len(paragraphs) > 1:
+            return False
+
+        # The transform is anchored at a single point, so every paragraph must share
+        # the same anchor on the inline axis (paragraphs may differ in justification).
+        anchors = {
+            self._compute_paragraph_position(text_setting, paragraph.get_text_anchor())[
+                0 if is_horizontal else 1
+            ]
+            for paragraph in paragraphs
+        }
+        if len(anchors) != 1:
+            return False
+
+        horizontal_scale, vertical_scale = scale
+        x, y, _ = self._compute_paragraph_position(
+            text_setting, paragraphs[0].get_text_anchor()
+        )
+        if uses_native_positioning:
+            x += text_setting.transform.tx
+            y += text_setting.transform.ty
+
+        # font-size carries the cross-axis scale, the transform the inline axis.
+        if is_horizontal:
+            inline_scale = (horizontal_scale / vertical_scale, 1.0)
+        else:
+            inline_scale = (1.0, vertical_scale / horizontal_scale)
+
+        svg_utils.append_attribute(
+            text_node, "transform", _scale_about(inline_scale, (x, y))
+        )
+        return True
 
     def _create_foreign_object_text(self, text_setting: TypeSetting) -> ET.Element:
         """Create <foreignObject> with XHTML content for text wrapping.
@@ -442,19 +615,35 @@ class TextConverter(ConverterProtocol):
             svg_utils.set_attribute(paragraph_node, "lengthAdjust", "spacingAndGlyphs")
 
     def _add_text_span(
-        self, text_setting: TypeSetting, paragraph_node: ET.Element, span: Span
+        self,
+        text_setting: TypeSetting,
+        paragraph_node: ET.Element,
+        span: Span,
+        text_scale_applied: bool = False,
     ) -> ET.Element:
-        """Add a text span to the paragraph node."""
+        """Add a text span to the paragraph node.
+
+        Args:
+            text_setting: Type setting object with writing direction and metrics.
+            paragraph_node: Parent paragraph tspan.
+            span: Style span to render.
+            text_scale_applied: Whether the inline-axis scale is already applied to
+                the parent ``<text>`` element by
+                :meth:`_apply_text_element_scaling`.
+        """
         style = span.style
         # Get PostScript name from font index - no font resolution needed
         postscript_name = text_setting.get_postscript_name(style.font)
 
         # Handle horizontal and vertical scaling
-        scaled_font_size, transform_scale = self._calculate_text_scaling(
+        scaling = self._calculate_text_scaling(
             style.font_size,
             style.horizontal_scale,
             style.vertical_scale,
+            text_setting.writing_direction,
+            text_scale_applied=text_scale_applied,
         )
+        scaled_font_size = scaling.font_size
 
         # Determine font weight - only set for faux bold
         # (PostScript name encodes actual weight)
@@ -516,11 +705,13 @@ class TextConverter(ConverterProtocol):
 
         # NOTE: Photoshop uses different values for subscript position/size.
         # Using baseline-shift with sub or super will result in inaccurate rendering.
+        # NOTE: The baseline shift is perpendicular to the writing direction, so it
+        # follows the cross-axis size rather than the emitted font-size.
         if style.font_baseline == FontBaseline.SUPERSCRIPT:
             svg_utils.set_attribute(
                 tspan,
                 "baseline-shift",
-                scaled_font_size * text_setting.superscript_position,
+                scaling.baseline_size * text_setting.superscript_position,
             )
             svg_utils.set_attribute(
                 tspan, "font-size", scaled_font_size * text_setting.superscript_size
@@ -529,7 +720,7 @@ class TextConverter(ConverterProtocol):
             svg_utils.set_attribute(
                 tspan,
                 "baseline-shift",
-                -scaled_font_size * text_setting.subscript_position,
+                -scaling.baseline_size * text_setting.subscript_position,
             )
             svg_utils.set_attribute(
                 tspan, "font-size", scaled_font_size * text_setting.subscript_size
@@ -545,6 +736,8 @@ class TextConverter(ConverterProtocol):
         # letter-spacing applies after the character.
         letter_spacing = style.tracking / 1000 * scaled_font_size
         letter_spacing -= style.tsume / 10 * scaled_font_size  # Tsume tightens spacing
+        # NOTE: The offset is an absolute value in pixels, so it is scaled along with
+        # the text when the scale lives on the <text> element.
         letter_spacing += self.text_letter_spacing_offset
 
         # Only set letter-spacing if non-zero (or if offset makes it non-zero)
@@ -570,32 +763,33 @@ class TextConverter(ConverterProtocol):
             elif text_setting.writing_direction == WritingDirection.VERTICAL_RL:
                 svg_utils.set_attribute(tspan, "dy", kerning_offset)
 
-        # Apply non-uniform scale transform if needed
-        # (Uniform scaling is already handled via scaled_font_size above)
-        if transform_scale is not None:
+        # Apply the residual cross-axis scale when spans disagree on their scaling
+        # and it could not be applied to the <text> element.
+        # (Uniform scaling is already handled via scaled_font_size above.)
+        if scaling.transform_scale is not None:
             logger.warning(
-                "Non-uniform text scaling (different horizontal and vertical scale) "
-                "on spans is not supported by browsers. Scaled text will not render "
-                "correctly. Consider using enable_text=False to rasterize text layers."
+                "Non-uniform text scaling on individual spans is not supported by "
+                "SVG renderers, which ignore transform on <tspan>. Advance widths "
+                "and text positions are preserved, but the glyphs will not be "
+                "scaled across the writing direction. Consider using "
+                "enable_text=False to rasterize text layers."
             )
 
+            # Anchor the scale at the paragraph position so that it does not shift
+            # the text. The paragraph position is unknown for paragraphs positioned
+            # with dy, in which case the scale falls back to the default origin.
+            parent_x = paragraph_node.attrib.get("x")
+            parent_y = paragraph_node.attrib.get("y")
+            origin = (
+                (float(parent_x), float(parent_y))
+                if parent_x is not None and parent_y is not None
+                else (0.0, 0.0)
+            )
             svg_utils.append_attribute(
                 tspan,
                 "transform",
-                f"scale({svg_utils.num2str(transform_scale[0])},{svg_utils.num2str(transform_scale[1])})",
+                _scale_about(scaling.transform_scale, origin),
             )
-
-            # Set transform-origin to the paragraph's position
-            # to prevent scale from shifting the text
-            # Get x and y from parent paragraph node
-            parent_x = paragraph_node.attrib.get("x")
-            parent_y = paragraph_node.attrib.get("y")
-            if parent_x is not None and parent_y is not None:
-                svg_utils.set_attribute(
-                    tspan,
-                    "transform-origin",
-                    f"{parent_x} {parent_y}",
-                )
 
         if (
             text_setting.writing_direction == WritingDirection.VERTICAL_RL
@@ -618,53 +812,75 @@ class TextConverter(ConverterProtocol):
         font_size: float,
         horizontal_scale: float,
         vertical_scale: float,
-    ) -> tuple[float, tuple[float, float] | None]:
+        writing_direction: WritingDirection,
+        text_scale_applied: bool = False,
+    ) -> TextScaling:
         """Calculate font-size scaling for text spans.
 
-        Handles uniform and non-uniform text scaling with browser compatibility
-        workarounds. For uniform scaling, scales font-size directly
-        (browser-compatible). For non-uniform scaling, uses transform
-        (still broken in browsers, but more consistent).
+        Non-uniform scaling cannot be expressed on a ``<tspan>``: ``transform`` is
+        SVG 2.0 only and is ignored by browsers and resvg alike. The font-size
+        therefore carries the scale of the inline (advance) axis - horizontal for
+        horizontal text, vertical for vertical text - so that glyph advance widths,
+        the position of following characters and center/right alignment match
+        Photoshop even when the transform is dropped. The remaining cross-axis
+        scale is emitted as a transform for SVG 2.0 renderers.
+
+        When the whole layer shares the same scale, the inline axis is instead
+        applied to the ``<text>`` element by :meth:`_apply_text_element_scaling`
+        and the font-size only carries the cross axis.
 
         Args:
-            font_size: Base font size in pixels
-            horizontal_scale: Horizontal scale factor (default 1.0)
-            vertical_scale: Vertical scale factor (default 1.0)
+            font_size: Base font size in pixels.
+            horizontal_scale: Horizontal scale factor (default 1.0).
+            vertical_scale: Vertical scale factor (default 1.0).
+            writing_direction: Writing direction of the text layer.
+            text_scale_applied: Whether the inline-axis scale is already applied to
+                the parent ``<text>`` element.
 
         Returns:
-            Tuple of (scaled_font_size, transform_scale):
-            - scaled_font_size: Font size after applying scaling
-            - transform_scale: (sx, sy) tuple for transform attribute,
-              or None if not needed
+            The font size to emit, the reference size for baseline offsets, and the
+            residual (sx, sy) transform, if any.
         """
-        SCALE_TOLERANCE = 1e-6  # Consistent with Transform.is_translation_only()
         has_scaling = vertical_scale != 1.0 or horizontal_scale != 1.0
         is_uniform_scale = abs(vertical_scale - horizontal_scale) < SCALE_TOLERANCE
 
+        if not has_scaling:
+            return TextScaling(font_size, font_size, None)
+
         # Validate scale values and determine approach
-        if has_scaling and (vertical_scale <= 0 or horizontal_scale <= 0):
+        if vertical_scale <= 0 or horizontal_scale <= 0:
             logger.warning(
                 f"Invalid scale values: horizontal={horizontal_scale}, "
                 f"vertical={vertical_scale}. Using original font-size."
             )
-            scaled_font_size = font_size
-            transform_scale = None
-        elif has_scaling and is_uniform_scale:
-            # Uniform scaling: scale font-size directly (browser-compatible)
-            scale = horizontal_scale  # Could use vertical_scale, they're equal
-            scaled_font_size = font_size * scale
-            transform_scale = None  # No transform needed
-        elif has_scaling:
-            # Non-uniform scaling: scale by vertical, adjust horizontal with transform
-            scaled_font_size = font_size * vertical_scale
-            # Transform adjusts horizontal to match
-            transform_scale = (horizontal_scale / vertical_scale, 1.0)
-        else:
-            # No scaling
-            scaled_font_size = font_size
-            transform_scale = None
+            return TextScaling(font_size, font_size, None)
 
-        return scaled_font_size, transform_scale
+        if is_uniform_scale:
+            # Uniform scaling: scale font-size directly (renderer-compatible)
+            scaled_font_size = font_size * horizontal_scale
+            return TextScaling(scaled_font_size, scaled_font_size, None)
+
+        # Non-uniform scaling: split the scale between the inline and cross axes.
+        # NOTE: For vertical text this assumes upright glyphs, whose advance follows
+        # the vertical scale. Runs rotated by the default "mixed" text orientation
+        # advance by their horizontal scale instead.
+        if writing_direction == WritingDirection.HORIZONTAL_TB:
+            inline_scale, cross_scale = horizontal_scale, vertical_scale
+        else:
+            inline_scale, cross_scale = vertical_scale, horizontal_scale
+        baseline_size = font_size * cross_scale
+
+        if text_scale_applied:
+            # The <text> element carries the inline axis.
+            return TextScaling(baseline_size, baseline_size, None)
+
+        residual = cross_scale / inline_scale
+        transform_scale = (
+            (1.0, residual)
+            if writing_direction == WritingDirection.HORIZONTAL_TB
+            else (residual, 1.0)
+        )
+        return TextScaling(font_size * inline_scale, baseline_size, transform_scale)
 
     def _get_foreign_object_container_styles(
         self, text_setting: TypeSetting, bounds: Rectangle
@@ -910,6 +1126,15 @@ class TextConverter(ConverterProtocol):
         # Get PostScript name from font index - no font resolution needed
         postscript_name = text_setting.get_postscript_name(style.font)
 
+        # CSS transforms do not affect layout either, so the font size carries the
+        # scale of the inline axis, exactly like the native <text> output.
+        scaling = self._calculate_text_scaling(
+            style.font_size,
+            style.horizontal_scale,
+            style.vertical_scale,
+            text_setting.writing_direction,
+        )
+
         styles = {}
 
         # Set display: inline-block and line-height to prevent inline box from
@@ -927,7 +1152,7 @@ class TextConverter(ConverterProtocol):
 
         # Font size
         if style.font_size:
-            styles["font-size"] = svg_utils.num2str_with_unit(style.font_size)
+            styles["font-size"] = svg_utils.num2str_with_unit(scaling.font_size)
 
         # Font weight - only set for faux bold (PostScript name encodes actual weight)
         if style.faux_bold:
@@ -958,7 +1183,7 @@ class TextConverter(ConverterProtocol):
             styles["font-variant"] = "small-caps"
 
         # Letter spacing
-        letter_spacing = style.tracking / 1000 * style.font_size
+        letter_spacing = style.tracking / 1000 * scaling.font_size
         letter_spacing += self.text_letter_spacing_offset
         if letter_spacing != 0:
             styles["letter-spacing"] = svg_utils.num2str_with_unit(letter_spacing)
@@ -967,22 +1192,23 @@ class TextConverter(ConverterProtocol):
         if style.font_baseline == FontBaseline.SUPERSCRIPT:
             styles["vertical-align"] = "super"
             styles["font-size"] = svg_utils.num2str_with_unit(
-                style.font_size * text_setting.superscript_size
+                scaling.font_size * text_setting.superscript_size
             )
         elif style.font_baseline == FontBaseline.SUBSCRIPT:
             styles["vertical-align"] = "sub"
             styles["font-size"] = svg_utils.num2str_with_unit(
-                style.font_size * text_setting.subscript_size
+                scaling.font_size * text_setting.subscript_size
             )
         elif style.baseline_shift != 0.0:
             # Custom baseline shift
             styles["vertical-align"] = svg_utils.num2str_with_unit(style.baseline_shift)
 
-        # Horizontal/vertical scale
-        if style.vertical_scale != 1.0 or style.horizontal_scale != 1.0:
+        # Horizontal/vertical scale: the inline axis is already in the font size,
+        # only the cross axis is left for the (layout-neutral) CSS transform.
+        if scaling.transform_scale is not None:
+            scale_x, scale_y = scaling.transform_scale
             styles["transform"] = (
-                f"scale({svg_utils.num2str(style.horizontal_scale)}, "
-                f"{svg_utils.num2str(style.vertical_scale)})"
+                f"scale({svg_utils.num2str(scale_x)}, {svg_utils.num2str(scale_y)})"
             )
             # Note: display: inline-block already set above for all spans
             styles["transform-origin"] = "center"

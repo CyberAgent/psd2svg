@@ -265,7 +265,7 @@ When ``enable_text=True`` (default), text layers are converted to native SVG ``<
 * Tsume (East Asian character tightening)
 * Ligatures (common ligatures and discretionary ligatures)
 * Line height (leading)
-* Horizontal and vertical text scaling
+* Horizontal and vertical text scaling (see Text Scaling Limitation below)
 * Position, rotation, and scaling transformations
 * **Arc warp effects** (experimental) - see Text Warp Effects below
 
@@ -434,30 +434,40 @@ For best results with vertical text, use Chromium-based browsers for viewing or 
 
 **Text Scaling Limitation:**
 
-Horizontal and vertical text scaling (``horizontal_scale`` and ``vertical_scale`` in PSD) uses ``transform`` on ``<tspan>`` elements, which is only supported in SVG 2.0. **No major browser currently supports this feature** (Chrome, Firefox, Safari, and Edge all ignore transforms on tspan elements).
+Horizontal and vertical text scaling (``horizontal_scale`` and ``vertical_scale`` in PSD) cannot be expressed on a ``<tspan>``: ``transform`` on ``<tspan>`` is an SVG 2.0 feature that **no major renderer supports** (Chrome, Firefox, Safari, Edge and resvg all ignore it).
+
+psd2svg therefore encodes the scaling in the ``font-size`` and in a transform on the ``<text>`` element, which every renderer honors:
+
+* **Uniform scaling** (``horizontal_scale == vertical_scale``) is applied to ``font-size`` and renders exactly.
+* **Non-uniform scaling shared by the whole text layer** is applied as a transform on the ``<text>`` element, anchored at the text origin so that alignment is preserved. This renders exactly as well.
+* **Non-uniform scaling of individual spans** cannot be applied to the ``<text>`` element, because the spans disagree. The ``font-size`` then carries the scale of the writing direction's inline axis (``horizontal_scale`` for horizontal text, ``vertical_scale`` for vertical text), and the remaining cross-axis scale is emitted as a ``transform`` on the ``<tspan>`` for SVG 2.0 renderers.
 
 **Impact:**
 
-* Scaled text will not render correctly in any browser
-* Text appears at normal size instead of scaled size
-* A warning is logged during conversion
+Only the last case is approximate. Glyph advance widths, the position of the following characters and center/right alignment all match Photoshop, but renderers that ignore ``transform`` on ``<tspan>`` draw the run without the cross-axis scaling: glyphs of a horizontally scaled run are as tall as they are wide, and a vertically scaled run keeps its original height. A warning is logged during conversion.
+
+The per-span fallback is also used when the ``<text>`` element cannot carry the scale: warped text (``<textPath>``, where the transform would distort the warp path), Justify All paragraphs (where the transform would stretch the ``textLength``), paragraphs that do not share a text anchor, and multi-paragraph vertical text.
+
+Scaling the ``<text>`` element also scales the stroke width of stroked text and the geometry of layer effects, as any transform does.
 
 **Workarounds:**
 
-1. **Recommended**: Use ``enable_text=False`` to rasterize text layers with scaling
+1. **Recommended**: Use ``enable_text=False`` to rasterize text layers that scale individual spans
 2. Convert text to vector shapes (outlines) in Photoshop before conversion
-3. Avoid using text scaling in your PSD designs
+3. Apply the same scaling to the whole text layer, which converts exactly
 
 **Technical Background:**
 
-While splitting scaled spans into separate ``<text>`` elements (which do support transforms in browsers) seems like a potential solution, this approach has fundamental issues:
+Rendering per-span non-uniform scaling exactly would require splitting the scaled spans into separate ``<text>`` elements (which do support transforms) and positioning them explicitly. That needs the rendered advance width of every preceding span, i.e. a font-metrics-based layout engine:
 
+* Position calculations - would require knowing rendered text widths without a layout engine
 * Line height calculations - scaled text affects vertical spacing in complex ways
 * Transform combination - when layers have their own transforms, matrix multiplication is required
-* Position calculations - would require knowing rendered text widths without a layout engine
-* Missing attributes - parent attributes need careful propagation
+* Measurement drift - our metrics would have to match the renderer's shaping (kerning, ligatures) exactly
 
-Given these complexities, the current implementation emits a clear warning rather than attempting unreliable splitting.
+``textLength`` with ``lengthAdjust="spacingAndGlyphs"`` is not a solution either: it also needs the natural text width, and resvg does not advance the following text by it.
+
+Given these complexities, the current implementation preserves the text layout and emits a clear warning instead.
 
 **Letter Spacing Differences:**
 
