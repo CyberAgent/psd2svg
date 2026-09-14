@@ -9,6 +9,7 @@ import pytest
 from psd_tools.constants import BlendMode
 from psd_tools.terminology import Enum
 
+from psd2svg.core.constants import BLEND_MODE, INACCURATE_BLEND_MODES
 from psd2svg.core.layer import LayerConverter
 
 
@@ -240,3 +241,71 @@ class TestBlendModeWarnings:
         """Test that completely unsupported blend modes raise ValueError."""
         with pytest.raises(ValueError, match="Unsupported blend mode"):
             converter.set_blend_mode(b"unsupported_mode", node)
+
+
+class TestDescriptorBlendModes:
+    """Test descriptor blend modes written as long string IDs.
+
+    Photoshop writes an enumerated blend mode either as the four-character key
+    or as the long string ID. Recent versions always write the long form, so
+    both spellings must map to the same SVG blend mode.
+    """
+
+    # (four-character key, long string ID) as reported by typeIDToStringID().
+    EQUIVALENTS = [
+        (Enum.Normal, b"normal"),
+        (Enum.Dissolve, b"dissolve"),
+        (Enum.Darken, b"darken"),
+        (Enum.Multiply, b"multiply"),
+        (Enum.ColorBurn, b"colorBurn"),
+        (Enum.Lighten, b"lighten"),
+        (Enum.Screen, b"screen"),
+        (Enum.ColorDodge, b"colorDodge"),
+        (Enum.Overlay, b"overlay"),
+        (Enum.SoftLight, b"softLight"),
+        (Enum.HardLight, b"hardLight"),
+        (Enum.Difference, b"difference"),
+        (Enum.Exclusion, b"exclusion"),
+        (Enum.Hue, b"hue"),
+        (Enum.Saturation, b"saturation"),
+        (Enum.Color, b"color"),
+        (Enum.Luminosity, b"luminosity"),
+    ]
+
+    @pytest.mark.parametrize("char_id, string_id", EQUIVALENTS)
+    def test_string_id_matches_char_id(self, char_id: bytes, string_id: bytes) -> None:
+        """Test that both spellings map to the same SVG blend mode."""
+        assert BLEND_MODE[string_id] == BLEND_MODE[char_id]
+
+    @pytest.mark.parametrize("char_id, string_id", EQUIVALENTS)
+    def test_string_id_accuracy_matches_char_id(
+        self, char_id: bytes, string_id: bytes
+    ) -> None:
+        """Test that both spellings agree on whether the mapping is accurate."""
+        assert (string_id in INACCURATE_BLEND_MODES) == (
+            char_id in INACCURATE_BLEND_MODES
+        )
+
+    def test_pass_through_string_id(self) -> None:
+        """Test that the long pass-through spelling is recognized."""
+        assert BLEND_MODE[b"passThrough"] == "pass-through"
+
+    def test_normal_string_id_sets_no_style(self) -> None:
+        """Test that a long normal blend mode converts without a style."""
+        converter = Mock(spec=LayerConverter)
+        converter.set_blend_mode = LayerConverter.set_blend_mode.__get__(
+            converter, LayerConverter
+        )
+        node = ET.Element("g")
+        converter.set_blend_mode(b"normal", node)
+        assert "style" not in node.attrib
+
+    def test_multiply_string_id_sets_style(self) -> None:
+        """Test that a long multiply blend mode converts to mix-blend-mode."""
+        converter = Mock(spec=LayerConverter)
+        converter.set_blend_mode = LayerConverter.set_blend_mode.__get__(
+            converter, LayerConverter
+        )
+        node = ET.Element("g")
+        converter.set_blend_mode(b"multiply", node)
+        assert "mix-blend-mode: multiply" in node.attrib["style"]
