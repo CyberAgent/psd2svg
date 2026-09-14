@@ -37,6 +37,7 @@ from tests.conftest import get_fixture
         "layer-types/pattern-fill.psd",
         "layer-types/artboard.psd",
         "layer-types/group.psd",
+        "layer-types/group-fill-opacity.psd",
         "layer-types/pixel-layer.psd",
         "layer-types/shape-layer.psd",
         "layer-types/smartobject-layer.psd",
@@ -65,6 +66,7 @@ def evaluate_quality(psd_file: str, quality: float) -> None:
     [
         pytest.param("layer-types/artboard.psd", 0.01),
         pytest.param("layer-types/group.psd", 0.01),
+        pytest.param("layer-types/group-fill-opacity.psd", 0.01),
         pytest.param("layer-types/pixel-layer.psd", 0.01),
         pytest.param(
             "layer-types/shape-layer.psd", 0.02
@@ -392,6 +394,8 @@ def test_paint_stroke(psd_file: str) -> None:
         "effects/color-overlay-7.psd",  # vector fill opacity and mask test
         # Blend modes written as long string IDs by recent Photoshop versions.
         "effects/color-overlay-9-long-blend-mode.psd",
+        # Group fill opacity must not be applied to the overlay effect.
+        "effects/color-overlay-10-group-fill-opacity.psd",
         "effects/gradient-overlay-1.psd",
         "effects/gradient-overlay-2.psd",
         "effects/gradient-overlay-3.psd",
