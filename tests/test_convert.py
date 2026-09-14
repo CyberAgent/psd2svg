@@ -110,6 +110,7 @@ def test_layer_types_quality(psd_file: str, quality: float) -> None:
         pytest.param("clipping/shape-with-clip-stroke.psd", 0.02),
         pytest.param("clipping/shape-with-clip2-stroke.psd", 0.02),
         pytest.param("clipping/shape-with-invisible-clip.psd", 0.01),
+        pytest.param("clipping/nested-group-with-clip.psd", 0.01),
         pytest.param(
             "clipping/shape-with-blend.psd", 0.01
         ),  # Blend mode for clipping shape layer
