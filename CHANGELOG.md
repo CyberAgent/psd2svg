@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Fill and adjustment layers leaked a `depth` attribute** (#329)
+  - Every fill and adjustment layer wrote the internal nesting depth into the
+    output as an invalid `depth` attribute
+
 - **Fill opacity and blend mode lost on layers with effects** (#326)
   - Clipping bases and text layers painted a bare `<use>` copy, rendering fully
     opaque and unblended; shape and fill clipping bases rendered unpainted
