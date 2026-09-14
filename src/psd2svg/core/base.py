@@ -34,6 +34,9 @@ class ConverterProtocol(Protocol):
     def add_layer(
         self, layer: layers.Layer, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
+    def add_artboard(
+        self, layer: layers.Artboard, depth: int = 0, **attrib: str
+    ) -> ET.Element | None: ...
     def add_group(
         self, layer: layers.Group, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
@@ -51,6 +54,7 @@ class ConverterProtocol(Protocol):
         layer: adjustments.SolidColorFill
         | adjustments.GradientFill
         | adjustments.PatternFill,
+        depth: int = 0,
         **attrib: str,
     ) -> ET.Element | None: ...
 
@@ -126,52 +130,52 @@ class ConverterProtocol(Protocol):
 
     # Adjustments
     def add_invert_adjustment(
-        self, layer: adjustments.Invert, **attrib: str
+        self, layer: adjustments.Invert, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_posterize_adjustment(
-        self, layer: adjustments.Posterize, **attrib: str
+        self, layer: adjustments.Posterize, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_hue_saturation_adjustment(
-        self, layer: adjustments.HueSaturation, **attrib: str
+        self, layer: adjustments.HueSaturation, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_exposure_adjustment(
-        self, layer: adjustments.Exposure, **attrib: str
+        self, layer: adjustments.Exposure, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_brightness_contrast_adjustment(
-        self, layer: adjustments.BrightnessContrast, **attrib: str
+        self, layer: adjustments.BrightnessContrast, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_threshold_adjustment(
-        self, layer: adjustments.Threshold, **attrib: str
+        self, layer: adjustments.Threshold, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_color_balance_adjustment(
-        self, layer: adjustments.ColorBalance, **attrib: str
+        self, layer: adjustments.ColorBalance, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_black_and_white_adjustment(
-        self, layer: adjustments.BlackAndWhite, **attrib: str
+        self, layer: adjustments.BlackAndWhite, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_channel_mixer_adjustment(
-        self, layer: adjustments.ChannelMixer, **attrib: str
+        self, layer: adjustments.ChannelMixer, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_color_lookup_adjustment(
-        self, layer: adjustments.ColorLookup, **attrib: str
+        self, layer: adjustments.ColorLookup, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_curves_adjustment(
-        self, layer: adjustments.Curves, **attrib: str
+        self, layer: adjustments.Curves, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_gradient_map_adjustment(
-        self, layer: adjustments.GradientMap, **attrib: str
+        self, layer: adjustments.GradientMap, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_levels_adjustment(
-        self, layer: adjustments.Levels, **attrib: str
+        self, layer: adjustments.Levels, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_photo_filter_adjustment(
-        self, layer: adjustments.PhotoFilter, **attrib: str
+        self, layer: adjustments.PhotoFilter, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_selective_color_adjustment(
-        self, layer: adjustments.SelectiveColor, **attrib: str
+        self, layer: adjustments.SelectiveColor, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
     def add_vibrance_adjustment(
-        self, layer: adjustments.Vibrance, **attrib: str
+        self, layer: adjustments.Vibrance, depth: int = 0, **attrib: str
     ) -> ET.Element | None: ...
 
     # Utilities

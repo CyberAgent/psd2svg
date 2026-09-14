@@ -246,3 +246,48 @@ class TestTextFill:
         assert effects
         assert all("opacity" not in use.attrib for use in effects)
         assert all("mix-blend-mode" not in use.get("style", "") for use in effects)
+
+
+class TestConversionParameters:
+    """Test that conversion parameters stay out of the SVG output."""
+
+    @pytest.mark.parametrize(
+        "psd_file",
+        [
+            "layer-types/solid-color-fill.psd",
+            "layer-types/gradient-fill.psd",
+            "layer-types/pattern-fill.psd",
+            "layer-types/invert.psd",
+            "layer-types/posterize.psd",
+            "layer-types/artboard.psd",
+            "adjustments/invert-clipping-mask.psd",
+        ],
+    )
+    @pytest.mark.parametrize("optimize", [False, True])
+    def test_depth_is_not_written_as_an_attribute(
+        self, psd_file: str, optimize: bool
+    ) -> None:
+        """Test that the nesting depth of a layer does not reach the output.
+
+        Fill and adjustment converters used to collect the dispatch keyword in
+        their extra attributes and write it out as `depth` on the node.
+        """
+        nodes = list(build_svg(psd_file, optimize).iter())
+        assert len(nodes) > 1
+        assert all("depth" not in node.attrib for node in nodes)
+
+    @pytest.mark.parametrize("optimize", [False, True])
+    def test_clipping_context_still_reaches_the_node(self, optimize: bool) -> None:
+        """Test that the attributes a converter is meant to receive survive.
+
+        A clipped adjustment takes its clipping context through the same extra
+        attributes that used to carry the nesting depth, so dropping the depth
+        must not drop the clipping with it. The fixture clips an invert
+        adjustment to an ellipse, and the clip travels into the layer mask.
+        """
+        svg = build_svg("adjustments/invert-clipping-mask.psd", optimize)
+        filtered = [use for use in svg.iter(f"{SVG_NS}use") if "filter" in use.attrib]
+        assert len(filtered) == 1
+        assert filtered[0].get("mask")
+        clipped = [node for node in svg.iter() if "clip-path" in node.attrib]
+        assert clipped

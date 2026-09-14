@@ -65,7 +65,7 @@ class LayerConverter(ConverterProtocol):
         }
         # Default layer_fn is a plain pixel layer.
         layer_fn = registry.get(type(layer), self.add_pixel)
-        return layer_fn(layer, depth=depth, **attrib)  # type: ignore[call-arg]
+        return layer_fn(layer, depth=depth, **attrib)
 
     def add_artboard(
         self, layer: layers.Artboard, depth: int = 0, **attrib: str
@@ -501,6 +501,7 @@ class LayerConverter(ConverterProtocol):
         layer: adjustments.SolidColorFill
         | adjustments.GradientFill
         | adjustments.PatternFill,
+        depth: int = 0,
         **attrib: str,
     ) -> ET.Element | None:
         """Add fill node to the given element."""
