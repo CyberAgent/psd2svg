@@ -9,8 +9,15 @@ from psd_tools.api.layers import TypeLayer
 
 from psd2svg import SVGDocument
 from psd2svg.core.converter import Converter
-from psd2svg.core.text import TextWrappingMode
-from psd2svg.core.typesetting import TypeSetting
+from psd2svg.core.text import TextWrappingMode, _common_span_scale
+from psd2svg.core.typesetting import (
+    Paragraph,
+    ParagraphSheet,
+    Span,
+    StyleSheet,
+    TypeSetting,
+    WritingDirection,
+)
 from tests.conftest import get_fixture
 
 
@@ -20,6 +27,20 @@ def convert_psd_to_svg(psd_file: str) -> ET.Element:
     converter = Converter(psdimage)
     converter.build()
     return converter.svg
+
+
+def _parse_scale(transform: str) -> tuple[float, float]:
+    """Extract the scale factors from an SVG transform string."""
+    match = re.search(r"scale\(([^,)]+),\s*([^)]+)\)", transform)
+    assert match is not None, f"No scale in transform: {transform}"
+    return float(match.group(1)), float(match.group(2))
+
+
+def _parse_translate(transform: str) -> tuple[float, float]:
+    """Extract the translation from an SVG transform string."""
+    match = re.search(r"translate\(([^,)]+),\s*([^)]+)\)", transform)
+    assert match is not None, f"No translate in transform: {transform}"
+    return float(match.group(1)), float(match.group(2))
 
 
 @pytest.mark.parametrize(
@@ -633,49 +654,348 @@ def test_text_style_leading() -> None:
 
 
 def test_text_style_horizontal_scale() -> None:
-    """Test horizontal scale transform handling (non-uniform).
+    """Test horizontal scale handling when the whole layer shares the scale.
 
-    When only horizontal_scale=0.5 and vertical_scale=1.0:
+    When all spans use horizontal_scale=0.5 and vertical_scale=1.0:
     - Font-size is scaled by vertical_scale (1.0, unchanged)
-    - Transform adjusts horizontal: scale(h/v, 1) = scale(0.5/1.0, 1) = scale(0.5, 1)
+    - The <text> element scales the inline axis: scale(h/v, 1) = scale(0.5, 1)
+    - The scale is anchored at the text origin so alignment is preserved
     """
     svg = convert_psd_to_svg("texts/style-horizontally-scale-50.psd")
 
-    # Check for transform on tspan or text element (optimization may move it to text)
-    element = svg.find(".//tspan[@transform]")
-    if element is None:
-        element = svg.find(".//text[@transform]")
-    assert element is not None, "Should have element with transform"
+    # Layer-wide scaling belongs on <text>, where transform is honored by renderers
+    text = svg.find(".//text[@transform]")
+    assert text is not None, "Layer-wide scale should be on the text element"
+    assert svg.find(".//tspan[@transform]") is None, (
+        "Spans should not carry a transform when the text element is scaled"
+    )
 
-    transform = element.attrib.get("transform", "")
-    # Should contain scale transformation
-    assert "scale" in transform, "Should have scale transform"
-    # Transform should be scale(0.5,1) for horizontal compression
-    assert ("0.5" in transform or ".5" in transform) and "1" in transform, (
-        "Should have scale(0.5,1) transform"
+    # Font-size carries the vertical scale only (unchanged here)
+    assert float(text.attrib["font-size"]) == pytest.approx(32.0)
+
+    # scale(0.5, 1) anchored at the text origin: translate(x * (1 - 0.5), 0)
+    x = float(text.attrib["x"])
+    scale_x, scale_y = _parse_scale(text.attrib["transform"])
+    assert (scale_x, scale_y) == pytest.approx((0.5, 1.0))
+    # Coordinates are rounded for compact output, hence the absolute tolerance
+    assert _parse_translate(text.attrib["transform"]) == pytest.approx(
+        (x * 0.5, 0.0), abs=0.01
     )
 
 
 def test_text_style_vertical_scale() -> None:
-    """Test vertical scale transform handling (non-uniform).
+    """Test vertical scale handling when the whole layer shares the scale.
 
-    When only vertical_scale=0.5 and horizontal_scale=1.0:
+    When all spans use vertical_scale=0.5 and horizontal_scale=1.0:
     - Font-size is scaled by vertical_scale (0.5)
-    - Transform adjusts horizontal: scale(h/v, 1) = scale(1.0/0.5, 1) = scale(2, 1)
+    - The <text> element scales the inline axis: scale(h/v, 1) = scale(2, 1)
     """
     svg = convert_psd_to_svg("texts/style-vertically-scale-50.psd")
 
-    # Check for transform on tspan or text element (optimization may move it to text)
-    element = svg.find(".//tspan[@transform]")
-    if element is None:
-        element = svg.find(".//text[@transform]")
-    assert element is not None, "Should have element with transform"
+    text = svg.find(".//text[@transform]")
+    assert text is not None, "Layer-wide scale should be on the text element"
+    assert svg.find(".//tspan[@transform]") is None, (
+        "Spans should not carry a transform when the text element is scaled"
+    )
 
-    transform = element.attrib.get("transform", "")
-    # Should contain scale transformation
-    assert "scale" in transform, "Should have scale transform"
-    # Transform should be scale(2,1) for horizontal adjustment
-    assert "2" in transform and "1" in transform, "Should have scale(2,1) transform"
+    # Font-size carries the vertical scale: 32 * 0.5
+    assert float(text.attrib["font-size"]) == pytest.approx(16.0)
+
+    x = float(text.attrib["x"])
+    scale_x, scale_y = _parse_scale(text.attrib["transform"])
+    assert (scale_x, scale_y) == pytest.approx((2.0, 1.0))
+    assert _parse_translate(text.attrib["transform"]) == pytest.approx(
+        (-x, 0.0), abs=0.01
+    )
+
+
+def test_text_style_horizontal_scale_span_advance_width() -> None:
+    """Test that a horizontally scaled span keeps Photoshop's advance widths.
+
+    Only "Ipsum" is scaled (horizontal_scale=2.0), so the scale cannot move to the
+    <text> element. The font-size carries the horizontal scale, which keeps the
+    advance widths - and therefore the following text and alignment - correct even
+    though renderers ignore transform on <tspan>. See GitHub issue #318.
+    """
+    svg = convert_psd_to_svg("texts/style-horizontally-scale-200.psd")
+
+    tspans = svg.findall(".//text/tspan")
+    assert len(tspans) == 2, "Unscaled and scaled runs should stay separate"
+    unscaled, scaled = tspans
+
+    assert float(unscaled.attrib["font-size"]) == pytest.approx(32.0)
+    # Horizontal scale is applied to the font-size: 32 * 2.0
+    assert float(scaled.attrib["font-size"]) == pytest.approx(64.0)
+    assert "transform" not in unscaled.attrib
+
+    # The residual vertical correction stays for SVG 2.0 renderers
+    assert _parse_scale(scaled.attrib["transform"]) == pytest.approx((1.0, 0.5))
+
+
+def test_text_style_vertical_scale_span_advance_width() -> None:
+    """Test that a vertically scaled span keeps Photoshop's advance widths.
+
+    Only "Ipsum" is scaled (vertical_scale=2.0). The horizontal scale is 1.0, so the
+    font-size stays unchanged and the following text is no longer shifted.
+    See GitHub issue #318.
+    """
+    svg = convert_psd_to_svg("texts/style-vertically-scale-200.psd")
+
+    scaled = svg.find(".//tspan[@transform]")
+    assert scaled is not None, "Scaled run should carry the residual transform"
+    assert scaled.text == "Ipsum"
+
+    # Font-size is unchanged: the horizontal scale is 1.0
+    text = svg.find(".//text")
+    assert text is not None
+    assert "font-size" not in scaled.attrib
+    assert float(text.attrib["font-size"]) == pytest.approx(32.0)
+
+    # The residual vertical correction stays for SVG 2.0 renderers
+    assert _parse_scale(scaled.attrib["transform"]) == pytest.approx((1.0, 2.0))
+
+
+def test_text_style_scale_layer_wide_preserves_leading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that layer-wide scaling does not disturb multi-paragraph line spacing.
+
+    The <text> transform only scales the inline axis, so the dy line offsets and the
+    paragraph anchors stay exactly as they are without scaling.
+    """
+    fixture = "texts/paragraph-space-after.psd"
+    unscaled = convert_psd_to_svg(fixture)
+    unscaled_positions = [
+        (tspan.attrib.get("x"), tspan.attrib.get("y"), tspan.attrib.get("dy"))
+        for tspan in unscaled.findall(".//text/tspan")
+    ]
+    assert any(dy is not None for _, _, dy in unscaled_positions), (
+        "Fixture should have multiple paragraphs"
+    )
+
+    # Apply horizontal_scale=2.0 to every span of the layer
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    svg = convert_psd_to_svg(fixture)
+
+    text = svg.find(".//text[@transform]")
+    assert text is not None, "Layer-wide scale should be on the text element"
+    assert _parse_scale(text.attrib["transform"]) == pytest.approx((2.0, 1.0))
+    assert svg.find(".//tspan[@transform]") is None
+
+    positions = [
+        (tspan.attrib.get("x"), tspan.attrib.get("y"), tspan.attrib.get("dy"))
+        for tspan in svg.findall(".//text/tspan")
+    ]
+    assert positions == unscaled_positions
+
+
+def test_text_style_scale_mixed_anchors_falls_back_to_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test the fallback when paragraphs do not share a text anchor.
+
+    The <text> transform is anchored at a single point, so it can only be used when
+    every paragraph starts at the same inline coordinate. This fixture mixes right,
+    center and left justification, so the scale has to stay on the spans.
+    """
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    svg = convert_psd_to_svg("texts/paragraph-shapetype1-multiple.psd")
+
+    assert svg.find(".//text[@transform]") is None, (
+        "Scale should not be anchored at a single point for mixed anchors"
+    )
+    text = svg.find(".//text")
+    assert text is not None
+    # The horizontal scale still lives in the font-size, keeping advance widths
+    assert float(text.attrib["font-size"]) == pytest.approx(64.0)
+
+    tspans = svg.findall(".//text/tspan")
+    assert len(tspans) == 3
+    baseline = float(tspans[0].attrib["y"])
+    for tspan in tspans:
+        baseline += float(tspan.attrib.get("dy", 0.0))
+        assert _parse_scale(tspan.attrib["transform"]) == pytest.approx((1.0, 0.5))
+        # Each residual is anchored at its own paragraph baseline
+        assert _parse_translate(tspan.attrib["transform"]) == pytest.approx(
+            (0.0, baseline * 0.5), abs=0.01
+        )
+
+
+def test_text_style_scale_justify_all_falls_back_to_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test the fallback for Justify All, which stretches text to a textLength.
+
+    Scaling the inline axis of the <text> element would stretch that length as
+    well, so the scale stays on the spans and the textLength is left untouched.
+    """
+    fixture = "texts/paragraph-shapetype1-justification6.psd"
+    unscaled = convert_psd_to_svg(fixture)
+    unscaled_text = unscaled.find(".//text")
+    assert unscaled_text is not None
+    assert unscaled_text.attrib.get("lengthAdjust") == "spacingAndGlyphs"
+
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    svg = convert_psd_to_svg(fixture)
+
+    text = svg.find(".//text")
+    assert text is not None
+    assert text.attrib["textLength"] == unscaled_text.attrib["textLength"], (
+        "Justify All length should not be stretched by the scale"
+    )
+    # The horizontal scale is carried by the font-size instead
+    assert float(text.attrib["font-size"]) == pytest.approx(
+        2 * float(unscaled_text.attrib["font-size"])
+    )
+    assert _parse_scale(text.attrib["transform"]) == pytest.approx((1.0, 0.5))
+
+
+def test_common_span_scale_ignores_paragraph_breaks() -> None:
+    """Test that empty runs do not defeat the layer-wide scale detection.
+
+    Photoshop stores paragraph breaks as separate runs that carry the default
+    scale; they draw nothing, so they must be ignored.
+    """
+    scaled = StyleSheet(name="", style_sheet_data={"HorizontalScale": 0.5})
+    default = StyleSheet(name="", style_sheet_data={})
+    paragraph_sheet = ParagraphSheet(name="", default_style_sheet=0, properties={})
+
+    def paragraph(*spans: Span) -> Paragraph:
+        return Paragraph(style=paragraph_sheet, spans=list(spans))
+
+    paragraphs = [
+        paragraph(Span(0, 5, "Lorem", scaled), Span(5, 6, "\r", default)),
+        paragraph(Span(6, 11, "Ipsum", scaled)),
+    ]
+    assert _common_span_scale(paragraphs) == (0.5, 1.0)
+
+    # A visible run with a different scale still forces the per-span fallback
+    paragraphs[1].spans[0] = Span(6, 11, "Ipsum", default)
+    assert _common_span_scale(paragraphs) is None
+
+
+def test_text_style_scale_vertical_writing_direction_layer_wide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test layer-wide scaling of vertical text, whose inline axis is vertical.
+
+    Uses the upright fixture (``baselinedirection1``), where every glyph advances
+    along the vertical axis. Sideways runs are a documented limitation.
+    """
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    svg = convert_psd_to_svg(
+        "texts/shapetype0-writingdirection2-baselinedirection1-justification0.psd"
+    )
+
+    text = svg.find(".//text[@transform]")
+    assert text is not None, "Layer-wide scale should be on the text element"
+    assert text.attrib.get("writing-mode") == "vertical-rl"
+    assert svg.find(".//tspan[@transform]") is None
+
+    # font-size carries the cross (horizontal) axis for vertical text
+    assert float(text.attrib["font-size"]) == pytest.approx(64.0)
+
+    # The inline (vertical) axis is scaled about the text origin: scale(1, v/h)
+    y = float(text.attrib["y"])
+    assert _parse_scale(text.attrib["transform"]) == pytest.approx((1.0, 0.5))
+    assert _parse_translate(text.attrib["transform"]) == pytest.approx(
+        (0.0, y * 0.5), abs=0.01
+    )
+
+
+def test_text_letter_spacing_offset_with_layer_wide_scale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that the letter spacing offset stays absolute under a <text> scale.
+
+    Tracking and tsume are relative to the font size and should scale with the
+    text, but text_letter_spacing_offset is an absolute pixel value, so it is
+    divided by the scale the <text> element applies.
+    """
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    psdimage = PSDImage.open(get_fixture("texts/style-tracking.psd"))
+
+    baseline = SVGDocument.from_psd(psdimage, text_letter_spacing_offset=0.0)
+    offset = SVGDocument.from_psd(psdimage, text_letter_spacing_offset=-0.5)
+
+    text = baseline.svg.find(".//text[@transform]")
+    assert text is not None, "Layer-wide scale should be on the text element"
+    scale_x, _ = _parse_scale(text.attrib["transform"])
+    assert scale_x == pytest.approx(2.0)
+
+    without_offset = baseline.svg.findall(".//*[@letter-spacing]")
+    with_offsets = offset.svg.findall(".//*[@letter-spacing]")
+    assert without_offset, "Fixture should emit letter-spacing"
+    assert len(without_offset) == len(with_offsets)
+
+    for without, with_offset in zip(without_offset, with_offsets):
+        delta = float(with_offset.attrib["letter-spacing"]) - float(
+            without.attrib["letter-spacing"]
+        )
+        # The emitted value is pre-divided so that the rendered offset is -0.5px
+        assert delta * scale_x == pytest.approx(-0.5)
+
+
+def test_text_style_scale_warp_falls_back_to_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test the fallback for warped text, laid out along a <textPath>.
+
+    Scaling the <text> element would distort the warp path itself.
+    """
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    svg = convert_psd_to_svg("texts/text-warp-arc-h+50.psd")
+
+    text = svg.find(".//text")
+    assert text is not None
+    assert "scale" not in text.attrib.get("transform", ""), (
+        "Warped text should not be scaled as a whole"
+    )
+    tspan = svg.find(".//textPath/tspan")
+    assert tspan is not None
+    # The horizontal scale lives in the font-size, keeping the advance along the path
+    assert float(tspan.attrib["font-size"]) == pytest.approx(64.0)
+    # Text on a path has no baseline to anchor the residual scale at, so it is
+    # dropped rather than emitted about a meaningless origin
+    assert "transform" not in tspan.attrib
+
+
+def test_text_style_scale_foreign_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that the foreignObject output scales the font-size as well.
+
+    CSS transforms do not affect layout either, so the inline axis has to be in the
+    font-size for the advance widths to be right.
+    """
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-space-after.psd"))
+    converter = Converter(psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT)
+    converter.build()
+
+    spans = converter.svg.findall(".//{http://www.w3.org/1999/xhtml}span")
+    assert spans, "Should have xhtml spans"
+    for span in spans:
+        style = span.attrib["style"]
+        assert "font-size: 64px" in style, f"Unexpected styles: {style}"
+        assert "transform: scale(1, 0.5)" in style, f"Unexpected styles: {style}"
+
+
+def test_text_style_scale_vertical_writing_direction() -> None:
+    """Test that vertical text scales the font-size along its inline (y) axis."""
+    converter = Converter(PSDImage.open(get_fixture("texts/style-bold.psd")))
+
+    horizontal = converter._calculate_text_scaling(
+        32.0, 2.0, 1.0, WritingDirection.HORIZONTAL_TB
+    )
+    assert horizontal.font_size == pytest.approx(64.0)
+    assert horizontal.transform_scale == pytest.approx((1.0, 0.5))
+
+    # In vertical writing mode the advance axis is vertical, so the font-size
+    # follows the vertical scale instead.
+    vertical = converter._calculate_text_scaling(
+        32.0, 2.0, 1.0, WritingDirection.VERTICAL_RL
+    )
+    assert vertical.font_size == pytest.approx(32.0)
+    assert vertical.transform_scale == pytest.approx((2.0, 1.0))
 
 
 def test_text_native_positioning_point_type() -> None:
