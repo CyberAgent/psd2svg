@@ -4,9 +4,11 @@ from xml.etree import ElementTree as ET
 
 import pytest
 from psd_tools import PSDImage
+from psd_tools.api import layers
 from psd_tools.constants import BlendMode
 
-from psd2svg import SVGDocument
+from psd2svg import ResourceLimits, SVGDocument
+from psd2svg.core.converter import Converter
 from tests.conftest import get_fixture
 
 SVG_NS = "{http://www.w3.org/2000/svg}"
@@ -291,3 +293,74 @@ class TestConversionParameters:
         assert filtered[0].get("mask")
         clipped = [node for node in svg.iter() if "clip-path" in node.attrib]
         assert clipped
+
+
+class TestClippingBaseDepth:
+    """Test the nesting depth accounted for a clipping base.
+
+    The fixture nests the clipping base three levels down::
+
+        Background
+        A
+          B
+            C        <- clipping base
+              D
+                Leaf
+            Clip     <- clipped to C
+
+    so `add_children` is entered for D at depth 4. The clipping base used to be
+    converted by a bare `add_layer(layer)` call that restarted the count at 0,
+    which capped the walk at depth 2 and let a PSD slip past `max_layer_depth`.
+    """
+
+    FIXTURE = "clipping/nested-group-with-clip.psd"
+
+    def test_clipping_base_is_converted_at_its_own_depth(self) -> None:
+        """Test that the clipping base keeps the depth it sits at.
+
+        Being a clipping base does not nest a layer any deeper, so it is
+        converted at the depth a plain sibling would be, neither restarted at
+        zero nor pushed a level down like the clip layers it carries.
+        """
+        psdimage = PSDImage.open(get_fixture(self.FIXTURE))
+        converter = Converter(psdimage)
+        base = next(layer for layer in psdimage.descendants() if layer.clip_layers)
+
+        depths: list[int] = []
+        add_layer = converter.add_layer
+
+        def record(
+            layer: layers.Layer, depth: int = 0, **attrib: str
+        ) -> ET.Element | None:
+            depths.append(depth)
+            return add_layer(layer, depth=depth, **attrib)
+
+        converter.add_layer = record  # type: ignore[method-assign]
+        with converter.add_clipping_target(base, depth=7):
+            pass
+
+        assert depths[0] == 7
+
+    @pytest.mark.parametrize("max_layer_depth", [3, 4])
+    def test_depth_limit_counts_through_a_clipping_base(
+        self, max_layer_depth: int
+    ) -> None:
+        """Test that the limit sees the layers nested under a clipping base.
+
+        Both limits are below the depth of 4 the fixture actually reaches, and
+        both used to convert without complaint.
+        """
+        psdimage = PSDImage.open(get_fixture(self.FIXTURE))
+        with pytest.raises(ValueError, match="exceeds limit"):
+            SVGDocument.from_psd(
+                psdimage,
+                resource_limits=ResourceLimits(max_layer_depth=max_layer_depth),
+            )
+
+    def test_depth_limit_above_the_nesting_still_converts(self) -> None:
+        """Test that the limit does not fire on a file that stays within it."""
+        psdimage = PSDImage.open(get_fixture(self.FIXTURE))
+        document = SVGDocument.from_psd(
+            psdimage, resource_limits=ResourceLimits(max_layer_depth=5)
+        )
+        assert document.tostring()

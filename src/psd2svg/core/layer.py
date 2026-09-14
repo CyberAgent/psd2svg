@@ -174,7 +174,7 @@ class LayerConverter(ConverterProtocol):
                 continue
 
             if layer.has_clip_layers(visible=True):
-                with self.add_clipping_target(layer) as attrib:
+                with self.add_clipping_target(layer, depth=depth) as attrib:
                     for clip_layer in layer.clip_layers:
                         self.add_layer(clip_layer, depth=depth + 1, **attrib)
             else:
@@ -356,15 +356,28 @@ class LayerConverter(ConverterProtocol):
             return node
 
     @contextlib.contextmanager
-    def add_clipping_target(self, layer: layers.Layer | layers.Group) -> Iterator[dict]:
-        """Context manager to handle clipping target."""
+    def add_clipping_target(
+        self, layer: layers.Layer | layers.Group, depth: int = 0
+    ) -> Iterator[dict]:
+        """Context manager to handle clipping target.
+
+        Args:
+            layer: The layer the clip layers are clipped to.
+            depth: Nesting depth of the clipping base, i.e. the depth of the
+                layer itself rather than of the clip layers it carries.
+
+        Yields:
+            Dictionary with the attribute to apply to the clipped elements.
+        """
         # NOTE: We decide between clip-path and mask based on content.
         # <clipPath> has bad interactions with <mask> in SVG renderers.
         if isinstance(layer, layers.ShapeLayer) and not layer.has_mask():
+            # NOTE: add_clip_path() builds the base with create_shape() instead
+            # of re-entering add_layer(), so it has no depth to keep track of.
             with self.add_clip_path(layer) as clip_attrib:
                 yield clip_attrib
         else:
-            with self.add_clip_mask(layer) as clip_attrib:
+            with self.add_clip_mask(layer, depth=depth) as clip_attrib:
                 yield clip_attrib
 
     @contextlib.contextmanager
@@ -376,7 +389,7 @@ class LayerConverter(ConverterProtocol):
             with self.add_clip_path(layer) as clip_attrib:
                 # Create elements inside the clipping mask.
                 for clip_layer in layer.clip_layers:
-                    self.add_layer(clip_layer, ..., **clip_attrib)
+                    self.add_layer(clip_layer, depth=depth + 1, **clip_attrib)
 
         Args:
             layer: The shape layer to use as a clipping path.
@@ -418,18 +431,23 @@ class LayerConverter(ConverterProtocol):
         self.apply_stroke_effect(layer, target)
 
     @contextlib.contextmanager
-    def add_clip_mask(self, layer: layers.Layer | layers.Group) -> Iterator[dict]:
+    def add_clip_mask(
+        self, layer: layers.Layer | layers.Group, depth: int = 0
+    ) -> Iterator[dict]:
         """Add a clipping mask and associated elements.
 
         Usage::
 
-            with self.add_clip_mask(layer) as clip_attrib:
+            with self.add_clip_mask(layer, depth=depth) as clip_attrib:
                 # Create elements inside the clipping mask.
                 for clip_layer in layer.clip_layers:
-                    self.add_layer(clip_layer, ..., **clip_attrib)
+                    self.add_layer(clip_layer, depth=depth + 1, **clip_attrib)
 
         Args:
             layer: The layer to use as a clipping mask.
+            depth: Nesting depth of the layer. Being a clipping base does not
+                nest the layer any deeper, so it is converted at the depth a
+                plain sibling would be.
 
         Yields:
             Dictionary with mask attribute to apply to clipped elements.
@@ -445,7 +463,7 @@ class LayerConverter(ConverterProtocol):
                 mask_type="alpha",
             )
         with self.set_current(mask):
-            target = self.add_layer(layer)
+            target = self.add_layer(layer, depth=depth)
             if target is None:
                 raise ValueError(
                     f"Failed to create clipping target for layer: '{layer.name}'"

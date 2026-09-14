@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Layer depth limit ignored everything under a clipping base** (#332)
+  - Deeply nested files slipped past `max_layer_depth` and now correctly raise,
+    which may call for a higher limit
+
 - **Fill and adjustment layers leaked a `depth` attribute** (#329)
   - Every fill and adjustment layer wrote the internal nesting depth into the
     output as an invalid `depth` attribute
