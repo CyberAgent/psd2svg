@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-09-14
+
 ### Fixed
 
 - **Layer depth limit ignored everything under a clipping base** (#332)
@@ -40,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pillow >= 12.3.0** (#309)
   - Resolves 13 Dependabot alerts, including heap out-of-bounds writes and an
     OS command injection in `WindowsViewer.get_command()`
+
+### Dependencies
+
+- Dependency and CI action bumps (psd-tools, tornado, actions/setup-python,
+  github/codeql-action)
 
 ## [0.12.0] - 2026-07-08
 
@@ -350,7 +357,8 @@ See [limitations.rst](https://psd2svg.readthedocs.io/en/latest/limitations.html)
 
 Previous releases - see git history for details.
 
-[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/CyberAgent/psd2svg/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/CyberAgent/psd2svg/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/CyberAgent/psd2svg/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/CyberAgent/psd2svg/compare/v0.10.0...v0.10.1
