@@ -93,6 +93,37 @@ class LayerConverter(ConverterProtocol):
         self, layer: layers.Group, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add a group layer to the svg document."""
+        fill_opacity = layer.tagged_blocks.get_data(Tag.BLEND_FILL_OPACITY, 255)
+
+        # Fill opacity applies to the group content but not to its effects, so
+        # when both are present the content has to be defined in <defs> and
+        # referenced by a separate <use> carrying the fill opacity. Effects then
+        # reference the definition and keep the original alpha.
+        if fill_opacity < 255 and layer.has_effects():
+            defs = self.create_node("defs")
+            node = self.create_node(
+                "g",
+                parent=defs,
+                class_=layer.kind,
+                title=layer.name,
+                id=self.auto_id("group"),
+                **attrib,  # type: ignore[arg-type]
+            )
+            with self.set_current(node):
+                self.add_children(layer, depth=depth + 1)
+
+            self.set_opacity(layer.opacity / 255, node)
+            # Reduced fill opacity makes a group composite on its own, so
+            # pass-through blending no longer applies to the content.
+            svg_utils.add_style(node, "isolation", "isolate")
+            node = self.apply_mask(layer, node)
+
+            self.apply_background_effects(layer, node, insert_before_target=False)
+            self.apply_raster_fill(layer, node)
+            self.apply_overlay_effects(layer, node)
+            self.apply_stroke_effect(layer, node)
+            return node
+
         node = self.create_node(
             "g",
             class_=layer.kind,
@@ -106,6 +137,8 @@ class LayerConverter(ConverterProtocol):
         self.apply_background_effects(layer, node, insert_before_target=True)
         self.apply_overlay_effects(layer, node)
         self.apply_stroke_effect(layer, node)
+        # Without effects, fill opacity and layer opacity simply multiply.
+        self.set_opacity(fill_opacity / 255, node)
         self.set_layer_attributes(layer, node)
         node = self.apply_mask(layer, node)
         return node
