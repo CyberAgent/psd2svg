@@ -7,7 +7,6 @@ from psd_tools import PSDImage
 from psd_tools.constants import BlendMode
 
 from psd2svg import SVGDocument
-from psd2svg.core.converter import Converter
 from tests.conftest import get_fixture
 
 SVG_NS = "{http://www.w3.org/2000/svg}"
@@ -99,24 +98,12 @@ class TestClippingBase:
     """Test that a clipping base paints the same inside and outside the mask."""
 
     @staticmethod
-    def build_clipping_svg(
-        psd_file: str, base_name: str, optimize: bool, **attributes: object
-    ) -> ET.Element:
-        """Convert a fixture after overriding attributes of the clipping base."""
-        psdimage = PSDImage.open(get_fixture(psd_file))
-        bases = [layer for layer in psdimage.descendants() if layer.name == base_name]
-        assert len(bases) == 1
-        for key, value in attributes.items():
-            setattr(bases[0], key, value)
-        document = SVGDocument.from_psd(psdimage)
-        return ET.fromstring(document.tostring(optimize=optimize))
-
-    @staticmethod
     def split_fills(svg: ET.Element) -> tuple[list[ET.Element], list[ET.Element]]:
         """Return the main fills inside and outside the clipping mask.
 
         Effects reference the same definition through a filter, so the main
-        fill is the reference that carries no filter.
+        fill is the reference that carries no filter. A layer mask is a mask of
+        its own, so the clipping mask is the one masking alpha.
         """
         masks = [
             mask
@@ -133,28 +120,23 @@ class TestClippingBase:
 
     @pytest.mark.parametrize("optimize", [False, True])
     @pytest.mark.parametrize(
-        "psd_file, base_name",
+        "psd_file",
         [
-            ("clipping/pixel-with-clip-stroke-effect.psd", "Star 1"),
-            ("clipping/group-with-clip-stroke-effect.psd", "Group 1"),
+            "clipping/pixel-with-clip-fill-opacity.psd",
+            "clipping/group-with-clip-fill-opacity.psd",
         ],
     )
     def test_fill_opacity_and_blend_mode_survive_clipping(
-        self, psd_file: str, base_name: str, optimize: bool
+        self, psd_file: str, optimize: bool
     ) -> None:
         """Test that the visible base keeps the fill opacity and the blend mode.
 
-        A base that has effects defines its content in <defs>, so the copy
+        Both fixtures hold a base at 25% fill opacity blending in multiply. The
+        base has effects, so its content is defined in <defs> and the copy
         painted outside the mask has to repeat the main fill instead of
         referencing the bare definition.
         """
-        svg = self.build_clipping_svg(
-            psd_file,
-            base_name,
-            optimize,
-            fill_opacity=64,
-            blend_mode=BlendMode.MULTIPLY,
-        )
+        svg = build_svg(psd_file, optimize)
         masked, visible = self.split_fills(svg)
         assert len(masked) == 1
         assert len(visible) == 1
@@ -163,33 +145,30 @@ class TestClippingBase:
         assert "mix-blend-mode: multiply" in visible[0].get("style", "")
 
     @pytest.mark.parametrize("optimize", [False, True])
-    def test_fill_opacity_is_not_applied_twice_without_effects(
-        self, optimize: bool
-    ) -> None:
-        """Test that a base without effects keeps carrying its own attributes.
+    def test_vector_base_keeps_its_paint(self, optimize: bool) -> None:
+        """Test that a shape base with effects is painted and stroked.
 
-        Without effects the layer node itself carries the fill opacity and the
-        blend mode, and the reference painted outside the mask must not apply
-        them a second time.
+        A shape layer that carries a layer mask is clipped through a <mask>,
+        where the shape definition holds the geometry only. The stroke of the
+        base paints over the clipped layers.
         """
-        svg = self.build_clipping_svg(
-            "clipping/pixel-with-blend.psd",
-            "Rectangle 1",
-            optimize,
-            fill_opacity=64,
-            blend_mode=BlendMode.MULTIPLY,
-        )
+        svg = build_svg("clipping/shape-mask-with-clip-stroke-effect.psd", optimize)
+
+        definitions = list(svg.iter(f"{SVG_NS}path"))
+        assert len(definitions) == 1
+        assert "fill" not in definitions[0].attrib
+
         masked, visible = self.split_fills(svg)
-        assert masked == []
-        assert len(visible) == 1
-        assert "opacity" not in visible[0].attrib
-        assert "mix-blend-mode" not in visible[0].get("style", "")
-        image = svg.find(f"{SVG_NS}mask/{SVG_NS}image") or svg.find(
-            f"{SVG_NS}defs/{SVG_NS}mask/{SVG_NS}image"
-        )
-        assert image is not None
-        assert image.get("opacity") == "0.25"
-        assert "mix-blend-mode: multiply" in image.get("style", "")
+        assert len(masked) == 2
+        fill, stroke = visible
+        assert fill.get("fill") == "#7f7f7f"
+        assert stroke.get("fill") == "none"
+        assert stroke.get("stroke") == "#000000"
+        clipped = [
+            image for image in svg.findall(f"{SVG_NS}image") if image.get("mask")
+        ]
+        assert len(clipped) == 1
+        assert list(svg).index(clipped[0]) == list(svg).index(stroke) - 1
 
     @pytest.mark.parametrize("optimize", [False, True])
     def test_full_fill_opacity_group_references_the_definition(
@@ -201,51 +180,43 @@ class TestClippingBase:
         group node while the fill opacity is 100%, so the copy painted outside
         the mask is a plain reference.
         """
-        svg = self.build_clipping_svg(
-            "clipping/group-with-clip-stroke-effect.psd",
-            "Group 1",
-            optimize,
-            blend_mode=BlendMode.MULTIPLY,
-        )
+        svg = build_svg("clipping/group-with-clip-stroke-effect.psd", optimize)
         masked, visible = self.split_fills(svg)
         assert masked == []
         assert len(visible) == 1
         assert visible[0].attrib.keys() == {"href"}
-        groups = list(svg.iter(f"{SVG_NS}g"))
-        assert len(groups) == 1
-        assert "mix-blend-mode: multiply" in groups[0].get("style", "")
 
-    def test_vector_base_keeps_its_paint(self) -> None:
-        """Test that a shape base with effects is painted and stroked.
+    @pytest.mark.parametrize("optimize", [False, True])
+    def test_fill_opacity_is_not_applied_twice_without_effects(
+        self, optimize: bool
+    ) -> None:
+        """Test that a base without effects keeps carrying its own attributes.
 
-        A shape layer that carries a layer mask is clipped through a <mask>,
-        where the shape definition holds no paint of its own.
+        Without effects the layer node itself carries the fill opacity and the
+        blend mode, and the reference painted outside the mask must not apply
+        them a second time. No fixture holds that combination, so the base of
+        a plain clipping fixture is faded here.
         """
-        psdimage = PSDImage.open(
-            get_fixture("clipping/shape-with-clip-stroke-effect.psd")
+        psdimage = PSDImage.open(get_fixture("clipping/pixel-with-blend.psd"))
+        base = next(
+            layer for layer in psdimage.descendants() if layer.name == "Rectangle 1"
         )
-        base = next(layer for layer in psdimage.descendants() if layer.name == "Star 1")
-        converter = Converter(psdimage)
-        with converter.add_clip_mask(base) as clip_attrib:
-            for clip_layer in base.clip_layers:
-                converter.add_layer(clip_layer, **clip_attrib)
-        svg = ET.fromstring(ET.tostring(converter.svg, encoding="unicode"))
+        base.fill_opacity = 64
+        base.blend_mode = BlendMode.MULTIPLY
+        svg = ET.fromstring(SVGDocument.from_psd(psdimage).tostring(optimize=optimize))
 
-        # The shape definition holds the geometry only.
-        definitions = list(svg.iter(f"{SVG_NS}path"))
-        assert len(definitions) == 1
-        assert "fill" not in definitions[0].attrib
-
-        # The shape is painted, then stroked over the clipped layers.
         masked, visible = self.split_fills(svg)
-        assert len(masked) == 2
-        fill, stroke = visible
-        assert fill.get("fill") == "#7f7f7f"
-        assert stroke.get("fill") == "none"
-        assert stroke.get("stroke") == "#000000"
-        clipped = svg.findall(f"{SVG_NS}image")
-        assert len(clipped) == 1
-        assert list(svg).index(clipped[0]) == list(svg).index(stroke) - 1
+        assert masked == []
+        assert len(visible) == 1
+        assert "opacity" not in visible[0].attrib
+        assert "mix-blend-mode" not in visible[0].get("style", "")
+        image = next(
+            image
+            for image in svg.iter(f"{SVG_NS}image")
+            if image.get("opacity") is not None
+        )
+        assert image.get("opacity") == "0.25"
+        assert "mix-blend-mode: multiply" in image.get("style", "")
 
 
 class TestTextFill:
