@@ -207,10 +207,11 @@ context manager that yields the attribute the clipped layers carry:
                 self.add_layer(layer, depth=depth)
 
 ``add_clipping_target()`` opens the clip section before it yields and closes it
-afterwards, dispatching to ``add_clip_path()`` for a shape target without a
-mask and to ``add_clip_mask()`` otherwise. The clipping base itself is
-converted at ``depth``, the same depth a plain sibling gets, while the clip
-layers it carries are counted one level deeper.
+afterwards, and the clip layers it yields to are counted one level deeper than
+the base. A shape target without a mask goes to ``add_clip_path()``, which
+builds the base with ``create_shape()`` and so has no nesting of its own to
+account for. Everything else goes to ``add_clip_mask()``, which converts the
+base at ``depth``, the same depth a plain sibling gets.
 
 Overlay Filter Effects
 -----------------------
