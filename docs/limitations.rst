@@ -440,13 +440,13 @@ psd2svg therefore encodes the scaling in the ``font-size`` and in a transform on
 
 * **Uniform scaling** (``horizontal_scale == vertical_scale``) is applied to ``font-size`` and renders exactly.
 * **Non-uniform scaling shared by the whole text layer** is applied as a transform on the ``<text>`` element, anchored at the text origin so that alignment is preserved. This renders exactly as well.
-* **Non-uniform scaling of individual spans** cannot be applied to the ``<text>`` element, because the spans disagree. The ``font-size`` then carries the scale of the writing direction's inline axis (``horizontal_scale`` for horizontal text, ``vertical_scale`` for vertical text), and the remaining cross-axis scale is emitted as a ``transform`` on the ``<tspan>`` for SVG 2.0 renderers.
+* **Non-uniform scaling of individual spans** cannot be applied to the ``<text>`` element, because the spans disagree. The ``font-size`` then carries the scale of the writing direction's inline axis (``horizontal_scale`` for horizontal text, ``vertical_scale`` for vertical text), and the remaining cross-axis scale is emitted as a ``transform`` on the ``<tspan>`` for SVG 2.0 renderers. When a paragraph holds a single span, that transform is optimized onto the ``<text>`` element, where it does render.
 
 **Impact:**
 
-Only the last case is approximate. Glyph advance widths, the position of the following characters and center/right alignment all match Photoshop, but renderers that ignore ``transform`` on ``<tspan>`` draw the run without the cross-axis scaling: glyphs of a horizontally scaled run are as tall as they are wide, and a vertically scaled run keeps its original height. A warning is logged during conversion.
+Only the last case is approximate, and only where the residual transform stays on the ``<tspan>``. Glyph advance widths, the position of the following characters and center/right alignment all match Photoshop, but renderers that ignore ``transform`` on ``<tspan>`` draw the run without the cross-axis scaling: glyphs of a horizontally scaled run are as tall as they are wide, and a vertically scaled run keeps its original height. A warning is logged during conversion.
 
-The per-span fallback is also used when the ``<text>`` element cannot carry the scale: warped text (``<textPath>``, where the transform would distort the warp path), Justify All paragraphs (where the transform would stretch the ``textLength``), paragraphs that do not share a text anchor, and multi-paragraph vertical text.
+The per-span fallback is also used when the ``<text>`` element cannot carry the scale: warped text (``<textPath>``, where the transform would distort the warp path), Justify All paragraphs (where the transform would stretch the ``textLength``, and where ``lengthAdjust`` squeezes the scaled glyphs back to that length anyway), paragraphs whose anchor points differ, and multi-paragraph vertical text.
 
 Scaling the ``<text>`` element also scales the stroke width of stroked text and the geometry of layer effects, as any transform does.
 

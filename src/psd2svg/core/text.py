@@ -94,7 +94,7 @@ def _common_span_scale(paragraphs: list[Paragraph]) -> tuple[float, float] | Non
         (span.style.horizontal_scale, span.style.vertical_scale)
         for paragraph in paragraphs
         for span in paragraph
-        if span.text.strip()
+        if span.text.strip("\r")
     }
     if len(scales) != 1:
         return None
@@ -268,13 +268,17 @@ class TextConverter(ConverterProtocol):
 
         # Non-uniform scaling shared by every span is applied to the <text> element,
         # where transforms are honored by all renderers.
-        text_scale_applied = self._apply_text_element_scaling(
+        text_element_scale = self._apply_text_element_scaling(
             text_setting, text_node, paragraphs, uses_native_positioning
         )
 
         container_node = text_node
         if text_setting.has_warp():
             container_node = self._create_text_path_node(text_setting, text_node)
+
+        # Paragraphs after the first are offset with dy, so their baseline has to be
+        # accumulated to anchor per-span transforms.
+        paragraph_offset = 0.0
 
         with self.set_current(container_node):
             for i, paragraph in enumerate(paragraphs):
@@ -284,12 +288,22 @@ class TextConverter(ConverterProtocol):
                     first_paragraph=(i == 0),
                     uses_native_positioning=uses_native_positioning,
                 )
+                origin_x, origin_y, _ = self._compute_paragraph_position(
+                    text_setting, paragraph.get_text_anchor()
+                )
+                if uses_native_positioning:
+                    origin_x += transform.tx
+                    origin_y += transform.ty
+                if i > 0:
+                    paragraph_offset += paragraph.compute_leading()
+                origin_y += paragraph_offset
                 for span in paragraph:
                     self._add_text_span(
                         text_setting,
                         paragraph_node,
                         span,
-                        text_scale_applied=text_scale_applied,
+                        paragraph_origin=(origin_x, origin_y),
+                        text_element_scale=text_element_scale,
                     )
 
         if text_setting.has_warp():
@@ -320,7 +334,7 @@ class TextConverter(ConverterProtocol):
         text_node: ET.Element,
         paragraphs: list[Paragraph],
         uses_native_positioning: bool,
-    ) -> bool:
+    ) -> float | None:
         """Apply layer-wide non-uniform text scaling to the <text> element.
 
         When every span shares the same non-uniform scale, the scaling can be
@@ -341,34 +355,38 @@ class TextConverter(ConverterProtocol):
             uses_native_positioning: Whether native x/y positioning is used.
 
         Returns:
-            True when the scaling was applied to the ``<text>`` element, meaning
-            spans must only carry the cross-axis scale in their font-size.
+            The inline-axis scale factor applied to the ``<text>`` element, meaning
+            spans must only carry the cross-axis scale in their font-size, or None
+            when the scaling has to stay on the spans.
         """
         # Warped text is laid out along a <textPath>; scaling the <text> element
         # would distort the warp path itself.
         if text_setting.has_warp():
-            return False
+            return None
 
         scale = _common_span_scale(paragraphs)
         if scale is None:
-            return False
+            return None
 
         # Justify All sets textLength on the paragraph, which the scale would stretch.
         if any(
             paragraph.justification == Justification.JUSTIFY_ALL
             for paragraph in paragraphs
         ):
-            return False
+            return None
 
         is_horizontal = text_setting.writing_direction == WritingDirection.HORIZONTAL_TB
 
         # Line offsets are always emitted as dy, even for vertical text, so scaling
         # the vertical axis of a multi-paragraph layer would stretch the leading.
         if not is_horizontal and len(paragraphs) > 1:
-            return False
+            return None
 
         # The transform is anchored at a single point, so every paragraph must share
-        # the same anchor on the inline axis (paragraphs may differ in justification).
+        # the same anchor position on the inline axis. Comparing positions rather
+        # than justification is deliberate: scaling about a shared anchor is exact
+        # for "start", "middle" and "end" alike, so point text keeps the exact path
+        # even when its paragraphs are justified differently.
         anchors = {
             self._compute_paragraph_position(text_setting, paragraph.get_text_anchor())[
                 0 if is_horizontal else 1
@@ -376,7 +394,7 @@ class TextConverter(ConverterProtocol):
             for paragraph in paragraphs
         }
         if len(anchors) != 1:
-            return False
+            return None
 
         horizontal_scale, vertical_scale = scale
         x, y, _ = self._compute_paragraph_position(
@@ -395,7 +413,7 @@ class TextConverter(ConverterProtocol):
         svg_utils.append_attribute(
             text_node, "transform", _scale_about(inline_scale, (x, y))
         )
-        return True
+        return inline_scale[0] if is_horizontal else inline_scale[1]
 
     def _create_foreign_object_text(self, text_setting: TypeSetting) -> ET.Element:
         """Create <foreignObject> with XHTML content for text wrapping.
@@ -619,7 +637,8 @@ class TextConverter(ConverterProtocol):
         text_setting: TypeSetting,
         paragraph_node: ET.Element,
         span: Span,
-        text_scale_applied: bool = False,
+        paragraph_origin: tuple[float, float] = (0.0, 0.0),
+        text_element_scale: float | None = None,
     ) -> ET.Element:
         """Add a text span to the paragraph node.
 
@@ -627,9 +646,10 @@ class TextConverter(ConverterProtocol):
             text_setting: Type setting object with writing direction and metrics.
             paragraph_node: Parent paragraph tspan.
             span: Style span to render.
-            text_scale_applied: Whether the inline-axis scale is already applied to
-                the parent ``<text>`` element by
-                :meth:`_apply_text_element_scaling`.
+            paragraph_origin: Absolute position of the paragraph, used to anchor
+                per-span transforms.
+            text_element_scale: Inline-axis scale already applied to the parent
+                ``<text>`` element by :meth:`_apply_text_element_scaling`, if any.
         """
         style = span.style
         # Get PostScript name from font index - no font resolution needed
@@ -641,7 +661,7 @@ class TextConverter(ConverterProtocol):
             style.horizontal_scale,
             style.vertical_scale,
             text_setting.writing_direction,
-            text_scale_applied=text_scale_applied,
+            text_scale_applied=text_element_scale is not None,
         )
         scaled_font_size = scaling.font_size
 
@@ -736,9 +756,12 @@ class TextConverter(ConverterProtocol):
         # letter-spacing applies after the character.
         letter_spacing = style.tracking / 1000 * scaled_font_size
         letter_spacing -= style.tsume / 10 * scaled_font_size  # Tsume tightens spacing
-        # NOTE: The offset is an absolute value in pixels, so it is scaled along with
-        # the text when the scale lives on the <text> element.
-        letter_spacing += self.text_letter_spacing_offset
+        # NOTE: Unlike tracking and tsume, the offset is an absolute value in pixels,
+        # so it is divided by the scale of the <text> element to keep it absolute.
+        if text_element_scale is not None:
+            letter_spacing += self.text_letter_spacing_offset / text_element_scale
+        else:
+            letter_spacing += self.text_letter_spacing_offset
 
         # Only set letter-spacing if non-zero (or if offset makes it non-zero)
         if letter_spacing != 0:
@@ -776,19 +799,13 @@ class TextConverter(ConverterProtocol):
             )
 
             # Anchor the scale at the paragraph position so that it does not shift
-            # the text. The paragraph position is unknown for paragraphs positioned
-            # with dy, in which case the scale falls back to the default origin.
-            parent_x = paragraph_node.attrib.get("x")
-            parent_y = paragraph_node.attrib.get("y")
-            origin = (
-                (float(parent_x), float(parent_y))
-                if parent_x is not None and parent_y is not None
-                else (0.0, 0.0)
-            )
+            # the text. The optimizer may move this transform up to the <text>
+            # element when the paragraph holds a single span, where renderers do
+            # honor it; the anchor keeps that promotion correct.
             svg_utils.append_attribute(
                 tspan,
                 "transform",
-                _scale_about(scaling.transform_scale, origin),
+                _scale_about(scaling.transform_scale, paragraph_origin),
             )
 
         if (
@@ -868,6 +885,8 @@ class TextConverter(ConverterProtocol):
             inline_scale, cross_scale = horizontal_scale, vertical_scale
         else:
             inline_scale, cross_scale = vertical_scale, horizontal_scale
+        # NOTE: This is the size seen by a renderer that drops the residual
+        # transform. A renderer that honors it scales the baseline shift as well.
         baseline_size = font_size * cross_scale
 
         if text_scale_applied:

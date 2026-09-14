@@ -804,11 +804,21 @@ def test_text_style_scale_mixed_anchors_falls_back_to_spans(
     assert svg.find(".//text[@transform]") is None, (
         "Scale should not be anchored at a single point for mixed anchors"
     )
+    text = svg.find(".//text")
+    assert text is not None
+    # The horizontal scale still lives in the font-size, keeping advance widths
+    assert float(text.attrib["font-size"]) == pytest.approx(64.0)
+
     tspans = svg.findall(".//text/tspan")
     assert len(tspans) == 3
+    baseline = float(tspans[0].attrib["y"])
     for tspan in tspans:
-        # The horizontal scale still lives in the font-size, keeping advance widths
+        baseline += float(tspan.attrib.get("dy", 0.0))
         assert _parse_scale(tspan.attrib["transform"]) == pytest.approx((1.0, 0.5))
+        # Each residual is anchored at its own paragraph baseline
+        assert _parse_translate(tspan.attrib["transform"]) == pytest.approx(
+            (0.0, baseline * 0.5), abs=0.01
+        )
 
 
 def test_text_style_scale_justify_all_falls_back_to_spans(
@@ -862,6 +872,72 @@ def test_common_span_scale_ignores_paragraph_breaks() -> None:
     # A visible run with a different scale still forces the per-span fallback
     paragraphs[1].spans[0] = Span(6, 11, "Ipsum", default)
     assert _common_span_scale(paragraphs) is None
+
+
+def test_text_style_scale_vertical_writing_direction_layer_wide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test layer-wide scaling of vertical text, whose inline axis is vertical."""
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    svg = convert_psd_to_svg(
+        "texts/shapetype0-writingdirection2-baselinedirection2-justification0.psd"
+    )
+
+    text = svg.find(".//text[@transform]")
+    assert text is not None, "Layer-wide scale should be on the text element"
+    assert text.attrib.get("writing-mode") == "vertical-rl"
+    assert svg.find(".//tspan[@transform]") is None
+
+    # font-size carries the cross (horizontal) axis for vertical text
+    assert float(text.attrib["font-size"]) == pytest.approx(64.0)
+
+    # The inline (vertical) axis is scaled about the text origin: scale(1, v/h)
+    y = float(text.attrib["y"])
+    assert _parse_scale(text.attrib["transform"]) == pytest.approx((1.0, 0.5))
+    assert _parse_translate(text.attrib["transform"]) == pytest.approx(
+        (0.0, y * 0.5), abs=0.01
+    )
+
+
+def test_text_style_scale_warp_falls_back_to_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test the fallback for warped text, laid out along a <textPath>.
+
+    Scaling the <text> element would distort the warp path itself.
+    """
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    svg = convert_psd_to_svg("texts/text-warp-arc-h+50.psd")
+
+    text = svg.find(".//text")
+    assert text is not None
+    assert "scale" not in text.attrib.get("transform", ""), (
+        "Warped text should not be scaled as a whole"
+    )
+    tspan = svg.find(".//textPath/tspan")
+    assert tspan is not None
+    # The horizontal scale lives in the font-size, keeping the advance along the path
+    assert float(tspan.attrib["font-size"]) == pytest.approx(64.0)
+    assert _parse_scale(tspan.attrib["transform"]) == pytest.approx((1.0, 0.5))
+
+
+def test_text_style_scale_foreign_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that the foreignObject output scales the font-size as well.
+
+    CSS transforms do not affect layout either, so the inline axis has to be in the
+    font-size for the advance widths to be right.
+    """
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-space-after.psd"))
+    converter = Converter(psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT)
+    converter.build()
+
+    spans = converter.svg.findall(".//{http://www.w3.org/1999/xhtml}span")
+    assert spans, "Should have xhtml spans"
+    for span in spans:
+        style = span.attrib["style"]
+        assert "font-size: 64px" in style, f"Unexpected styles: {style}"
+        assert "transform: scale(1, 0.5)" in style, f"Unexpected styles: {style}"
 
 
 def test_text_style_scale_vertical_writing_direction() -> None:
