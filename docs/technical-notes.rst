@@ -243,6 +243,67 @@ For simple overlays, this is equivalent to using a mask with fill.
     <rect color="green" alpha="0.5" mask="url(#mask_0)">
     <rect color="red" alpha="0.5" mask="url(#mask_0)">
 
+Blend Modes Without a CSS Equivalent
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Divide, Subtract, Linear Burn and Linear Dodge have no usable ``mix-blend-mode``.
+Photoshop's separable blend functions, however, relate each of them to an operation
+SVG does support, applied to a rewritten blend layer::
+
+    Divide(b, s)      = min(1, b / s)      = ColorDodge(b, 1 - s)
+    Subtract(b, s)    = max(0, b - s)      = LinearBurn(b, 1 - s)
+    LinearBurn(b, s)  = max(0, b + s - 1)
+    LinearDodge(b, s) = min(1, b + s)
+
+An overlay effect already synthesizes its blend layer inside the filter, so it can be
+rewritten there. Divide inverts the fill and blends with ``color-dodge``:
+
+.. code-block:: xml
+
+    <filter id="gradientoverlay" color-interpolation-filters="sRGB">
+      <feImage href="#gradientfill" />
+      <feComponentTransfer>
+        <feFuncR type="table" tableValues="1 0" />
+        <feFuncG type="table" tableValues="1 0" />
+        <feFuncB type="table" tableValues="1 0" />
+      </feComponentTransfer>
+      <feComposite in2="SourceAlpha" operator="in" />
+    </filter>
+    <use href="#image" filter="url(#gradientoverlay)" style="mix-blend-mode: color-dodge" />
+
+The three sums instead evaluate ``b + s + k4`` with ``feComposite`` and drop
+``mix-blend-mode`` altogether. Linear Burn and Linear Dodge use ``k4="-1"`` and
+``k4="0"``; Subtract is Linear Burn with the fill inverted first:
+
+.. code-block:: xml
+
+    <filter id="gradientoverlay" color-interpolation-filters="sRGB">
+      <feImage href="#gradientfill" result="fill" />
+      <feComponentTransfer in="SourceGraphic" result="opaque">
+        <feFuncA type="table" tableValues="1 1" />
+      </feComponentTransfer>
+      <feComposite in="fill" in2="opaque" operator="arithmetic" k1="0" k2="1" k3="1" k4="-1" />
+      <feComposite in2="SourceAlpha" operator="in" />
+    </filter>
+
+The detour through ``opaque`` is what makes this correct for semi-transparent
+layers. ``feComposite operator="arithmetic"`` works on premultiplied values, so a
+layer of alpha ``a`` enters the sum as ``a·b`` and yields ``a·b + s + k4`` where the
+right answer is ``a·(b + s + k4)`` — the constant cannot be scaled by ``a``. Forcing
+the layer opaque with ``feFuncA`` (``feComponentTransfer`` operates on
+*un*-premultiplied values) runs the sum at ``a = 1``, and the trailing
+``feComposite in2="SourceAlpha" operator="in"`` puts the alpha back. Without it, a
+layer at 50% opacity under a Linear Burn overlay renders 102 where Photoshop's
+effect gives 115.
+
+``color-interpolation-filters="sRGB"`` is required. The SVG default is ``linearRGB``,
+and inverting or summing in linear space gives the wrong numbers.
+
+This route only applies where the blend layer exists inside a filter. A layer-level
+Divide or Subtract, and a shape layer's overlay effect (which paints a plain ``fill``
+instead of a filter), still use the approximations in
+:doc:`limitations`.
+
 Stroke Overlays
 ~~~~~~~~~~~~~~~
 

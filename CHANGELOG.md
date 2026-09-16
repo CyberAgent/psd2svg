@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Divide and Subtract blend modes rendered as `difference`, inverting colors** (#339)
+  - Divide, Subtract, Linear Burn and Linear Dodge are now exact on Color,
+    Gradient and Pattern Overlay effects
+
 ## [0.12.1] - 2026-09-14
 
 ### Fixed

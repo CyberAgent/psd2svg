@@ -82,17 +82,26 @@ SVG 1.1 does not support all Photoshop blending modes. Some blending modes have 
 * Dissolve
 * Darker Color
 * Lighter Color
-* Linear Dodge
-* Linear Burn
 * Vivid Light
 * Linear Light
 * Pin Light
 * Hard Mix
-* Subtract
-* Divide
 
-Linear Dodge is converted to ``plus-darker`` and Linear Burn to ``plus-lighter``.
+Linear Burn is converted to ``plus-darker`` and Linear Dodge to ``plus-lighter``.
 However, majority of SVG renderers do not support these modes.
+
+**Exact only on layer effects:**
+
+Divide, Subtract, Linear Burn and Linear Dodge are reproduced exactly on Color,
+Gradient and Pattern Overlay effects, which synthesize their blend layer inside an
+SVG filter and so can be rewritten there.
+
+Everywhere else -- as a layer blending mode, or on a shape layer's overlay effect,
+which paints a plain ``fill`` rather than a filter -- they fall back to
+approximations and emit a warning. Divide and Subtract are approximated with
+``difference``, which inverts colors rather than approximating them; Linear Burn and
+Linear Dodge use ``plus-darker`` and ``plus-lighter`` as above. Flattening those
+layers in Photoshop is the reliable workaround.
 
 **Partially supported:**
 

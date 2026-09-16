@@ -12,6 +12,7 @@ from psd_tools.terminology import Enum, Key, Klass, Unit
 from psd2svg import svg_utils
 from psd2svg.core import color_utils
 from psd2svg.core.base import ConverterProtocol
+from psd2svg.core.constants import FILTER_BLEND_MODES
 from psd2svg.core.gradient import GradientInterpolation
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,61 @@ class EffectConverter(ConverterProtocol):
         self.apply_satin_effect(layer, target)
         self.apply_bevel_emboss_effect(layer, target)
 
+    def composite_overlay_fill(
+        self, psd_mode: bytes, filter: ET.Element, use: ET.Element
+    ) -> None:
+        """Composite a synthesised overlay fill onto the layer it decorates.
+
+        ``filter`` must end with the primitive that produced the fill. Usually the
+        fill is just clipped to the layer alpha and ``mix-blend-mode`` on ``use`` does
+        the blending. The modes in :data:`FILTER_BLEND_MODES` have no
+        ``mix-blend-mode`` equivalent, so those are rewritten into an exact form here
+        instead.
+        """
+        recipe = FILTER_BLEND_MODES.get(psd_mode)
+        if recipe is None:
+            with self.set_current(filter):
+                self.create_node("feComposite", in2="SourceAlpha", operator="in")
+            self.set_blend_mode(psd_mode, use)
+            return
+
+        # Inverting and summing must happen on sRGB values; the filter default is
+        # linearRGB, which gives the wrong numbers.
+        svg_utils.set_attribute(filter, "color-interpolation-filters", "sRGB")
+        fill = filter[-1]
+        with self.set_current(filter):
+            if recipe.invert:
+                fill = self.create_node("feComponentTransfer")
+                with self.set_current(fill):
+                    for channel in ("feFuncR", "feFuncG", "feFuncB"):
+                        self.create_node(channel, type="table", tableValues="1 0")
+            if recipe.css_mode is not None:
+                self.create_node("feComposite", in2="SourceAlpha", operator="in")
+                svg_utils.add_style(use, "mix-blend-mode", recipe.css_mode)
+                return
+
+            # feComposite arithmetic works on premultiplied values, where the
+            # constant offset cannot be scaled by the layer alpha. Sum against an
+            # opaque copy of the layer and re-apply the alpha afterwards, so that
+            # semi-transparent layers blend correctly too.
+            svg_utils.set_attribute(fill, "result", "fill")
+            opaque = self.create_node(
+                "feComponentTransfer", in_="SourceGraphic", result="opaque"
+            )
+            with self.set_current(opaque):
+                self.create_node("feFuncA", type="table", tableValues="1 1")
+            self.create_node(
+                "feComposite",
+                in_="fill",
+                in2="opaque",
+                operator="arithmetic",
+                k1=0,
+                k2=1,
+                k3=1,
+                k4=recipe.offset,
+            )
+            self.create_node("feComposite", in2="SourceAlpha", operator="in")
+
     def apply_color_overlay_effect(
         self, layer: layers.Layer, target: ET.Element
     ) -> None:
@@ -54,8 +110,6 @@ class EffectConverter(ConverterProtocol):
             else:
                 use = self.add_raster_color_overlay_effect(effect, target)
 
-            if effect.blend_mode != Enum.Normal:
-                self.set_blend_mode(effect.blend_mode, use)
             if effect.opacity != 100.0:
                 self.set_opacity(effect.opacity / 100.0, use)
 
@@ -72,29 +126,27 @@ class EffectConverter(ConverterProtocol):
                 "feFlood",
                 flood_color=color_utils.descriptor2hex(effect.color),
             )
-            self.create_node(
-                "feComposite",
-                operator="in",
-                in2="SourceAlpha",
-            )
         use = self.create_node(
             "use",
             href=svg_utils.get_uri(target),
             filter=svg_utils.get_funciri(filter),
             class_="color-overlay-effect",
         )
+        self.composite_overlay_fill(effect.blend_mode, filter, use)
         return use
 
     def add_vector_color_overlay_effect(
         self, effect: effects.ColorOverlay, target: ET.Element
     ) -> ET.Element:
         """Add a color overlay effect to the current element using vector path."""
-        return self.create_node(
+        use = self.create_node(
             "use",
             class_="color-overlay-effect",
             href=svg_utils.get_uri(target),
             fill=color_utils.descriptor2hex(effect.color),
         )
+        self.set_blend_mode(effect.blend_mode, use)
+        return use
 
     def apply_stroke_effect(self, layer: layers.Layer, target: ET.Element) -> None:
         """Apply stroke effects to the target element."""
@@ -460,12 +512,10 @@ class EffectConverter(ConverterProtocol):
             self.set_gradient_transform(layer, gradient, effect)
 
             if isinstance(layer, layers.ShapeLayer):
-                use = self.add_vector_gradient_overlay_effect(gradient, target)
+                use = self.add_vector_gradient_overlay_effect(gradient, target, effect)
             else:
                 use = self.add_raster_gradient_overlay_effect(gradient, target, effect)
 
-            if effect.blend_mode != Enum.Normal:
-                self.set_blend_mode(effect.blend_mode, use)
             if effect.opacity != 100.0:
                 self.set_opacity(effect.opacity / 100.0, use)
 
@@ -521,29 +571,27 @@ class EffectConverter(ConverterProtocol):
                 "feImage",
                 href=svg_utils.get_uri(rect),
             )
-            self.create_node(
-                "feComposite",
-                in2="SourceAlpha",
-                operator="in",
-            )
         use = self.create_node(
             "use",
             href=svg_utils.get_uri(target),
             filter=svg_utils.get_funciri(filter),
             class_="gradient-overlay-effect",
         )
+        self.composite_overlay_fill(effect.blend_mode, filter, use)
         return use
 
     def add_vector_gradient_overlay_effect(
-        self, gradient: ET.Element, target: ET.Element
+        self, gradient: ET.Element, target: ET.Element, effect: effects.GradientOverlay
     ) -> ET.Element:
-        return self.create_node(
+        use = self.create_node(
             "use",
             parent=self.current,
             class_="gradient-overlay-effect",
             href=svg_utils.get_uri(target),
             fill=svg_utils.get_funciri(gradient),
         )
+        self.set_blend_mode(effect.blend_mode, use)
+        return use
 
     def set_gradient_transform(
         self,
@@ -653,17 +701,15 @@ class EffectConverter(ConverterProtocol):
             self.set_pattern_effect_transform(pattern, effect, reference)
 
             if isinstance(layer, layers.ShapeLayer):
-                use = self.add_vector_pattern_overlay_effect(pattern, target)
+                use = self.add_vector_pattern_overlay_effect(pattern, target, effect)
             else:
-                use = self.add_raster_pattern_overlay_effect(pattern, target)
+                use = self.add_raster_pattern_overlay_effect(pattern, target, effect)
 
-            if effect.blend_mode != Enum.Normal:
-                self.set_blend_mode(effect.blend_mode, use)
             if effect.opacity != 100.0:
                 self.set_opacity(effect.opacity / 100.0, use)
 
     def add_raster_pattern_overlay_effect(
-        self, pattern: ET.Element, target: ET.Element
+        self, pattern: ET.Element, target: ET.Element, effect: effects.PatternOverlay
     ) -> ET.Element:
         # feFlood does not support fill with pattern, so we use feImage and feComposite.
         defs = self.create_node("defs")
@@ -698,29 +744,27 @@ class EffectConverter(ConverterProtocol):
                 "feImage",
                 href=svg_utils.get_uri(rect),
             )
-            self.create_node(
-                "feComposite",
-                in2="SourceAlpha",
-                operator="in",
-            )
         use = self.create_node(
             "use",
             href=svg_utils.get_uri(target),
             filter=svg_utils.get_funciri(filter),
             class_="pattern-overlay-effect",
         )
+        self.composite_overlay_fill(effect.blend_mode, filter, use)
         return use
 
     def add_vector_pattern_overlay_effect(
-        self, pattern: ET.Element, target: ET.Element
+        self, pattern: ET.Element, target: ET.Element, effect: effects.PatternOverlay
     ) -> ET.Element:
-        return self.create_node(
+        use = self.create_node(
             "use",
             parent=self.current,
             class_="pattern-overlay-effect",
             href=svg_utils.get_uri(target),
             fill=svg_utils.get_funciri(pattern),
         )
+        self.set_blend_mode(effect.blend_mode, use)
+        return use
 
     def set_pattern_effect_transform(
         self,

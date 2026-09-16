@@ -6,11 +6,14 @@ from unittest.mock import Mock
 from xml.etree import ElementTree as ET
 
 import pytest
+from psd_tools import PSDImage
 from psd_tools.constants import BlendMode
 from psd_tools.terminology import Enum
 
+from psd2svg import SVGDocument
 from psd2svg.core.constants import BLEND_MODE, INACCURATE_BLEND_MODES
 from psd2svg.core.layer import LayerConverter
+from tests.conftest import get_fixture
 
 
 class TestBlendModeWarnings:
@@ -309,3 +312,94 @@ class TestDescriptorBlendModes:
         node = ET.Element("g")
         converter.set_blend_mode(b"multiply", node)
         assert "mix-blend-mode: multiply" in node.attrib["style"]
+
+
+class TestFilterBlendModes:
+    """Test the exact filter route for blend modes CSS cannot express."""
+
+    @staticmethod
+    def _overlay(psd_file: str) -> tuple[ET.Element, ET.Element]:
+        """Convert a fixture and return its single overlay filter and its user."""
+        document = SVGDocument.from_psd(PSDImage.open(get_fixture(psd_file)))
+        filters = document.svg.findall(".//{*}filter")
+        assert len(filters) == 1
+        uses = document.svg.findall(".//{*}use[@filter]")
+        assert len(uses) == 1
+        return filters[0], uses[0]
+
+    @staticmethod
+    def _tags(filter: ET.Element) -> list[str]:
+        return [child.tag.rpartition("}")[2] for child in filter]
+
+    def test_divide_inverts_the_fill_and_dodges(self) -> None:
+        """Test that Divide becomes color-dodge on an inverted fill."""
+        filter, use = self._overlay("blend-modes/effect-divide.psd")
+        assert filter.get("color-interpolation-filters") == "sRGB"
+        assert self._tags(filter) == ["feImage", "feComponentTransfer", "feComposite"]
+        assert [child.get("tableValues") for child in filter[1]] == ["1 0"] * 3
+        assert filter[2].get("operator") == "in"
+        assert filter[2].get("in2") == "SourceAlpha"
+        assert "mix-blend-mode: color-dodge" in use.get("style", "")
+
+    @pytest.mark.parametrize(
+        "psd_file, inverts, offset",
+        [
+            ("blend-modes/effect-subtract.psd", True, "-1"),
+            ("blend-modes/effect-linear-burn.psd", False, "-1"),
+            ("blend-modes/effect-linear-dodge.psd", False, "0"),
+        ],
+    )
+    def test_sums_use_arithmetic_composite(
+        self, psd_file: str, inverts: bool, offset: str
+    ) -> None:
+        """Test that the additive modes sum the fill and the layer in the filter."""
+        filter, use = self._overlay(psd_file)
+        assert filter.get("color-interpolation-filters") == "sRGB"
+        assert "mix-blend-mode" not in use.get("style", "")
+        expected = ["feImage"]
+        if inverts:
+            expected.append("feComponentTransfer")
+        expected += ["feComponentTransfer", "feComposite", "feComposite"]
+        assert self._tags(filter) == expected
+
+        # The sum runs against an opaque copy of the layer, so that the constant
+        # offset is not applied to premultiplied values.
+        opaque = filter[-3]
+        assert opaque.get("in") == "SourceGraphic"
+        assert [
+            (child.tag.rpartition("}")[2], child.get("tableValues")) for child in opaque
+        ] == [("feFuncA", "1 1")]
+        assert filter[-4].get("result") == "fill"
+
+        arithmetic = filter[-2]
+        assert arithmetic.get("operator") == "arithmetic"
+        assert arithmetic.get("in") == "fill"
+        assert arithmetic.get("in2") == opaque.get("result")
+        assert (
+            arithmetic.get("k1"),
+            arithmetic.get("k2"),
+            arithmetic.get("k3"),
+            arithmetic.get("k4"),
+        ) == ("0", "1", "1", offset)
+
+        # ... and the layer alpha is re-applied to the sum.
+        assert filter[-1].get("operator") == "in"
+        assert filter[-1].get("in2") == "SourceAlpha"
+
+    @pytest.mark.parametrize(
+        "psd_file",
+        [
+            "blend-modes/effect-divide.psd",
+            "blend-modes/effect-subtract.psd",
+            "blend-modes/effect-linear-burn.psd",
+            "blend-modes/effect-linear-dodge.psd",
+        ],
+    )
+    def test_no_approximation_warning(self, psd_file: str, caplog: Any) -> None:
+        """Test that the exact route does not warn about an approximation."""
+        with caplog.at_level(logging.WARNING):
+            SVGDocument.from_psd(PSDImage.open(get_fixture(psd_file)))
+
+        assert not [
+            r for r in caplog.records if "not accurately supported" in r.message
+        ]

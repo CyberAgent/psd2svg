@@ -168,11 +168,7 @@ def test_clipping(psd_file: str, quality: float) -> None:
         pytest.param(
             "blend-modes/effect-dissolve.psd", 0.01
         ),  # Dissolve is not supported, but MSE is low.
-        pytest.param(
-            "blend-modes/effect-divide.psd",
-            0.01,
-            marks=pytest.mark.xfail(reason="Divide is not accurately supported."),
-        ),
+        pytest.param("blend-modes/effect-divide.psd", 0.01),
         pytest.param("blend-modes/effect-exclusion.psd", 0.01),
         pytest.param("blend-modes/effect-hard-light.psd", 0.01),
         pytest.param(
@@ -183,16 +179,8 @@ def test_clipping(psd_file: str, quality: float) -> None:
         pytest.param("blend-modes/effect-hue.psd", 0.01),
         pytest.param("blend-modes/effect-lighten.psd", 0.01),
         pytest.param("blend-modes/effect-lighter-color.psd", 0.01),
-        pytest.param(
-            "blend-modes/effect-linear-burn.psd",
-            0.01,
-            marks=pytest.mark.xfail(reason="Linear burn is not accurately supported."),
-        ),
-        pytest.param(
-            "blend-modes/effect-linear-dodge.psd",
-            0.01,
-            marks=pytest.mark.xfail(reason="Linear dodge is not accurately supported."),
-        ),
+        pytest.param("blend-modes/effect-linear-burn.psd", 0.01),
+        pytest.param("blend-modes/effect-linear-dodge.psd", 0.01),
         pytest.param(
             "blend-modes/effect-linear-light.psd",
             0.01,
@@ -210,11 +198,7 @@ def test_clipping(psd_file: str, quality: float) -> None:
         pytest.param("blend-modes/effect-saturation.psd", 0.01),
         pytest.param("blend-modes/effect-screen.psd", 0.01),
         pytest.param("blend-modes/effect-soft-light.psd", 0.01),
-        pytest.param(
-            "blend-modes/effect-subtract.psd",
-            0.01,
-            marks=pytest.mark.xfail(reason="Subtract is not accurately supported."),
-        ),
+        pytest.param("blend-modes/effect-subtract.psd", 0.01),
         pytest.param(
             "blend-modes/effect-vivid-light.psd",
             0.01,
