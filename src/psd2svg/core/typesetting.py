@@ -30,9 +30,10 @@ class TextColorType(IntEnum):
     """Color space of an EngineData text color record.
 
     The record carries an alpha component followed by one component per
-    channel, so ARGB has four values and ACMYK five.
+    channel, so grayscale has two values, ARGB four and ACMYK five.
     """
 
+    GRAY = 0
     ARGB = 1
     ACMYK = 2
 
@@ -1045,6 +1046,12 @@ def _color_to_argb(
     color_type = color.get("Type", None)
     values = [float(value) for value in color.get("Values", [])]
     if color_type is not None:
+        if int(color_type) == TextColorType.GRAY and len(values) == 2:
+            # EngineData stores the single component as luminance, not ink
+            # coverage, so 0.0 is black -- inverted from the "% black" value
+            # Photoshop itself shows for the same color.
+            a, gray = values
+            return (a, gray, gray, gray)
         if int(color_type) == TextColorType.ARGB and len(values) == 4:
             a, r, g, b = values
             return (a, r, g, b)

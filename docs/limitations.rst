@@ -674,14 +674,15 @@ Color Space Limitations
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 * **CMYK**: Converted without color management (see below)
+* **Grayscale**: Converted without color management (see below)
 * **Lab color**: Not supported
 * **Color profiles**: May not be fully preserved
 * **Spot colors**: Not supported
 
 **Workaround:** Convert to RGB in Photoshop before conversion for best results.
 
-CMYK Conversion
-~~~~~~~~~~~~~~~
+CMYK and Grayscale Conversion
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 CMYK colors -- text fills, shape fills, strokes and effect colors alike -- are
 converted with the naive formula ``r = 255 * (1 - c) * (1 - k)``, where ``c``
@@ -690,6 +691,11 @@ ignored, so the result differs from the Photoshop composite, and saturated
 colors differ the most. For example, 100% cyan becomes ``#00ffff`` here, while
 Photoshop renders it as ``#00aeef`` through a U.S. Web Coated (SWOP) v2
 profile.
+
+Grayscale colors are converted by replicating the single stored component
+across red, green and blue, and the embedded gray profile is ignored the same
+way. For example, 50% gray becomes ``#808080`` here, while Photoshop composites
+it as ``#959595`` through a Dot Gain 20% profile.
 
 Precision
 ~~~~~~~~~
