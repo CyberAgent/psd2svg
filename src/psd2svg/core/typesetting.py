@@ -26,6 +26,17 @@ from psd2svg.core import color_utils, font_utils
 logger = logging.getLogger(__name__)
 
 
+class TextColorType(IntEnum):
+    """Color space of an EngineData text color record.
+
+    The record carries an alpha component followed by one component per
+    channel, so ARGB has four values and ACMYK five.
+    """
+
+    ARGB = 1
+    ACMYK = 2
+
+
 class TextWrappingMode(IntEnum):
     """Text wrapping mode values."""
 
@@ -455,8 +466,7 @@ class StyleSheet:
         color = self.style_sheet_data.get("FillColor", None)
         if color is None:
             return (1.0, 0.0, 0.0, 0.0)  # Default black
-        assert "Type" in color and color["Type"].value == 1  # ARGB color
-        return tuple(color["Values"])
+        return _color_to_argb(color, (1.0, 0.0, 0.0, 0.0))
 
     @property
     def stroke_color(self) -> tuple[float, float, float, float]:
@@ -464,8 +474,7 @@ class StyleSheet:
         color = self.style_sheet_data.get("StrokeColor", None)
         if color is None:
             return (0.0, 0.0, 0.0, 0.0)  # Default transparent
-        assert "Type" in color and color["Type"].value == 1  # ARGB color
-        return tuple(color["Values"])
+        return _color_to_argb(color, (0.0, 0.0, 0.0, 0.0))
 
     @property
     def fill_flag(self) -> bool:
@@ -1017,6 +1026,38 @@ class TypeSetting:
         return " ".join(commands)
 
 
+def _color_to_argb(
+    color: DictElement, fallback: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    """Convert an EngineData color record to an ARGB tuple with values in 0-1.
+
+    Args:
+        color: EngineData color record, carrying a ``Type`` and ``Values``.
+        fallback: Color to use when the record cannot be interpreted.
+
+    Returns:
+        Tuple of (a, r, g, b) as floats in the range 0.0-1.0.
+
+    Note:
+        An unsupported color type degrades to the fallback so that a single
+        bad span does not abort the conversion of the whole document.
+    """
+    color_type = color.get("Type", None)
+    values = [float(value) for value in color.get("Values", [])]
+    if color_type is not None:
+        if int(color_type) == TextColorType.ARGB and len(values) == 4:
+            a, r, g, b = values
+            return (a, r, g, b)
+        if int(color_type) == TextColorType.ACMYK and len(values) == 5:
+            a, c, m, y, k = values
+            r, g, b = color_utils.cmyk2rgb_float((c, m, y, k))
+            return (a, r, g, b)
+    logger.warning(
+        "Unsupported text color, falling back to %s: %s", fallback, dict(color)
+    )
+    return fallback
+
+
 def _get_hex_color_from_argb(argb: tuple[float, float, float, float]) -> str | None:
     """Convert ARGB color tuple to hex string."""
     a, r, g, b = argb
@@ -1024,7 +1065,11 @@ def _get_hex_color_from_argb(argb: tuple[float, float, float, float]) -> str | N
         return "none"
     elif ((r, g, b) == (0, 0, 0)) and (a == 1):
         return None  # Default black color in SVG.
-    r_int = int(r * 255)
-    g_int = int(g * 255)
-    b_int = int(b * 255)
-    return color_utils.rgba2hex((r_int, g_int, b_int), alpha=a)
+    return color_utils.rgba2hex(
+        (
+            color_utils.float2uint8(r),
+            color_utils.float2uint8(g),
+            color_utils.float2uint8(b),
+        ),
+        alpha=a,
+    )

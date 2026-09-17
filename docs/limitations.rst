@@ -673,12 +673,23 @@ Color Management
 Color Space Limitations
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-* **CMYK**: May not convert accurately to RGB
+* **CMYK**: Converted without color management (see below)
 * **Lab color**: Not supported
 * **Color profiles**: May not be fully preserved
 * **Spot colors**: Not supported
 
 **Workaround:** Convert to RGB in Photoshop before conversion for best results.
+
+CMYK Conversion
+~~~~~~~~~~~~~~~
+
+CMYK colors -- text fills, shape fills, strokes and effect colors alike -- are
+converted with the naive formula ``r = 255 * (1 - c) * (1 - k)``, where ``c``
+and ``k`` are fractions between 0 and 1. Any ICC profile embedded in the PSD is
+ignored, so the result differs from the Photoshop composite, and saturated
+colors differ the most. For example, 100% cyan becomes ``#00ffff`` here, while
+Photoshop renders it as ``#00aeef`` through a U.S. Web Coated (SWOP) v2
+profile.
 
 Precision
 ~~~~~~~~~

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CMYK colors converted incorrectly** (#348)
+  - CMYK text aborted the whole conversion, and CMYK shape, stroke and effect
+    colors rendered near-black
+
 - **Divide and Subtract blend modes rendered as `difference`, inverting colors** (#339)
   - Divide, Subtract, Linear Burn and Linear Dodge are now exact on Color,
     Gradient and Pattern Overlay effects
