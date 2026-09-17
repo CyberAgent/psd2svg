@@ -130,6 +130,20 @@ def _scale_about(scale: tuple[float, float], origin: tuple[float, float]) -> str
     return f"{translate_str} {scale_str}"
 
 
+def _paragraph_advance(
+    writing_direction: WritingDirection, leading: float
+) -> tuple[float | None, float | None]:
+    """Return the relative block-axis advance for a paragraph break.
+
+    Horizontal text advances down the page, while ``vertical-rl`` text advances
+    to the left. ``None`` marks the inline axis, which must be reset to the
+    paragraph origin instead of moved relatively.
+    """
+    if writing_direction == WritingDirection.VERTICAL_RL:
+        return -leading, None
+    return None, leading
+
+
 def _needs_whitespace_preservation(text: str) -> bool:
     """Check if text needs whitespace preservation.
 
@@ -276,9 +290,10 @@ class TextConverter(ConverterProtocol):
         if text_setting.has_warp():
             container_node = self._create_text_path_node(text_setting, text_node)
 
-        # Paragraphs after the first are offset with dy, so their baseline has to be
-        # accumulated to anchor per-span transforms.
-        paragraph_offset = 0.0
+        # Paragraph baselines advance along the block axis. Keep the absolute offset
+        # so per-span transforms can be anchored at the rendered paragraph origin.
+        paragraph_offset_x = 0.0
+        paragraph_offset_y = 0.0
 
         with self.set_current(container_node):
             for i, paragraph in enumerate(paragraphs):
@@ -295,8 +310,13 @@ class TextConverter(ConverterProtocol):
                     origin_x += transform.tx
                     origin_y += transform.ty
                 if i > 0:
-                    paragraph_offset += paragraph.compute_leading()
-                origin_y += paragraph_offset
+                    advance_x, advance_y = _paragraph_advance(
+                        text_setting.writing_direction, paragraph.compute_leading()
+                    )
+                    paragraph_offset_x += advance_x or 0.0
+                    paragraph_offset_y += advance_y or 0.0
+                origin_x += paragraph_offset_x
+                origin_y += paragraph_offset_y
                 for span in paragraph:
                     self._add_text_span(
                         text_setting,
@@ -344,7 +364,7 @@ class TextConverter(ConverterProtocol):
         text alignment all match Photoshop.
 
         Only the inline (advance) axis is scaled here; the cross axis is carried by
-        ``font-size`` so that the explicit ``dy`` line offsets keep their leading.
+        ``font-size`` so that explicit paragraph offsets keep their leading.
         The transform is anchored at the paragraph origin so that text alignment is
         preserved.
 
@@ -376,11 +396,6 @@ class TextConverter(ConverterProtocol):
             return None
 
         is_horizontal = text_setting.writing_direction == WritingDirection.HORIZONTAL_TB
-
-        # Line offsets are always emitted as dy, even for vertical text, so scaling
-        # the vertical axis of a multi-paragraph layer would stretch the leading.
-        if not is_horizontal and len(paragraphs) > 1:
-            return None
 
         # The transform is anchored at a single point, so every paragraph must share
         # the same anchor position on the inline axis. Comparing positions rather
@@ -562,15 +577,16 @@ class TextConverter(ConverterProtocol):
     ) -> ET.Element:
         """Create paragraph node with positioning attributes.
 
-        All paragraphs use consistent structure: each tspan has explicit
-        x/y or dy positioning.
+        Paragraphs reset their inline-axis position and advance relatively along
+        the block axis: ``x``/``dy`` for horizontal text and ``y``/``dx`` for
+        ``vertical-rl`` text.
 
         Args:
             text_setting: Type setting object containing transform information.
             text_node: Parent text element.
             x: Base x position.
             y: Base y position.
-            line_height: Line height for dy attribute.
+            line_height: Line height used for the paragraph advance.
             text_anchor: SVG text-anchor value.
             dominant_baseline: SVG dominant-baseline value.
             first_paragraph: Whether this is the first paragraph.
@@ -585,17 +601,23 @@ class TextConverter(ConverterProtocol):
             x += transform.tx
             y += transform.ty
 
-        # Determine if we should set x, y on the tspan
-        # All paragraphs get x for consistency (to reset horizontal position)
-        # First paragraph gets both x and y
-        # Subsequent paragraphs get x and dy (for line spacing)
-        if uses_native_positioning:
-            should_set_x = True  # Always set x for consistency
-            should_set_y = first_paragraph  # Only first paragraph gets y
+        is_vertical = text_setting.writing_direction == WritingDirection.VERTICAL_RL
+
+        # Reset the inline axis for every paragraph. The first paragraph also sets
+        # the block-axis origin; later paragraphs move from it with dx or dy.
+        if is_vertical:
+            should_set_x = first_paragraph and (uses_native_positioning or x != 0.0)
+            should_set_y = uses_native_positioning or y != 0.0 or not first_paragraph
+        elif uses_native_positioning:
+            should_set_x = True
+            should_set_y = first_paragraph
         else:
-            # Using transform positioning
             should_set_x = x != 0.0 or not first_paragraph
             should_set_y = y != 0.0 and first_paragraph
+
+        advance_x, advance_y = _paragraph_advance(
+            text_setting.writing_direction, line_height
+        )
 
         # Create paragraph node with positioning and baseline attributes.
         # The dominant-baseline="hanging" provides the closest match to Photoshop's
@@ -606,7 +628,8 @@ class TextConverter(ConverterProtocol):
             text_anchor=text_anchor,
             x=x if should_set_x else None,
             y=y if should_set_y else None,
-            dy=line_height if not first_paragraph else None,
+            dx=advance_x if not first_paragraph else None,
+            dy=advance_y if not first_paragraph else None,
             dominant_baseline=dominant_baseline,
         )
 

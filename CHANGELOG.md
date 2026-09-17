@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Vertical paragraph breaks advanced downward instead of creating columns** (#341)
+
 - **Grayscale text rendered black regardless of its tone** (#350)
 
 - **CMYK colors converted incorrectly** (#348)

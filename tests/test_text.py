@@ -156,6 +156,35 @@ def test_text_paragraph_positions() -> None:
         )
 
 
+def test_vertical_text_paragraph_positions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that vertical paragraph breaks create columns from right to left."""
+    monkeypatch.setattr(
+        TypeSetting,
+        "writing_direction",
+        property(lambda self: WritingDirection.VERTICAL_RL),
+    )
+    svg = convert_psd_to_svg("texts/font-sizes-1.psd")
+    text_node = svg.find(".//text")
+    assert text_node is not None
+    assert text_node.attrib.get("writing-mode") == "vertical-rl"
+
+    paragraphs = text_node.findall("tspan")
+    assert len(paragraphs) == 4
+
+    first_x = paragraphs[0].attrib.get("x")
+    first_y = paragraphs[0].attrib.get("y")
+    assert first_x is not None
+    assert first_y is not None
+    assert paragraphs[0].attrib.get("dx") is None
+    assert paragraphs[0].attrib.get("dy") is None
+
+    for paragraph in paragraphs[1:]:
+        assert paragraph.attrib.get("x") is None
+        assert paragraph.attrib.get("y") == first_y
+        assert float(paragraph.attrib["dx"]) < 0
+        assert paragraph.attrib.get("dy") is None
+
+
 def test_text_paragraph_native_positioning_no_x_override() -> None:
     """Test that all paragraphs have consistent x positioning.
 
@@ -901,6 +930,60 @@ def test_text_style_scale_vertical_writing_direction_layer_wide(
     assert _parse_translate(text.attrib["transform"]) == pytest.approx(
         (0.0, y * 0.5), abs=0.01
     )
+
+
+def test_text_style_scale_vertical_multiple_paragraphs_layer_wide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that vertical columns do not block safe layer-wide scaling."""
+    monkeypatch.setattr(
+        TypeSetting,
+        "writing_direction",
+        property(lambda self: WritingDirection.VERTICAL_RL),
+    )
+    monkeypatch.setattr(StyleSheet, "horizontal_scale", property(lambda self: 2.0))
+    svg = convert_psd_to_svg("texts/font-sizes-1.psd")
+
+    text = svg.find(".//text[@transform]")
+    assert text is not None
+    assert _parse_scale(text.attrib["transform"]) == pytest.approx((1.0, 0.5))
+    assert svg.find(".//tspan[@transform]") is None
+
+    paragraphs = text.findall("tspan")
+    assert len(paragraphs) == 4
+    assert all(float(paragraph.attrib["dx"]) < 0 for paragraph in paragraphs[1:])
+
+
+def test_text_style_scale_vertical_paragraph_origins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test per-span transforms use each vertical column's absolute origin."""
+    monkeypatch.setattr(
+        TypeSetting,
+        "writing_direction",
+        property(lambda self: WritingDirection.VERTICAL_RL),
+    )
+    monkeypatch.setattr(
+        StyleSheet,
+        "horizontal_scale",
+        property(lambda self: 2.0 if self.font_size < 20 else 1.5),
+    )
+    svg = convert_psd_to_svg("texts/font-sizes-1.psd")
+
+    text = svg.find(".//text")
+    assert text is not None
+    assert text.attrib.get("transform") is None
+    paragraphs = text.findall("tspan")
+    assert len(paragraphs) == 4
+
+    origin_x = float(paragraphs[0].attrib["x"])
+    for paragraph in paragraphs:
+        origin_x += float(paragraph.attrib.get("dx", 0.0))
+        scale_x, scale_y = _parse_scale(paragraph.attrib["transform"])
+        assert scale_y == pytest.approx(1.0)
+        translate_x, translate_y = _parse_translate(paragraph.attrib["transform"])
+        assert translate_x == pytest.approx(origin_x * (1.0 - scale_x), abs=0.01)
+        assert translate_y == pytest.approx(0.0, abs=0.01)
 
 
 def test_text_letter_spacing_offset_with_layer_wide_scale(
