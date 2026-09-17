@@ -586,9 +586,9 @@ def test_manual_kerning_uses_previous_superscript_size(
         StyleSheet,
         "font_baseline",
         property(
-            lambda style: FontBaseline.SUPERSCRIPT
-            if style.kerning == 0
-            else FontBaseline.ROMAN
+            lambda style: (
+                FontBaseline.SUPERSCRIPT if style.kerning == 0 else FontBaseline.ROMAN
+            )
         ),
     )
 
