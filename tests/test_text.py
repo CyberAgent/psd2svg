@@ -2502,3 +2502,92 @@ def test_foreignobject_vertical_alignment_vertical_text() -> None:
 
     # With new auto-leading, compensation is tiny and may be omitted
     # Don't assert specific margin-top value
+
+
+def test_cmyk_text_fill_color() -> None:
+    """CMYK text fill colors convert instead of aborting the document."""
+    svg = convert_psd_to_svg("texts/style-fill-color-cmyk.psd")
+    text_nodes = svg.findall(".//text")
+    assert len(text_nodes) == 2
+
+    # The layers are CMYK (100, 0, 0, 0) and (0, 0, 0, 50). ICC color
+    # management is not applied, so these are the naive conversions.
+    fills = [node.attrib.get("fill") for node in text_nodes]
+    assert fills == ["#00ffff", "#808080"]
+
+
+def test_cmyk_style_sheet_colors() -> None:
+    """StyleSheet exposes CMYK fill and stroke colors as ARGB."""
+    style = StyleSheet(
+        name="",
+        style_sheet_data={
+            "FillColor": {"Type": 2, "Values": [1.0, 1.0, 0.0, 0.0, 0.0]},
+            "StrokeColor": {"Type": 2, "Values": [1.0, 0.0, 0.0, 0.0, 0.5]},
+            "StrokeFlag": True,
+        },
+    )
+    assert style.fill_color == (1.0, 0.0, 1.0, 1.0)
+    assert style.stroke_color == (1.0, 0.5, 0.5, 0.5)
+    assert style.get_fill_color() == "#00ffff"
+    assert style.get_stroke_color() == "#808080"
+
+
+def test_grayscale_text_fill_color(caplog: pytest.LogCaptureFixture) -> None:
+    """Grayscale text fill colors keep their tone instead of turning black."""
+    with caplog.at_level(logging.WARNING):
+        svg = convert_psd_to_svg("texts/style-fill-color-gray.psd")
+    assert "Unsupported text color" not in caplog.text
+
+    text_nodes = svg.findall(".//text")
+    assert len(text_nodes) == 2
+
+    # The layers are 50% and 25% black, which Photoshop stores as the
+    # luminances 0.5 and 0.75. ICC color management is not applied, so these
+    # are the naive conversions.
+    fills = [node.attrib.get("fill") for node in text_nodes]
+    assert fills == ["#808080", "#bfbfbf"]
+
+
+def test_grayscale_style_sheet_colors() -> None:
+    """StyleSheet exposes grayscale fill and stroke colors as ARGB."""
+    style = StyleSheet(
+        name="",
+        style_sheet_data={
+            "FillColor": {"Type": 0, "Values": [1.0, 0.5]},
+            "StrokeColor": {"Type": 0, "Values": [1.0, 0.75]},
+            "StrokeFlag": True,
+        },
+    )
+    assert style.fill_color == (1.0, 0.5, 0.5, 0.5)
+    assert style.stroke_color == (1.0, 0.75, 0.75, 0.75)
+    assert style.get_fill_color() == "#808080"
+    assert style.get_stroke_color() == "#bfbfbf"
+
+
+@pytest.mark.parametrize(
+    "color",
+    [
+        {"Type": 3, "Values": [1.0, 0.5]},  # Unknown color type
+        {"Type": 0, "Values": [1.0]},  # Wrong number of values
+        {"Type": 2, "Values": [1.0, 0.0, 0.0, 0.0]},  # Wrong number of values
+        {"Values": [1.0, 0.0, 0.0, 0.0]},  # Missing type
+    ],
+)
+def test_unsupported_text_color_falls_back_to_default(
+    color: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unsupported color degrades the span rather than the document.
+
+    Fill degrades to black, but stroke degrades to transparent: an
+    uninterpretable stroke color should not draw an outline that the document
+    never asked for.
+    """
+    with caplog.at_level(logging.WARNING):
+        fill_style = StyleSheet(name="", style_sheet_data={"FillColor": color})
+        assert fill_style.fill_color == (1.0, 0.0, 0.0, 0.0)
+        stroke_style = StyleSheet(
+            name="", style_sheet_data={"StrokeColor": color, "StrokeFlag": True}
+        )
+        assert stroke_style.stroke_color == (0.0, 0.0, 0.0, 0.0)
+        assert stroke_style.get_stroke_color() == "none"
+    assert "Unsupported text color" in caplog.text

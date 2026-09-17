@@ -27,14 +27,31 @@ def rgba2hex(values: Sequence[int], alpha: float = 1.0) -> str:
     return f"#{r:02x}{g:02x}{b:02x}{a:02x}"
 
 
-def cmyk2rgb(values: Sequence[float]) -> tuple[int, int, int]:
-    """Convert CMYK color to RGB color."""
+def cmyk2rgb_float(values: Sequence[float]) -> tuple[float, float, float]:
+    """Convert CMYK color to RGB color, both as fractions in the range 0.0-1.0.
+
+    Args:
+        values: Tuple of (c, m, y, k) as fractions in the range 0.0-1.0.
+
+    Returns:
+        Tuple of (r, g, b) as floats in the range 0.0-1.0.
+    """
     assert len(values) == 4
-    return (
-        clip_int(2.55 * (1.0 - values[0]) * (1.0 - values[3])),
-        clip_int(2.55 * (1.0 - values[1]) * (1.0 - values[3])),
-        clip_int(2.55 * (1.0 - values[2]) * (1.0 - values[3])),
-    )
+    c, m, y, k = (float(value) for value in values)
+    return ((1.0 - c) * (1.0 - k), (1.0 - m) * (1.0 - k), (1.0 - y) * (1.0 - k))
+
+
+def cmyk2rgb(values: Sequence[float]) -> tuple[int, int, int]:
+    """Convert CMYK color to 8-bit RGB color.
+
+    Args:
+        values: Tuple of (c, m, y, k) as fractions in the range 0.0-1.0.
+
+    Returns:
+        Tuple of (r, g, b) as integers in the range 0-255.
+    """
+    r, g, b = cmyk2rgb_float(values)
+    return (float2uint8(r), float2uint8(g), float2uint8(b))
 
 
 def descriptor2rgb(desc: Descriptor) -> tuple[float, float, float]:
@@ -70,8 +87,8 @@ def descriptor2rgb(desc: Descriptor) -> tuple[float, float, float]:
         m = desc.get(Enum.Magenta, 0)
         y = desc.get(Enum.Yellow, 0)
         k = desc.get(Enum.Black, 0)
-        r, g, b = cmyk2rgb((c / 100, m / 100, y / 100, k / 100))
-        return (float(r), float(g), float(b))
+        r, g, b = cmyk2rgb_float((c / 100, m / 100, y / 100, k / 100))
+        return (r * 255.0, g * 255.0, b * 255.0)
 
     if desc.classID == Klass.Grayscale:
         gray = desc.get(Enum.Gray, 0)
@@ -128,8 +145,12 @@ def descriptor2hex(desc: Descriptor | None, fallback: str = "none") -> str:
 
 
 def float2uint8(v: float) -> int:
-    """Convert a float in the range [0.0, 1.0] to an integer in the range [0, 255]."""
-    return clip_int(255 * v)
+    """Convert a float in the range [0.0, 1.0] to an integer in the range [0, 255].
+
+    The value is rounded rather than truncated; truncation systematically
+    darkens colors and turns values such as ``0.2`` into 50 instead of 51.
+    """
+    return clip_int(round(255 * v))
 
 
 def clip_int(value: int | float, min_value: int = 0, max_value: int = 255) -> int:
