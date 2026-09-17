@@ -1047,8 +1047,9 @@ def _color_to_argb(
     values = [float(value) for value in color.get("Values", [])]
     if color_type is not None:
         if int(color_type) == TextColorType.GRAY and len(values) == 2:
-            # The single component is luminance, not ink coverage, so 0.0 is
-            # black. This is inverted from Photoshop's own "% black" input.
+            # EngineData stores the single component as luminance, not ink
+            # coverage, so 0.0 is black -- inverted from the "% black" value
+            # Photoshop itself shows for the same color.
             a, gray = values
             return (a, gray, gray, gray)
         if int(color_type) == TextColorType.ARGB and len(values) == 4:

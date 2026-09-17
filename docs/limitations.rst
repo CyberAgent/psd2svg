@@ -692,10 +692,10 @@ colors differ the most. For example, 100% cyan becomes ``#00ffff`` here, while
 Photoshop renders it as ``#00aeef`` through a U.S. Web Coated (SWOP) v2
 profile.
 
-Grayscale colors are converted by replicating the single component across red,
-green and blue, which is exact, but the embedded gray profile is ignored the
-same way. For example, 50% gray becomes ``#808080`` here, while Photoshop
-composites it as ``#959595`` through a Dot Gain 20% profile.
+Grayscale colors are converted by replicating the single stored component
+across red, green and blue, and the embedded gray profile is ignored the same
+way. For example, 50% gray becomes ``#808080`` here, while Photoshop composites
+it as ``#959595`` through a Dot Gain 20% profile.
 
 Precision
 ~~~~~~~~~
