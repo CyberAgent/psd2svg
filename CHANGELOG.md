@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Grayscale text rendered black regardless of its tone** (#350)
+
 - **CMYK colors converted incorrectly** (#348)
   - CMYK text aborted the whole conversion, and CMYK shape, stroke and effect
     colors rendered near-black
