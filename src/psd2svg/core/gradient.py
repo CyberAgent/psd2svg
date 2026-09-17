@@ -99,6 +99,8 @@ class GradientInterpolation:
                 except ValueError as e:
                     # If color conversion fails, fall back to direct key interpolation
                     logger.warning(f"Color interpolation fallback due to: {e}")
+                    # This branch interpolates the source keys in place, so it
+                    # keeps the source classID, unlike the RGB path below.
                     desc = Descriptor(classID=color0.classID)
                     for key in color0.keys():
                         if key in color1:
@@ -114,8 +116,11 @@ class GradientInterpolation:
                 g = rgb0[1] + t * (rgb1[1] - rgb0[1])
                 b = rgb0[2] + t * (rgb1[2] - rgb0[2])
 
-                # Create descriptor with integer format (b'Rd  ', b'Grn ', b'Bl  ')
-                desc = Descriptor(classID=color0.classID)
+                # Create descriptor with integer format (b'Rd  ', b'Grn ', b'Bl  ').
+                # The keys written below are RGB, so the classID must say so
+                # too; keeping the source one made grayscale and CMYK stops
+                # read as an absent, all-zero color.
+                desc = Descriptor(classID=Klass.RGBColor)
                 desc[Enum.Red] = r
                 desc[Enum.Green] = g
                 desc[Enum.Blue] = b

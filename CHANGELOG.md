@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Grayscale shape, stroke, effect and gradient colors aborted the conversion** (#354)
+  - They also converted inverted, rendering every grayscale color white
+
+- **CMYK gradients rendered white** (#354)
+  - Interpolated gradient stops kept the source color mode, so their RGB
+    values were read back as an absent color
+
 - **Manual kerning used the current character's size across mixed-size runs** (#351)
   - Boundary offsets now use the preceding drawable character's scaled size
 

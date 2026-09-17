@@ -338,6 +338,8 @@ def test_paint_color(psd_file: str) -> None:
         "paint/linear-gradient-7-offset.psd",
         # Interpolation test.
         "paint/linear-gradient-8-stops.psd",
+        # Grayscale color descriptors in gradient stops.
+        "paint/gradient-gray.psd",
         # Radial gradients.
         "paint/radial-gradient-1.psd",
     ],
