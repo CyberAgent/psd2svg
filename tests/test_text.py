@@ -2,6 +2,7 @@ import logging
 import math
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 
 import pytest
 from psd_tools import PSDImage
@@ -11,6 +12,7 @@ from psd2svg import SVGDocument
 from psd2svg.core.converter import Converter
 from psd2svg.core.text import TextWrappingMode, _common_span_scale
 from psd2svg.core.typesetting import (
+    FontBaseline,
     Paragraph,
     ParagraphSheet,
     Span,
@@ -456,6 +458,152 @@ def test_text_style_kerning() -> None:
     )
     for value in nonzero:
         assert value < 0, f"Expected negative dx for tighter kerning, got {value}"
+
+
+def test_manual_kerning_uses_previous_mixed_font_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test mixed-size boundaries before optimizer span merging.
+
+    The fixture stores each manual-kerning boundary as a separate style run. Giving
+    those runs different sizes verifies that each dx uses the preceding drawable
+    run, rather than the run that owns the kerning value.
+    """
+    sizes_by_kerning = {
+        0: 20.0,
+        50: 999.0,
+        -25: 80.0,
+        -100: 10.0,
+        -75: 40.0,
+        -50: 60.0,
+    }
+    monkeypatch.setattr(
+        StyleSheet,
+        "font_size",
+        property(lambda style: sizes_by_kerning[style.kerning]),
+    )
+    monkeypatch.setattr(
+        StyleSheet,
+        "horizontal_scale",
+        property(lambda style: 0.5 if style.kerning == 0 else 1.0),
+    )
+    original_iter = TypeSetting.__iter__
+
+    def iter_with_empty_runs(text_setting: TypeSetting) -> Iterator[Paragraph]:
+        for paragraph in original_iter(text_setting):
+            if len(paragraph.spans) > 1:
+                first = paragraph.spans[0]
+                empty_data = dict(first.style.style_sheet_data)
+                empty_data["Kerning"] = 50
+                empty_style = StyleSheet(name="", style_sheet_data=empty_data)
+                paragraph.spans[1:1] = [
+                    Span(first.end, first.end, "", empty_style),
+                    Span(first.end, first.end, "\r", empty_style),
+                ]
+            yield paragraph
+
+    monkeypatch.setattr(TypeSetting, "__iter__", iter_with_empty_runs)
+
+    svg = convert_psd_to_svg("texts/style-kerning-manual.psd")
+    runs = {tspan.text: tspan for tspan in svg.findall(".//tspan") if tspan.text}
+
+    # L(20 * 0.5) -> o(80), o(80) -> r(10), and r(10) -> e(80).
+    assert float(runs["o"].attrib["dx"]) == pytest.approx(-0.25)
+    assert float(runs["r"].attrib["dx"]) == pytest.approx(-8.0)
+    assert float(runs["e"].attrib["dx"]) == pytest.approx(-0.25)
+
+
+def test_manual_kerning_uses_previous_size_for_vertical_text() -> None:
+    """Test that vertical manual kerning uses the same boundary semantics."""
+    fixture = "texts/shapetype0-writingdirection2-baselinedirection1-justification0.psd"
+    psdimage = PSDImage.open(get_fixture(fixture))
+    layer = next(
+        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
+    )
+    text_setting = TypeSetting(layer._data)
+    source_span = next(iter(next(iter(text_setting))))
+    converter = Converter(psdimage)
+    paragraph_node = ET.Element("tspan")
+    previous_style_data = dict(source_span.style.style_sheet_data)
+    previous_style_data.update(FontSize=100.0, VerticalScale=0.5, Kerning=0)
+    previous_span = Span(
+        0,
+        1,
+        "A",
+        StyleSheet(name="", style_sheet_data=previous_style_data),
+    )
+    _, previous_size = converter._add_text_span(
+        text_setting,
+        paragraph_node,
+        previous_span,
+    )
+
+    current_style_data = dict(source_span.style.style_sheet_data)
+    current_style_data.update(FontSize=100.0, VerticalScale=2.0, Kerning=-100)
+    current_span = Span(
+        1,
+        2,
+        "B",
+        StyleSheet(name="", style_sheet_data=current_style_data),
+    )
+    tspan, _ = converter._add_text_span(
+        text_setting,
+        paragraph_node,
+        current_span,
+        kerning_reference_size=previous_size,
+    )
+
+    assert "dx" not in tspan.attrib
+    assert float(tspan.attrib["dy"]) == pytest.approx(-5.0)
+
+
+def test_manual_kerning_resets_at_paragraph_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that a previous paragraph cannot supply a kerning em reference."""
+    monkeypatch.setattr(StyleSheet, "kerning", property(lambda style: -100))
+
+    svg = convert_psd_to_svg("texts/style-kerning-manual.psd")
+
+    # Each paragraph starts with a non-zero manual value under the patch, but
+    # neither has a preceding drawable character at that boundary. Later
+    # characters still kern normally, and optimizer merging serializes the first
+    # character's missing offset as zero.
+    offsets = []
+    for paragraph in svg.findall(".//text/tspan"):
+        dx = paragraph.attrib.get("dx")
+        if dx is not None:
+            offsets.append(dx)
+            assert float(dx.split()[0]) == 0.0
+    assert offsets
+
+
+@pytest.mark.parametrize(
+    "font_baseline",
+    [FontBaseline.SUPERSCRIPT, FontBaseline.SUBSCRIPT],
+    ids=["superscript", "subscript"],
+)
+def test_manual_kerning_uses_previous_script_size(
+    monkeypatch: pytest.MonkeyPatch,
+    font_baseline: FontBaseline,
+) -> None:
+    """Test that super/subscript sizing is part of the preceding character's em."""
+    monkeypatch.setattr(
+        StyleSheet,
+        "font_baseline",
+        property(
+            lambda style: font_baseline if style.kerning == 0 else FontBaseline.ROMAN
+        ),
+    )
+
+    svg = convert_psd_to_svg("texts/style-kerning-manual.psd")
+    runs = {tspan.text: tspan for tspan in svg.findall(".//tspan") if tspan.text}
+
+    previous_size = float(runs["L"].attrib["font-size"])
+    assert float(runs["orem"].attrib["dx"].split()[0]) == pytest.approx(
+        -0.025 * previous_size,
+        abs=0.01,
+    )
 
 
 def test_text_style_tsume() -> None:
