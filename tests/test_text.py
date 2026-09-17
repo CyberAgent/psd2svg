@@ -2384,9 +2384,12 @@ def test_cmyk_style_sheet_colors() -> None:
     assert style.get_stroke_color() == "#808080"
 
 
-def test_grayscale_text_fill_color() -> None:
+def test_grayscale_text_fill_color(caplog: pytest.LogCaptureFixture) -> None:
     """Grayscale text fill colors keep their tone instead of turning black."""
-    svg = convert_psd_to_svg("texts/style-fill-color-gray.psd")
+    with caplog.at_level(logging.WARNING):
+        svg = convert_psd_to_svg("texts/style-fill-color-gray.psd")
+    assert "Unsupported text color" not in caplog.text
+
     text_nodes = svg.findall(".//text")
     assert len(text_nodes) == 2
 
