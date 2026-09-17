@@ -299,6 +299,7 @@ def test_enable_title_flag() -> None:
         "paint/color-1.psd",
         "paint/color-2.psd",  # Fill opacity test for shape layer
         "paint/color-3.psd",  # Fill opacity test for raster layer
+        "paint/color-gray.psd",  # Grayscale color descriptors
     ],
 )
 def test_paint_color(psd_file: str) -> None:

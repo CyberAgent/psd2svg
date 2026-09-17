@@ -5,13 +5,16 @@ from unittest.mock import Mock
 from xml.etree import ElementTree as ET
 
 import pytest
+from psd_tools import PSDImage
 from psd_tools.api.layers import Layer
 from psd_tools.constants import Tag
 from psd_tools.psd import descriptor
 from psd_tools.psd.tagged_blocks import ListElement, TaggedBlocks
 from psd_tools.terminology import Key, Unit
 
+from psd2svg.core.converter import Converter
 from psd2svg.core.paint import PaintConverter
+from tests.conftest import get_fixture
 
 
 class TestPatternTransform:
@@ -85,3 +88,15 @@ class TestPatternTransform:
         assert (
             node.attrib["patternTransform"] == "translate(0,12) scale(0.5) rotate(-45)"
         )
+
+
+def test_grayscale_solid_fill_colors() -> None:
+    """Grayscale fill descriptors store percent black, so the value is inverted."""
+    psdimage = PSDImage.open(get_fixture("paint/color-gray.psd"))
+    converter = Converter(psdimage)
+    converter.build()
+
+    # The layers are 100% and 25% black. ICC color management is not applied,
+    # so these are the naive conversions.
+    fills = [node.attrib.get("fill") for node in converter.svg.findall(".//rect")]
+    assert fills == ["#000000", "#bfbfbf"]
