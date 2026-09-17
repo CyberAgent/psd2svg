@@ -2384,10 +2384,40 @@ def test_cmyk_style_sheet_colors() -> None:
     assert style.get_stroke_color() == "#808080"
 
 
+def test_grayscale_text_fill_color() -> None:
+    """Grayscale text fill colors keep their tone instead of turning black."""
+    svg = convert_psd_to_svg("texts/style-fill-color-gray.psd")
+    text_nodes = svg.findall(".//text")
+    assert len(text_nodes) == 2
+
+    # The layers are 50% and 25% black, which Photoshop stores as the
+    # luminances 0.5 and 0.75. ICC color management is not applied, so these
+    # are the naive conversions.
+    fills = [node.attrib.get("fill") for node in text_nodes]
+    assert fills == ["#808080", "#bfbfbf"]
+
+
+def test_grayscale_style_sheet_colors() -> None:
+    """StyleSheet exposes grayscale fill and stroke colors as ARGB."""
+    style = StyleSheet(
+        name="",
+        style_sheet_data={
+            "FillColor": {"Type": 0, "Values": [1.0, 0.5]},
+            "StrokeColor": {"Type": 0, "Values": [1.0, 0.75]},
+            "StrokeFlag": True,
+        },
+    )
+    assert style.fill_color == (1.0, 0.5, 0.5, 0.5)
+    assert style.stroke_color == (1.0, 0.75, 0.75, 0.75)
+    assert style.get_fill_color() == "#808080"
+    assert style.get_stroke_color() == "#bfbfbf"
+
+
 @pytest.mark.parametrize(
     "color",
     [
         {"Type": 3, "Values": [1.0, 0.5]},  # Unknown color type
+        {"Type": 0, "Values": [1.0]},  # Wrong number of values
         {"Type": 2, "Values": [1.0, 0.0, 0.0, 0.0]},  # Wrong number of values
         {"Values": [1.0, 0.0, 0.0, 0.0]},  # Missing type
     ],
