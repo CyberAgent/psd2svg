@@ -578,17 +578,21 @@ def test_manual_kerning_resets_at_paragraph_boundary(
     assert offsets
 
 
-def test_manual_kerning_uses_previous_superscript_size(
+@pytest.mark.parametrize(
+    "font_baseline",
+    [FontBaseline.SUPERSCRIPT, FontBaseline.SUBSCRIPT],
+    ids=["superscript", "subscript"],
+)
+def test_manual_kerning_uses_previous_script_size(
     monkeypatch: pytest.MonkeyPatch,
+    font_baseline: FontBaseline,
 ) -> None:
-    """Test that script sizing is part of the preceding character's em size."""
+    """Test that super/subscript sizing is part of the preceding character's em."""
     monkeypatch.setattr(
         StyleSheet,
         "font_baseline",
         property(
-            lambda style: (
-                FontBaseline.SUPERSCRIPT if style.kerning == 0 else FontBaseline.ROMAN
-            )
+            lambda style: font_baseline if style.kerning == 0 else FontBaseline.ROMAN
         ),
     )
 

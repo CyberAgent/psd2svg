@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Manual kerning used the current character's size across mixed-size runs** (#351)
+  - Boundary offsets now use the preceding drawable character's scaled size
+
 - **Divide and Subtract blend modes rendered as `difference`, inverting colors** (#339)
   - Divide, Subtract, Linear Burn and Linear Dodge are now exact on Color,
     Gradient and Pattern Overlay effects
