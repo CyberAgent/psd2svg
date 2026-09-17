@@ -317,14 +317,21 @@ class TextConverter(ConverterProtocol):
                     paragraph_offset_y += advance_y or 0.0
                 origin_x += paragraph_offset_x
                 origin_y += paragraph_offset_y
+                previous_font_size: float | None = None
                 for span in paragraph:
-                    self._add_text_span(
+                    _, emitted_font_size = self._add_text_span(
                         text_setting,
                         paragraph_node,
                         span,
                         paragraph_origin=(origin_x, origin_y),
                         text_element_scale=text_element_scale,
+                        kerning_reference_size=previous_font_size,
                     )
+                    # Manual kerning belongs to the boundary before the current
+                    # character. Empty and carriage-return-only runs do not create
+                    # such a boundary and must not replace the preceding size.
+                    if span.text.strip("\r"):
+                        previous_font_size = emitted_font_size
 
         if text_setting.has_warp():
             # When there is <textPath>, we can only optimize at the paragraph level.
@@ -662,7 +669,8 @@ class TextConverter(ConverterProtocol):
         span: Span,
         paragraph_origin: tuple[float, float] = (0.0, 0.0),
         text_element_scale: float | None = None,
-    ) -> ET.Element:
+        kerning_reference_size: float | None = None,
+    ) -> tuple[ET.Element, float]:
         """Add a text span to the paragraph node.
 
         Args:
@@ -673,6 +681,12 @@ class TextConverter(ConverterProtocol):
                 per-span transforms.
             text_element_scale: Inline-axis scale already applied to the parent
                 ``<text>`` element by :meth:`_apply_text_element_scaling`, if any.
+            kerning_reference_size: Emitted font size of the preceding drawable
+                character, or None at a paragraph boundary.
+
+        Returns:
+            The emitted ``<tspan>`` and its effective font size in the local SVG
+            coordinate system.
         """
         style = span.style
         # Get PostScript name from font index - no font resolution needed
@@ -687,6 +701,11 @@ class TextConverter(ConverterProtocol):
             text_scale_applied=text_element_scale is not None,
         )
         scaled_font_size = scaling.font_size
+        emitted_font_size = scaled_font_size
+        if style.font_baseline == FontBaseline.SUPERSCRIPT:
+            emitted_font_size *= text_setting.superscript_size
+        elif style.font_baseline == FontBaseline.SUBSCRIPT:
+            emitted_font_size *= text_setting.subscript_size
 
         # Determine font weight - only set for faux bold
         # (PostScript name encodes actual weight)
@@ -756,18 +775,14 @@ class TextConverter(ConverterProtocol):
                 "baseline-shift",
                 scaling.baseline_size * text_setting.superscript_position,
             )
-            svg_utils.set_attribute(
-                tspan, "font-size", scaled_font_size * text_setting.superscript_size
-            )
+            svg_utils.set_attribute(tspan, "font-size", emitted_font_size)
         elif style.font_baseline == FontBaseline.SUBSCRIPT:
             svg_utils.set_attribute(
                 tspan,
                 "baseline-shift",
                 -scaling.baseline_size * text_setting.subscript_position,
             )
-            svg_utils.set_attribute(
-                tspan, "font-size", scaled_font_size * text_setting.subscript_size
-            )
+            svg_utils.set_attribute(tspan, "font-size", emitted_font_size)
 
         # Apply letter spacing from tracking, tsume, and optional global offset
         # NOTE: Tracking is in 1/1000 em units.
@@ -801,8 +816,12 @@ class TextConverter(ConverterProtocol):
         # adjusts the space before it.
         # NOTE: letter-spacing adds space AFTER characters,
         # so we can't use it for kerning.
-        if style.kerning != 0:
-            kerning_offset = style.kerning / 1000 * scaled_font_size
+        if (
+            style.kerning != 0
+            and kerning_reference_size is not None
+            and span.text.strip("\r")
+        ):
+            kerning_offset = style.kerning / 1000 * kerning_reference_size
             # Use dx for horizontal text, dy for vertical text
             if text_setting.writing_direction == WritingDirection.HORIZONTAL_TB:
                 svg_utils.set_attribute(tspan, "dx", kerning_offset)
@@ -851,7 +870,7 @@ class TextConverter(ConverterProtocol):
             # NOTE: glyph-orientation-vertical is deprecated but may help
             # with compatibility.
             # svg_utils.set_attribute(tspan, "glyph-orientation-vertical", "90")
-        return tspan
+        return tspan, emitted_font_size
 
     def _calculate_text_scaling(
         self,

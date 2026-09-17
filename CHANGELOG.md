@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Vertical paragraph breaks advanced downward instead of creating columns** (#341)
 
+- **Manual kerning used the current character's size across mixed-size runs** (#351)
+  - Boundary offsets now use the preceding drawable character's scaled size
+
 - **Grayscale text rendered black regardless of its tone** (#350)
 
 - **CMYK colors converted incorrectly** (#348)
