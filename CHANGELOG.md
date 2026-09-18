@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Grayscale shape, stroke, effect and gradient colors aborted the conversion** (#354)
-  - They also converted inverted, rendering every grayscale color white
+  - The stored value was also read inverted, turning every grayscale color white
 
 - **CMYK gradients rendered white** (#354)
   - Interpolated gradient stops kept the source color mode, so their RGB
