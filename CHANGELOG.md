@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Vertical paragraph breaks advanced downward instead of creating columns** (#341)
+
 - **Dashed strokes emitted an unformatted `stroke-dashoffset`** (#356)
   - The number formatting helpers now accept psd-tools numeric wrappers instead
     of silently skipping formatting for them
