@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Japanese metrics kerning omitted proportional glyph advances** (#335)
+  - Browser output now enables the font's `palt` or `vpal` OpenType feature
+    when automatic kerning is active
+
 - **Gradient stops were rounded to a whole percent** (#364)
   - Stop offsets and opacities now go through the shared number formatter,
     keeping the sub-percent positions Photoshop's 0-4096 scale produces

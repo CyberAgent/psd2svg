@@ -493,15 +493,24 @@ Photoshop and SVG use different kerning algorithms, which may result in slight l
 
 **Photoshop Behavior:**
 
-* Uses optical kerning by default when AutoKern is enabled (most common case)
-* Optical kerning analyzes character shapes and applies visual adjustments beyond font tables
-* Can also use metrics kerning or manual kerning when explicitly configured
+* Supports metrics, optical, and manual kerning modes
+* Japanese fonts can supply proportional metrics through ``palt`` and ``vpal``
+* Optical kerning applies additional, shape-based adjustments computed by
+  Photoshop
 
 **SVG/Browser Behavior:**
 
 * Uses metrics kerning automatically via the CSS ``font-kerning: auto`` property (browser default)
 * Applies the font's built-in kerning tables without optical adjustments
+* Enables the OpenType ``palt`` feature for horizontal Japanese text and ``vpal``
+  for vertical Japanese text when ``AutoKerning`` is enabled
 * Manual kerning adjustments from PSD files are preserved via SVG ``dx``/``dy`` attributes
+
+The default resvg rasterizer does not interpret ``font-feature-settings``. The
+``palt`` and ``vpal`` adjustments therefore take effect in browser-based output,
+including the Playwright rasterizer, but not in resvg output. This support does
+not reproduce Photoshop's proprietary optical kerning adjustments, so text that
+uses optical kerning can still have different glyph positions.
 
 **Why They Differ:**
 
@@ -534,7 +543,9 @@ The offset is in pixels and is added to all letter-spacing values. Typical value
 
 **Technical Notes:**
 
-* The ``auto_kerning`` property in PSD files indicates optical kerning mode
+* The ``auto_kerning`` property reads the ``AutoKerning`` value from PSD EngineData
+* For Japanese runs with that value enabled, browser output requests ``palt`` or
+  ``vpal``; Photoshop optical kerning remains outside the scope of this mapping
 * SVG 1.1: ``kerning="auto"`` attribute enables kerning (default)
 * SVG 2.0/CSS: ``font-kerning: auto`` property enables kerning (browser default)
 * Manual kerning from PSD is always preserved regardless of the kerning mode

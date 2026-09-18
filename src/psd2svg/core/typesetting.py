@@ -400,7 +400,13 @@ class StyleSheet:
     @property
     def auto_kerning(self) -> bool:
         """Whether auto kerning is enabled."""
-        return bool(self.style_sheet_data.get("AutoKern", True))
+        # EngineData uses AutoKerning. Keep accepting AutoKern for compatibility
+        # with callers that may have constructed StyleSheet data themselves.
+        return bool(
+            self.style_sheet_data.get(
+                "AutoKerning", self.style_sheet_data.get("AutoKern", True)
+            )
+        )
 
     @property
     def kerning(self) -> int:
@@ -921,6 +927,11 @@ class TypeSetting:
             logger.warning(f"PostScript name not found for font index {font_index}.")
             return None
         return postscriptname.value
+
+    def is_japanese_font(self, font_index: int) -> bool:
+        """Whether the EngineData font record uses the Japanese script."""
+        font_info = self.font_set[font_index]
+        return int(font_info.get("Script", 0)) == 1
 
     def get_font_info(
         self,
