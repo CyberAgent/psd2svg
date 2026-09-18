@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Stroke effects below 100% opacity rendered fully opaque** (#PRNUM)
+- **Stroke effects below 100% opacity rendered fully opaque** (#363)
   - The percentage was written straight into `stroke-opacity`, which SVG
     clamps to 0-1
 
