@@ -100,3 +100,29 @@ def test_grayscale_solid_fill_colors() -> None:
     # so these are the naive conversions.
     fills = [node.attrib.get("fill") for node in converter.svg.findall(".//rect")]
     assert fills == ["#000000", "#bfbfbf"]
+
+
+def test_dashed_stroke_is_converted() -> None:
+    """Cover the dashed branch of stroke conversion end to end.
+
+    This is the only fixture with a non-empty ``line_dash_set``, so it is the
+    only test that reaches that branch at all. The rounding it depends on is
+    unit-tested separately in ``tests/test_svg_utils.py``; what is asserted
+    here is that the whole path produces the right attributes, including that
+    ``Stroke.line_dash_offset`` -- a ``UnitFloat`` despite psd-tools
+    annotating it as ``float`` -- is formatted rather than stringified.
+    """
+    psdimage = PSDImage.open(get_fixture("paint/stroke-2-dashed.psd"))
+    converter = Converter(psdimage)
+    converter.build()
+
+    nodes = [
+        node for node in converter.svg.iter() if "stroke-dashoffset" in node.attrib
+    ]
+    assert len(nodes) == 1
+    # Photoshop stores 1.3333333; unformatted it would reach the SVG in full.
+    assert nodes[0].attrib["stroke-dashoffset"] == "1.33"
+    # Dash set entries are unitless multiples of the line width, so they are
+    # scaled by it. The offset is stored in points and is not.
+    assert nodes[0].attrib["stroke-width"] == "8"
+    assert nodes[0].attrib["stroke-dasharray"] == "24,16"

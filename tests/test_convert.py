@@ -367,6 +367,7 @@ def test_paint_pattern(psd_file: str) -> None:
         "paint/stroke-1-color.psd",
         "paint/stroke-1-gradient.psd",
         "paint/stroke-1-pattern.psd",
+        "paint/stroke-2-dashed.psd",  # Dashed stroke with a fractional offset.
     ],
 )
 def test_paint_stroke(psd_file: str) -> None:
