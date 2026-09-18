@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dashed strokes emitted an unformatted `stroke-dashoffset`** (#356)
+  - The number formatting helpers now accept psd-tools numeric wrappers instead
+    of silently skipping formatting for them
+
 - **Grayscale shape, stroke, effect and gradient colors aborted the conversion** (#354)
   - The stored value was also read inverted, turning every grayscale color white
 

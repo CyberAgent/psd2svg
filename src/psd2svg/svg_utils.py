@@ -5,7 +5,7 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from re import Pattern
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence, SupportsFloat
 
 logger = logging.getLogger(__name__)
 
@@ -62,23 +62,58 @@ def safe_utf8(text: str) -> str:
     return ILLEGAL_XML_RE.sub(" ", text)
 
 
-def num2str(num: int | float | bool, digit: int = DEFAULT_NUMBER_DIGITS) -> str:
-    """Convert a number to a string, using the specified format for floats."""
+def _is_number(value: Any) -> bool:
+    """Whether :func:`num2str` can format the value.
+
+    The built-in types are tested first: the ``__float__`` lookup is only
+    needed for psd-tools' numeric wrappers, and this runs on every attribute
+    of every node.
+    """
+    return isinstance(value, (int, float, bool)) or hasattr(value, "__float__")
+
+
+def num2str(num: SupportsFloat, digit: int = DEFAULT_NUMBER_DIGITS) -> str:
+    """Convert a number to a string, using the specified format for floats.
+
+    Anything convertible through ``__float__`` is accepted, not just the
+    built-in numeric types: psd-tools wraps descriptor values in ``Double``,
+    ``Integer`` and ``UnitFloat``, which duck-type as numbers but subclass no
+    primitive, so an ``isinstance`` check against ``float`` misses them. Only
+    the numeric value is formatted: a ``UnitFloat``'s unit is never read, and
+    appending one stays the caller's job through :func:`num2str_with_unit`.
+
+    Raises:
+        ValueError: If the value is not a number, or cannot be converted to one.
+    """
     if isinstance(num, bool):
         return "true" if num else "false"
     if isinstance(num, int):
         return str(num)
     if isinstance(num, float):
-        if num.is_integer():
-            return str(int(num))
-        # Format float with specified number of digits, and trim trailing zeros
-        number = f"{num:.{digit}f}"
-        return f"{number[0]}{number[1:].rstrip('0').rstrip('.')}"
-    raise ValueError(f"Unsupported type: {type(num)}")
+        value = num
+    elif not hasattr(num, "__float__"):
+        # Checked before converting so that a numeric string stays rejected.
+        raise ValueError(f"Unsupported type: {type(num)}")
+    else:
+        try:
+            if hasattr(num, "__index__"):
+                # psd-tools' Integer, LargeInteger and Bool. Converting through
+                # __index__ keeps values above 2**53 exact, which float rounds.
+                return str(num.__index__())
+            value = float(num)
+        except (TypeError, ValueError, ArithmeticError) as error:
+            # Convertible in principle but not in fact, as for an array with
+            # more than one element or a fraction too large for a float.
+            raise ValueError(f"Unsupported type: {type(num)}") from error
+    if value.is_integer():
+        return str(int(value))
+    # Format float with specified number of digits, and trim trailing zeros
+    number = f"{value:.{digit}f}"
+    return f"{number[0]}{number[1:].rstrip('0').rstrip('.')}"
 
 
 def num2str_with_unit(
-    num: int | float, unit: str = "px", digit: int = DEFAULT_NUMBER_DIGITS
+    num: SupportsFloat, unit: str = "px", digit: int = DEFAULT_NUMBER_DIGITS
 ) -> str:
     """Convert a number to a string with a CSS unit appended.
 
@@ -102,7 +137,7 @@ def num2str_with_unit(
 
 
 def seq2str(
-    seq: Sequence[int | float | bool],
+    seq: Sequence[SupportsFloat],
     sep: str = ",",
     digit: int = DEFAULT_NUMBER_DIGITS,
 ) -> str:
@@ -422,11 +457,9 @@ def add_class(node: ET.Element, class_name: str) -> None:
 
 def set_attribute(node: ET.Element, key: str, value: Any) -> None:
     """Add an attribute to an XML node."""
-    if isinstance(value, (int, float, bool)):
+    if _is_number(value):
         node.set(key, num2str(value))
-    elif isinstance(value, list) and all(
-        isinstance(v, (int, float, bool)) for v in value
-    ):
+    elif isinstance(value, list) and all(_is_number(v) for v in value):
         node.set(key, seq2str(value))
     else:
         node.set(key, str(value))
