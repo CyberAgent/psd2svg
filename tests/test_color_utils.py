@@ -60,3 +60,35 @@ def test_cmyk_descriptor_conversion(
     desc = _cmyk_descriptor(*cmyk)
     assert descriptor2rgb(desc) == expected_rgb
     assert descriptor2hex(desc) == expected_hex
+
+
+def _grayscale_descriptor(gray: float) -> Descriptor:
+    """Build a Grayscale descriptor with a percent-black component."""
+    desc = Descriptor(classID=Klass.Grayscale)
+    desc[Enum.Gray] = Double(gray)
+    return desc
+
+
+@pytest.mark.parametrize(
+    "gray, expected_rgb, expected_hex",
+    [
+        (0.0, (255.0, 255.0, 255.0), "#ffffff"),
+        (25.0, (191.25, 191.25, 191.25), "#bfbfbf"),
+        (50.0, (127.5, 127.5, 127.5), "#808080"),
+        (100.0, (0.0, 0.0, 0.0), "#000000"),
+    ],
+)
+def test_grayscale_descriptor_conversion(
+    gray: float, expected_rgb: tuple[float, ...], expected_hex: str
+) -> None:
+    """Grayscale descriptors store percent black, so the value is inverted."""
+    desc = _grayscale_descriptor(gray)
+    assert descriptor2rgb(desc) == expected_rgb
+    assert descriptor2hex(desc) == expected_hex
+
+
+def test_grayscale_descriptor_defaults_to_white() -> None:
+    """A Grayscale descriptor without a component means 0% black."""
+    desc = Descriptor(classID=Klass.Grayscale)
+    assert descriptor2rgb(desc) == (255.0, 255.0, 255.0)
+    assert descriptor2hex(desc) == "#ffffff"
