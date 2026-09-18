@@ -662,6 +662,19 @@ class TextConverter(ConverterProtocol):
             )
             svg_utils.set_attribute(paragraph_node, "lengthAdjust", "spacingAndGlyphs")
 
+    @staticmethod
+    def _get_proportional_metrics_feature(
+        text_setting: TypeSetting, span: Span
+    ) -> str | None:
+        """Get the OpenType proportional-metrics feature for a text span."""
+        if not span.style.auto_kerning or not text_setting.is_japanese_font(
+            span.style.font
+        ):
+            return None
+        if text_setting.writing_direction == WritingDirection.VERTICAL_RL:
+            return "vpal"
+        return "palt"
+
     def _add_text_span(
         self,
         text_setting: TypeSetting,
@@ -740,6 +753,13 @@ class TextConverter(ConverterProtocol):
             svg_utils.append_attribute(tspan, "text-decoration", "underline")
         if style.strikethrough:
             svg_utils.append_attribute(tspan, "text-decoration", "line-through")
+
+        # Photoshop applies proportional alternate metrics to Japanese fonts when
+        # automatic metrics kerning is enabled. These OpenType features are off by
+        # default in browsers, so request the horizontal or vertical variant.
+        feature = self._get_proportional_metrics_feature(text_setting, span)
+        if feature is not None:
+            svg_utils.add_style(tspan, "font-feature-settings", f"'{feature}'")
 
         # Apply ligature settings using font-variant-ligatures
         # Photoshop defaults to ligatures=True (common ligatures enabled)
@@ -1231,6 +1251,10 @@ class TextConverter(ConverterProtocol):
         # Font style - only set for faux italic (PostScript name encodes actual style)
         if style.faux_italic:
             styles["font-style"] = "italic"
+
+        feature = self._get_proportional_metrics_feature(text_setting, span)
+        if feature is not None:
+            styles["font-feature-settings"] = f"'{feature}'"
 
         # Color
         fill_color = style.get_fill_color()
