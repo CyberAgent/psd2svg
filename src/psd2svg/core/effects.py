@@ -344,7 +344,8 @@ class EffectConverter(ConverterProtocol):
             svg_utils.set_attribute(use, "stroke", svg_utils.get_funciri(gradient))
 
         if effect.opacity != 100.0:
-            svg_utils.set_attribute(use, "stroke-opacity", effect.opacity)
+            # Effect opacity is a percentage; stroke-opacity is 0-1.
+            svg_utils.set_attribute(use, "stroke-opacity", effect.opacity / 100.0)
         if float(effect.size) != 1.0:
             svg_utils.set_attribute(use, "stroke-width", float(effect.size))
 

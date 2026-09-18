@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stroke effects below 100% opacity rendered fully opaque** (#PRNUM)
+  - The percentage was written straight into `stroke-opacity`, which SVG
+    clamps to 0-1
+
 - **Vertical paragraph breaks advanced downward instead of creating columns** (#341)
 
 - **Dashed strokes emitted an unformatted `stroke-dashoffset`** (#356)

@@ -440,6 +440,9 @@ def test_effects(psd_file: str) -> None:
         "effects/stroke-1-vector-gradient.psd",
         "effects/stroke-1-vector-pattern.psd",
         "effects/stroke-2-vector-color.psd",  # Stroke around stroke case.
+        # The only fixture with an effect below 100% opacity. Its stroke is
+        # thicker than its siblings' so the error is visible to MSE.
+        "effects/stroke-4-vector-color-opacity.psd",
     ],
 )
 def test_stroke_effects(psd_file: str) -> None:
