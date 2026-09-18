@@ -1,8 +1,11 @@
 """Tests for SVG utility functions."""
 
 import xml.etree.ElementTree as ET
+from typing import SupportsFloat
 
 import pytest
+from psd_tools.psd.descriptor import Bool, Double, Integer, LargeInteger, UnitFloat
+from psd_tools.terminology import Unit
 
 from psd2svg import svg_utils
 
@@ -94,6 +97,63 @@ class TestNum2Str:
         with pytest.raises(ValueError, match="Unsupported type"):
             svg_utils.num2str([1, 2, 3])  # type: ignore
 
+    def test_numeric_string_is_still_rejected(self) -> None:
+        """A string that happens to be numeric is not a number."""
+        with pytest.raises(ValueError, match="Unsupported type"):
+            svg_utils.num2str("1.5")  # type: ignore
+
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            (Double(12.0), "12"),
+            (Double(12.3456789), "12.35"),
+            (Double(-0.5), "-0.5"),
+            (Integer(3), "3"),
+            (UnitFloat(unit=Unit.Percent, value=50.0), "50"),
+            # Stroke.line_dash_offset is a UnitFloat, so this is the shape that
+            # reaches set_attribute from core/paint.py for a dashed stroke.
+            (UnitFloat(unit=Unit.Points, value=1.0 / 3.0), "0.33"),
+        ],
+    )
+    def test_psd_tools_wrappers(self, value: SupportsFloat, expected: str) -> None:
+        """psd-tools wraps descriptor numbers in types that subclass no primitive."""
+        assert svg_utils.num2str(value) == expected
+
+    def test_wrapper_honors_digit(self) -> None:
+        """The digit argument applies to wrappers as it does to floats."""
+        value = Double(0.123456)
+        assert svg_utils.num2str(value, digit=4) == "0.1235"
+        assert svg_utils.num2str(value, digit=1) == "0.1"
+
+    def test_large_integer_wrapper_keeps_precision(self) -> None:
+        """Integer wrappers format through int, so large values stay exact."""
+        value = 2**60 + 1
+        assert svg_utils.num2str(LargeInteger(value)) == str(value)
+
+    def test_wrapper_with_unit(self) -> None:
+        """The unit comes from the caller, never from a UnitFloat."""
+        value = UnitFloat(unit=Unit.Percent, value=50.0)
+        assert svg_utils.num2str_with_unit(value, "px") == "50px"
+
+    def test_boolean_wrapper_formats_as_a_number(self) -> None:
+        """psd-tools Bool is a NumericElement, so it formats as 1 rather than true.
+
+        Nothing passes one today. This pins the behavior, which is still better
+        than the "True" that string formatting produced before.
+        """
+        assert svg_utils.num2str(Bool(True)) == "1"
+        assert svg_utils.num2str(Bool(False)) == "0"
+
+    def test_unconvertible_number_raises_value_error(self) -> None:
+        """A value that claims __float__ but fails to convert still raises."""
+
+        class Bad:
+            def __float__(self) -> float:
+                raise TypeError("not really a number")
+
+        with pytest.raises(ValueError, match="Unsupported type"):
+            svg_utils.num2str(Bad())
+
 
 class TestSeq2Str:
     """Test the seq2str function for sequence formatting."""
@@ -167,6 +227,74 @@ class TestSeq2Str:
         """Test that tuples work as well as lists."""
         assert svg_utils.seq2str((1, 2, 3)) == "1,2,3"
         assert svg_utils.seq2str((0.5, 1.5), sep=" ") == "0.5 1.5"
+
+    def test_psd_tools_wrappers(self) -> None:
+        """Wrappers format the same as the plain numbers they wrap."""
+        values: list[SupportsFloat] = [
+            Double(1.0),
+            Integer(2),
+            UnitFloat(unit=Unit.Pixels, value=3.5),
+        ]
+        assert svg_utils.seq2str(values) == "1,2,3.5"
+        assert svg_utils.seq2str([Double(0.123456), 1]) == "0.12,1"
+
+
+class TestSetAttribute:
+    """Test the set_attribute function for attribute formatting."""
+
+    def test_plain_numbers(self) -> None:
+        """Numbers are formatted by num2str."""
+        node = ET.Element("rect")
+        svg_utils.set_attribute(node, "x", 12.0)
+        svg_utils.set_attribute(node, "y", 12.3456789)
+        svg_utils.set_attribute(node, "width", 5)
+        assert node.get("x") == "12"
+        assert node.get("y") == "12.35"
+        assert node.get("width") == "5"
+
+    @pytest.mark.parametrize(
+        "wrapped, plain",
+        [
+            (Double(12.0), 12.0),
+            (Double(12.3456789), 12.3456789),
+            (Integer(3), 3.0),
+            (UnitFloat(unit=Unit.Points, value=1.0 / 3.0), 1.0 / 3.0),
+        ],
+    )
+    def test_wrapper_matches_plain_float(
+        self, wrapped: SupportsFloat, plain: float
+    ) -> None:
+        """A wrapper is formatted identically to the float it wraps.
+
+        Wrappers used to miss the numeric branch and fall through to str(),
+        which skipped both the integer collapse and the digit rounding.
+        """
+        node = ET.Element("rect")
+        svg_utils.set_attribute(node, "wrapped", wrapped)
+        svg_utils.set_attribute(node, "plain", plain)
+        assert node.get("wrapped") == node.get("plain")
+
+    def test_list_of_wrappers(self) -> None:
+        """A list of wrappers takes the sequence branch."""
+        node = ET.Element("path")
+        svg_utils.set_attribute(node, "stroke-dasharray", [Double(4.0), Double(2.5)])
+        assert node.get("stroke-dasharray") == "4,2.5"
+
+    def test_strings_and_lists_are_unchanged(self) -> None:
+        """Non-numeric values keep going through str()."""
+        node = ET.Element("rect")
+        svg_utils.set_attribute(node, "fill", "none")
+        svg_utils.set_attribute(node, "class", ["a", "b"])
+        svg_utils.set_attribute(node, "missing", None)
+        assert node.get("fill") == "none"
+        assert node.get("class") == "['a', 'b']"
+        assert node.get("missing") == "None"
+
+    def test_booleans(self) -> None:
+        """Python bools still format as SVG keywords."""
+        node = ET.Element("rect")
+        svg_utils.set_attribute(node, "flag", True)
+        assert node.get("flag") == "true"
 
 
 class TestSvgFormatting:
