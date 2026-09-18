@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Gradient stops were rounded to a whole percent** (#364)
+  - Stop offsets and opacities now go through the shared number formatter,
+    keeping the sub-percent positions Photoshop's 0-4096 scale produces
+
 - **Stroke effects below 100% opacity rendered fully opaque** (#363)
   - The percentage was written straight into `stroke-opacity`, which SVG
     clamps to 0-1

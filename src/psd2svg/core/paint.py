@@ -240,11 +240,16 @@ class PaintConverter(ConverterProtocol):
         interpolator = GradientInterpolation(gradient)
         with self.set_current(node):
             for location, color, opacity in interpolator:
+                # Both values are fractions in 0.0-1.0, scaled here rather
+                # than left to create_node: num2str keeps its digits after
+                # the decimal point, so formatting the fraction would round
+                # every stop to the nearest whole percent, and Photoshop
+                # stores positions on a 0-4096 scale that rarely lands on one.
                 self.create_node(
                     "stop",
-                    offset=f"{location:.0%}",
+                    offset=svg_utils.num2str_with_unit(location * 100, "%"),
                     stop_color=color_utils.descriptor2hex(color),
-                    stop_opacity=f"{opacity:.0%}",
+                    stop_opacity=svg_utils.num2str_with_unit(opacity * 100, "%"),
                 )
 
         # TODO: Midpoint support?
