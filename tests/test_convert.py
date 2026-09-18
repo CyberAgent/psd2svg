@@ -299,6 +299,7 @@ def test_enable_title_flag() -> None:
         "paint/color-1.psd",
         "paint/color-2.psd",  # Fill opacity test for shape layer
         "paint/color-3.psd",  # Fill opacity test for raster layer
+        "paint/color-gray.psd",  # Grayscale color descriptors
     ],
 )
 def test_paint_color(psd_file: str) -> None:
@@ -337,6 +338,8 @@ def test_paint_color(psd_file: str) -> None:
         "paint/linear-gradient-7-offset.psd",
         # Interpolation test.
         "paint/linear-gradient-8-stops.psd",
+        # Grayscale color descriptors in gradient stops.
+        "paint/gradient-gray.psd",
         # Radial gradients.
         "paint/radial-gradient-1.psd",
     ],

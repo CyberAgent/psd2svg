@@ -91,10 +91,10 @@ def descriptor2rgb(desc: Descriptor) -> tuple[float, float, float]:
         return (r * 255.0, g * 255.0, b * 255.0)
 
     if desc.classID == Klass.Grayscale:
-        gray = desc.get(Enum.Gray, 0)
-        assert isinstance(gray, float)
-        gray_val = float(gray * 255.0)
-        return (gray_val, gray_val, gray_val)
+        # Photoshop stores "% black" here, so 0 is white and 100 is black --
+        # inverted from the luminance that EngineData text colors store.
+        gray = (1.0 - float(desc.get(Enum.Gray, 0)) / 100.0) * 255.0
+        return (gray, gray, gray)
 
     raise ValueError(f"Unsupported color mode: {desc.classID!r}")
 
@@ -135,9 +135,9 @@ def descriptor2hex(desc: Descriptor | None, fallback: str = "none") -> str:
         return f"#{r:02x}{g:02x}{b:02x}"
 
     if desc.classID == Klass.Grayscale:
-        gray = desc.get(Enum.Gray, 0)
-        assert isinstance(gray, float)
-        gray = float2uint8(gray)
+        # Photoshop stores "% black" here, so 0 is white and 100 is black --
+        # inverted from the luminance that EngineData text colors store.
+        gray = float2uint8(1.0 - float(desc.get(Enum.Gray, 0)) / 100.0)
         return f"#{gray:02x}{gray:02x}{gray:02x}"
 
     logger.warning("Unsupported color mode: %s", desc.classID)

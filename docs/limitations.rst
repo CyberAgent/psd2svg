@@ -694,8 +694,12 @@ profile.
 
 Grayscale colors are converted by replicating the single stored component
 across red, green and blue, and the embedded gray profile is ignored the same
-way. For example, 50% gray becomes ``#808080`` here, while Photoshop composites
-it as ``#959595`` through a Dot Gain 20% profile.
+way. The two places Photoshop stores that component disagree on its
+orientation: text colors carry a luminance, where 0 is black, while shape
+fill, stroke, effect and gradient stop colors carry a "% black", where 100 is
+black. Either
+way, 50% gray becomes ``#808080`` here, while Photoshop composites it as
+``#959595`` through a Dot Gain 20% profile.
 
 Precision
 ~~~~~~~~~
