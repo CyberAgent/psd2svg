@@ -126,3 +126,26 @@ def test_dashed_stroke_is_converted() -> None:
     # scaled by it. The offset is stored in points and is not.
     assert nodes[0].attrib["stroke-width"] == "8"
     assert nodes[0].attrib["stroke-dasharray"] == "24,16"
+
+
+def test_gradient_stops_keep_sub_percent_precision() -> None:
+    """Gradient stops are not rounded to a whole percent.
+
+    Photoshop stores stop positions on a 0-4096 scale, so a position set in the
+    UI rarely lands on a whole percent: 82 fixtures have a fractional offset.
+    This is the only one that also carries fractional opacities, so it pins
+    both attributes at once.
+    """
+    psdimage = PSDImage.open(get_fixture("paint/linear-gradient-8-stops.psd"))
+    converter = Converter(psdimage)
+    converter.build()
+
+    # Rounded to whole percents the offsets would read 0/33/90/100% and the
+    # opacities 25/25/88/100%. The colors are asserted alongside them so that
+    # the interpolated stops this fixture adds are covered too.
+    assert [node.attrib for node in converter.svg.findall(".//stop")] == [
+        {"offset": "0%", "stop-color": "#12d5df", "stop-opacity": "25.1%"},
+        {"offset": "33.03%", "stop-color": "#668cea", "stop-opacity": "25.1%"},
+        {"offset": "89.67%", "stop-color": "#f70fff", "stop-opacity": "88.45%"},
+        {"offset": "100%", "stop-color": "#f70fff", "stop-opacity": "100%"},
+    ]
