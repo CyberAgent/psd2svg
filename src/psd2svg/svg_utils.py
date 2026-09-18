@@ -91,20 +91,20 @@ def num2str(num: SupportsFloat, digit: int = DEFAULT_NUMBER_DIGITS) -> str:
         return str(num)
     if isinstance(num, float):
         value = num
-    elif hasattr(num, "__index__"):
-        # psd-tools' Integer, LargeInteger and Bool. Converting through
-        # __index__ keeps values above 2**53 exact, which float would round.
-        return str(num.__index__())
-    elif hasattr(num, "__float__"):
+    elif not hasattr(num, "__float__"):
+        # Checked before converting so that a numeric string stays rejected.
+        raise ValueError(f"Unsupported type: {type(num)}")
+    else:
         try:
+            if hasattr(num, "__index__"):
+                # psd-tools' Integer, LargeInteger and Bool. Converting through
+                # __index__ keeps values above 2**53 exact, which float rounds.
+                return str(num.__index__())
             value = float(num)
         except (TypeError, ValueError, ArithmeticError) as error:
             # Convertible in principle but not in fact, as for an array with
             # more than one element or a fraction too large for a float.
             raise ValueError(f"Unsupported type: {type(num)}") from error
-    else:
-        # Checked before converting so that a numeric string stays rejected.
-        raise ValueError(f"Unsupported type: {type(num)}")
     if value.is_integer():
         return str(int(value))
     # Format float with specified number of digits, and trim trailing zeros

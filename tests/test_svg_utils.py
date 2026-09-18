@@ -3,6 +3,7 @@
 import xml.etree.ElementTree as ET
 from typing import SupportsFloat
 
+import numpy
 import pytest
 from psd_tools.psd.descriptor import Bool, Double, Integer, LargeInteger, UnitFloat
 from psd_tools.terminology import Unit
@@ -153,6 +154,14 @@ class TestNum2Str:
 
         with pytest.raises(ValueError, match="Unsupported type"):
             svg_utils.num2str(Bad())
+
+    def test_unindexable_number_raises_value_error(self) -> None:
+        """The __index__ fast path translates its errors too.
+
+        A multi-element array exposes both protocols but can satisfy neither.
+        """
+        with pytest.raises(ValueError, match="Unsupported type"):
+            svg_utils.num2str(numpy.array([1.5, 2.5]))
 
 
 class TestSeq2Str:
