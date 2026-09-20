@@ -11,12 +11,17 @@ Weight values follow fontconfig conventions:
 - 0 = thin (CSS 100)
 - 40 = extralight (CSS 200)
 - 50 = light (CSS 300)
+- 55 = demilight (CSS 350)
+- 75 = book (CSS 380)
 - 80 = regular/normal (CSS 400)
 - 100 = medium (CSS 500)
 - 180 = semibold (CSS 600)
 - 200 = bold (CSS 700)
 - 205 = extrabold (CSS 800)
 - 210 = black (CSS 900)
+- 215 = extrablack (CSS 1000)
+
+Values between these points interpolate; see core.font_weights.
 """
 
 from typing import Any
@@ -26,7 +31,8 @@ from typing import Any
 #   W1: 0.0 → 40.0 (extralight)
 #   W2: 0.0 → 45.0 (between extralight and light)
 #   W3: 0.0 → 50.0 (light)
-# This provides better progression and accuracy for Japanese font weight variants.
+# These round-trip to the faces' own OS/2.usWeightClass (W0-W9 →
+# 100/200/250/300/400/500/600/700/800/900) via core.font_weights.
 _JAPANESE_WEIGHTS = {
     "W0": 0.0,
     "W1": 40.0,

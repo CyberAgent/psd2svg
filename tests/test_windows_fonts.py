@@ -221,15 +221,22 @@ class TestWindowsFontResolverWeightConversion:
         """Test _get_weight_from_os2() interpolates non-standard weights."""
         resolver = windows_fonts.WindowsFontResolver()
 
-        # Test weight 350 (between 300 and 400)
+        # Test weight 250 (Hiragino W2, between 200 and 300)
+        mock_font = MagicMock()
+        mock_font.__contains__ = lambda self, key: True
+        mock_font.__getitem__ = lambda self, key: MagicMock(usWeightClass=250)
+
+        result = resolver._get_weight_from_os2(mock_font)
+
+        # Should interpolate: 40.0 + 0.5 * (50.0 - 40.0) = 45.0
+        assert result == 45.0
+
+        # 350 (demilight) is a point on fontconfig's own scale, not interpolated
         mock_font = MagicMock()
         mock_font.__contains__ = lambda self, key: True
         mock_font.__getitem__ = lambda self, key: MagicMock(usWeightClass=350)
 
-        result = resolver._get_weight_from_os2(mock_font)
-
-        # Should interpolate: 50.0 + 0.5 * (80.0 - 50.0) = 65.0
-        assert result == 65.0
+        assert resolver._get_weight_from_os2(mock_font) == 55.0
 
     def test_get_weight_from_os2_edge_cases(self) -> None:
         """Test _get_weight_from_os2() edge cases (< 100, > 900)."""
@@ -242,12 +249,19 @@ class TestWindowsFontResolverWeightConversion:
         result = resolver._get_weight_from_os2(mock_font)
         assert result == 0.0
 
-        # Weight > 900
+        # Weight > 900 interpolates towards extrablack (1000 -> 215.0)
         mock_font = MagicMock()
         mock_font.__contains__ = lambda self, key: True
         mock_font.__getitem__ = lambda self, key: MagicMock(usWeightClass=950)
         result = resolver._get_weight_from_os2(mock_font)
-        assert result == 210.0
+        assert result == 212.5
+
+        # Beyond the scale, clamp
+        mock_font = MagicMock()
+        mock_font.__contains__ = lambda self, key: True
+        mock_font.__getitem__ = lambda self, key: MagicMock(usWeightClass=1100)
+        result = resolver._get_weight_from_os2(mock_font)
+        assert result == 215.0
 
     def test_get_weight_from_os2_no_table(self) -> None:
         """Test _get_weight_from_os2() returns default when OS/2 table missing."""

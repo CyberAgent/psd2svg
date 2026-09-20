@@ -655,20 +655,21 @@ class SVGDocument:
         Note:
             Only sets font-weight if not 400 (Regular, CSS default).
             Only sets font-style if italic.
-            Preserves existing font-weight/font-style (from faux bold/italic).
         """
-        # Set font-weight if not Regular (400)
-        # Note: Only set if element doesn't already have font-weight
-        # (preserve faux-bold from text.py if present)
-        if not element.get("font-weight"):
-            css_weight = resolved_font.css_weight
-            if css_weight != 400:
-                svg_utils.set_attribute(element, "font-weight", css_weight)
+        # The face's own weight always wins: faux bold is an outline thickening
+        # emitted as a stroke in core/text.py, not a font-weight (issue #337).
+        # A Regular face needs no attribute, but any weight already on the
+        # element has to go, or it would outlive the face it contradicts.
+        css_weight = resolved_font.css_weight
+        if css_weight != 400:
+            svg_utils.set_attribute(element, "font-weight", css_weight)
+        else:
+            element.attrib.pop("font-weight", None)
 
         # Set font-style if italic
-        # Note: Only set if element doesn't already have font-style
-        # (preserve faux-italic from text.py if present)
-        if not element.get("font-style") and resolved_font.italic:
+        # Note: faux italic already set font-style="italic" in core/text.py,
+        # so this only adds it for faces that are themselves italic.
+        if resolved_font.italic:
             svg_utils.set_attribute(element, "font-style", "italic")
 
     def _resolve_postscript_names_static(self, svg: ET.Element) -> None:
@@ -687,8 +688,9 @@ class SVGDocument:
             - Updates font-family, font-weight, and font-style attributes
             - Returns nothing (no resolved_fonts_map needed)
         """
-        # Get all unique PostScript names used in SVG
-        postscript_names = svg_utils.extract_font_families(svg)
+        # Get all unique PostScript names used in SVG. extract_font_families()
+        # returns a set, so sort it to keep the traversal order stable.
+        postscript_names = sorted(svg_utils.extract_font_families(svg))
 
         for ps_name in postscript_names:
             # Resolve using static mapping only (no platform queries)
@@ -756,12 +758,13 @@ class SVGDocument:
         Note:
             - Always uses platform-specific resolution (fontconfig/Windows registry)
             - Extracts charset from text elements for optimal font matching
-            - Preserves existing font-weight/font-style (from faux bold/italic)
             - Only sets font-weight if not 400 (Regular, CSS default)
             - Only sets font-style if italic
         """
-        # Get all unique PostScript names used in SVG
-        postscript_names = svg_utils.extract_font_families(svg)
+        # Get all unique PostScript names used in SVG. extract_font_families()
+        # returns a set, so sort it: the order decides which face wins a
+        # @font-face descriptor collision in _generate_css_rules_for_fonts().
+        postscript_names = sorted(svg_utils.extract_font_families(svg))
 
         # Track resolved fonts for reuse in font embedding
         resolved_fonts_map: dict[str, FontInfo] = {}
@@ -858,7 +861,28 @@ class SVGDocument:
         css_rules: list[str] = []
         source_desc = "data URI" if use_data_uri else "file:// URL"
 
+        # A @font-face rule is selected by (family, weight, style), so two faces
+        # sharing those shadow each other in the browser. Report that rather
+        # than resolve it: each face carries its own subset, so dropping one
+        # would take its glyphs with it (issue #337).
+        emitted: dict[tuple[str, int, bool], str] = {}
+
         for resolved_font in resolved_fonts:
+            descriptor = (
+                resolved_font.family,
+                resolved_font.css_weight,
+                resolved_font.italic,
+            )
+            if descriptor in emitted:
+                logger.warning(
+                    f"Font '{resolved_font.file}' has the same @font-face "
+                    f"descriptor as '{emitted[descriptor]}' "
+                    f"(family='{resolved_font.family}', "
+                    f"weight={resolved_font.css_weight}, "
+                    f"style={'italic' if resolved_font.italic else 'normal'}), "
+                    "so which one a renderer picks is undefined."
+                )
+
             # Step 4: Generate CSS source (data URI or file URL)
             try:
                 # Generate CSS source based on mode
@@ -879,6 +903,7 @@ class SVGDocument:
                 # Generate @font-face CSS rule
                 css_rule = resolved_font.to_font_face_css(css_source)
                 css_rules.append(css_rule)
+                emitted.setdefault(descriptor, resolved_font.file)
 
                 logger.debug(
                     f"Inserted CSS @font-face for '{resolved_font.family}' "

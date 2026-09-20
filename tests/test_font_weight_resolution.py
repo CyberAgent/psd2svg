@@ -83,11 +83,16 @@ class TestFontWeightResolution:
         assert text.get("font-weight") is None  # No attribute for 400 (Regular)
         assert text.get("font-style") is None
 
-    def test_preserve_existing_faux_bold(self) -> None:
-        """Test that existing font-weight (faux bold) is preserved."""
+    def test_resolved_weight_wins_over_existing(self) -> None:
+        """Test that the resolved face's weight replaces any existing one.
+
+        The resolution step used to skip elements that already carried a
+        font-weight, which made faux bold discard the specified face's weight.
+        See GitHub issue #337.
+        """
         svg_str = (
             '<svg xmlns="http://www.w3.org/2000/svg">'
-            '<text font-family="ArialMT" font-weight="bold">Text</text></svg>'
+            '<text font-family="HiraMinStdN-W2" font-weight="bold">Text</text></svg>'
         )
         svg = ET.fromstring(svg_str)
         doc = SVGDocument(svg=svg, images={})
@@ -97,11 +102,16 @@ class TestFontWeightResolution:
         ns = {"svg": "http://www.w3.org/2000/svg"}
         text = svg.find(".//svg:text", ns)
         assert text is not None
-        assert text.get("font-family") == "Arial"
-        assert text.get("font-weight") == "bold"  # Preserved from original (faux bold)
+        assert text.get("font-family") == "Hiragino Mincho StdN"
+        assert text.get("font-weight") == "250"  # W2, not the pre-existing bold
 
-    def test_preserve_existing_faux_italic(self) -> None:
-        """Test that existing font-style (faux italic) is preserved."""
+    def test_faux_italic_survives_a_non_italic_face(self) -> None:
+        """Test that faux italic is not undone by the resolution step.
+
+        Unlike faux bold, faux italic is still emitted as font-style in
+        core/text.py, so the resolution step must leave it alone on a face that
+        is not itself italic.
+        """
         svg_str = (
             '<svg xmlns="http://www.w3.org/2000/svg">'
             '<text font-family="ArialMT" font-style="italic">Text</text></svg>'
@@ -115,9 +125,8 @@ class TestFontWeightResolution:
         text = svg.find(".//svg:text", ns)
         assert text is not None
         assert text.get("font-family") == "Arial"
-        assert (
-            text.get("font-style") == "italic"
-        )  # Preserved from original (faux italic)
+        assert text.get("font-style") == "italic"
+        assert text.get("font-weight") is None  # Arial is Regular
 
     def test_various_font_weights(self) -> None:
         """Test that various font weights are correctly set."""
