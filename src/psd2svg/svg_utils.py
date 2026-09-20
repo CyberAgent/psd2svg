@@ -492,13 +492,19 @@ def set_style(node: ET.Element, key: str, value: Any) -> None:
         node.set("style", declaration)
         return
 
+    # Replace the first declaration in place, keeping its position relative to
+    # any shorthand, and drop later duplicates: one of those would otherwise
+    # override the value being set here.
     target = key.lower()
-    declarations = _split_declarations(style)
-    for index, existing in enumerate(declarations):
-        if _declaration_property(existing) == target:
-            declarations[index] = declaration
-            break
-    else:
+    declarations: list[str] = []
+    replaced = False
+    for existing in _split_declarations(style):
+        if _declaration_property(existing) != target:
+            declarations.append(existing)
+        elif not replaced:
+            declarations.append(declaration)
+            replaced = True
+    if not replaced:
         declarations.append(declaration)
     node.set("style", "; ".join(declarations))
 

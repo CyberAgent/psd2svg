@@ -335,6 +335,20 @@ class TestStyleDeclarations:
         svg_utils.remove_style(node, "font-family")
         assert "style" not in node.attrib
 
+    def test_set_style_drops_overriding_duplicates(self) -> None:
+        """A later duplicate would override the value being set, so it goes."""
+        node = ET.Element("span")
+        node.set("style", "font-weight: 400; color: red; font-weight: 900")
+        svg_utils.set_style(node, "font-weight", 700)
+        assert node.get("style") == "font-weight: 700; color: red"
+
+    def test_remove_style_drops_every_duplicate(self) -> None:
+        """Removal leaves no declaration of the property behind."""
+        node = ET.Element("span")
+        node.set("style", "font-weight: 400; color: red; font-weight: 900")
+        svg_utils.remove_style(node, "font-weight")
+        assert node.get("style") == "color: red"
+
     def test_property_names_are_case_insensitive(self) -> None:
         """CSS property names do not carry case, so neither does the matching."""
         node = ET.Element("span")
