@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Unsupported adjustment layers now say so precisely** (#PR)
+- **Unsupported adjustment layers now say so precisely** (#371)
   - Black & White, Selective Color, Vibrance and Color Lookup are documented as
     unrepresentable in SVG filters rather than pending, and every unsupported
     adjustment now warns that the layer is omitted from the output
