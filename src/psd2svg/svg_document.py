@@ -862,8 +862,9 @@ class SVGDocument:
         source_desc = "data URI" if use_data_uri else "file:// URL"
 
         # A @font-face rule is selected by (family, weight, style), so two faces
-        # sharing those would shadow each other in the browser. Emit the first
-        # and report the rest instead of writing dead rules (issue #337).
+        # sharing those shadow each other in the browser. Report that rather
+        # than resolve it: each face carries its own subset, so dropping one
+        # would take its glyphs with it (issue #337).
         emitted: dict[tuple[str, int, bool], str] = {}
 
         for resolved_font in resolved_fonts:
@@ -878,10 +879,9 @@ class SVGDocument:
                     f"descriptor as '{emitted[descriptor]}' "
                     f"(family='{resolved_font.family}', "
                     f"weight={resolved_font.css_weight}, "
-                    f"style={'italic' if resolved_font.italic else 'normal'}). "
-                    "Only the first is embedded."
+                    f"style={'italic' if resolved_font.italic else 'normal'}), "
+                    "so which one a renderer picks is undefined."
                 )
-                continue
 
             # Step 4: Generate CSS source (data URI or file URL)
             try:
@@ -903,7 +903,7 @@ class SVGDocument:
                 # Generate @font-face CSS rule
                 css_rule = resolved_font.to_font_face_css(css_source)
                 css_rules.append(css_rule)
-                emitted[descriptor] = resolved_font.file
+                emitted.setdefault(descriptor, resolved_font.file)
 
                 logger.debug(
                     f"Inserted CSS @font-face for '{resolved_font.family}' "

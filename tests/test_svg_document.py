@@ -168,7 +168,12 @@ class TestFontFaceCollision:
     """Tests for @font-face descriptor collision detection (issue #337)."""
 
     @staticmethod
-    def _font(postscript_name: str, path: Path, weight: float) -> FontInfo:
+    def _font(
+        postscript_name: str,
+        path: Path,
+        weight: float,
+        charset: set[int] | None = None,
+    ) -> FontInfo:
         path.write_bytes(b"")
         return FontInfo(
             postscript_name=postscript_name,
@@ -176,12 +181,17 @@ class TestFontFaceCollision:
             family="Test Family",
             style="Test",
             weight=weight,
+            charset=charset,
         )
 
-    def test_colliding_descriptors_emit_one_rule(
+    def test_colliding_descriptors_are_reported(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Two faces with the same (family, weight, style) shadow each other."""
+        """Two faces with the same (family, weight, style) shadow each other.
+
+        The collision is reported but both rules are still emitted: each face
+        carries its own subset, so dropping one would take its glyphs with it.
+        """
         doc = SVGDocument(svg=ET.Element("svg"), images={})
         first = tmp_path / "a.ttf"
         second = tmp_path / "b.ttf"
@@ -195,9 +205,28 @@ class TestFontFaceCollision:
                 fonts, subset_fonts=False, font_format="woff2", use_data_uri=False
             )
 
-        assert len(rules) == 1
+        assert len(rules) == 2
         assert first.name in rules[0]
+        assert second.name in rules[1]
         assert str(second) in caplog.text
+
+    def test_colliding_faces_keep_their_own_charsets(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A collision must not cost either face the glyphs only it covers."""
+        doc = SVGDocument(svg=ET.Element("svg"), images={})
+        first = self._font("Test-A", tmp_path / "a.ttf", 50.0, {ord("A")})
+        second = self._font("Test-B", tmp_path / "b.ttf", 50.0, {ord("B")})
+
+        with caplog.at_level(logging.WARNING):
+            rules = doc._generate_css_rules_for_fonts(
+                [first, second],
+                subset_fonts=True,
+                font_format="woff2",
+                use_data_uri=False,
+            )
+
+        assert len(rules) == 2
 
     def test_distinct_descriptors_both_emitted(self, tmp_path: Path) -> None:
         """Neighbouring weights stay distinguishable, so both rules survive."""

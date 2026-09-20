@@ -499,6 +499,8 @@ Limitations:
   not read Photoshop's character stroke width yet.
 - A translucent fill is composited twice where the stroke underlies it, so the
   stem interior reads darker than its fringe. Photoshop keeps one uniform alpha.
+- In ``foreignObject`` output the resolved face weight never reaches the span's
+  CSS, so the thickening lands on the family's Regular face.
 - Faux *italic* is still emitted as ``font-style: italic``, which selects a real
   italic face where one exists rather than shearing the specified face.
 
@@ -608,8 +610,9 @@ produce ``@font-face`` rules with identical ``(family, weight, style)``
 descriptors, so the second shadows the first. Through the table they map back to
 their own ``usWeightClass``, 250 and 300.
 
-``_generate_css_rules_for_fonts()`` additionally detects any remaining
-descriptor collision, emitting the first face and warning about the rest. It
+``_generate_css_rules_for_fonts()`` additionally reports any remaining
+descriptor collision. It still emits every rule: each face carries its own
+subset, so suppressing one would take the glyphs only it covers with it. It
 cannot see two faces that share one font file, because ``resolved_fonts_map``
 is keyed by file path and collapses them before the rules are generated.
 
