@@ -473,11 +473,15 @@ class AdjustmentConverter(ConverterProtocol):
     ) -> ET.Element | None:
         """Add a black and white adjustment layer to the svg document.
 
-        Note: This adjustment layer type is not yet implemented.
+        Note: Not supported. Photoshop's per-hue-range weighting has no SVG
+        filter equivalent, so the layer is omitted from the output.
         """
         logger.warning(
-            f"Black and White adjustment layer is not yet implemented: "
-            f"'{layer.name}' ({layer.kind})"
+            f"Black and White adjustment layer is not supported and is omitted "
+            f"from the output: '{layer.name}' ({layer.kind}). Photoshop weights "
+            f"each pixel by which of six color ranges its hue falls into, which "
+            f"SVG filter primitives cannot classify. Flatten the adjustment in "
+            f"Photoshop before conversion."
         )
         return None
 
@@ -486,11 +490,13 @@ class AdjustmentConverter(ConverterProtocol):
     ) -> ET.Element | None:
         """Add a channel mixer adjustment layer to the svg document.
 
-        Note: This adjustment layer type is not yet implemented.
+        Note: Not yet implemented, tracked by issue #369. The layer is omitted
+        from the output.
         """
         logger.warning(
-            f"Channel Mixer adjustment layer is not yet implemented: "
-            f"'{layer.name}' ({layer.kind})"
+            f"Channel Mixer adjustment layer is not yet implemented and is "
+            f"omitted from the output: '{layer.name}' ({layer.kind}). "
+            f"See https://github.com/CyberAgent/psd2svg/issues/369."
         )
         return None
 
@@ -499,11 +505,14 @@ class AdjustmentConverter(ConverterProtocol):
     ) -> ET.Element | None:
         """Add a color lookup adjustment layer to the svg document.
 
-        Note: This adjustment layer type is not yet implemented.
+        Note: Not supported. A 3D LUT has no SVG filter primitive and psd-tools
+        does not expose the data, so the layer is omitted from the output.
         """
         logger.warning(
-            f"Color Lookup adjustment layer is not yet implemented: "
-            f"'{layer.name}' ({layer.kind})"
+            f"Color Lookup adjustment layer is not supported and is omitted "
+            f"from the output: '{layer.name}' ({layer.kind}). A 3D LUT has no "
+            f"SVG filter primitive, and psd-tools does not expose the lookup "
+            f"data. Flatten the adjustment in Photoshop before conversion."
         )
         return None
 
@@ -577,11 +586,13 @@ class AdjustmentConverter(ConverterProtocol):
     ) -> ET.Element | None:
         """Add a gradient map adjustment layer to the svg document.
 
-        Note: This adjustment layer type is not yet implemented.
+        Note: Not yet implemented, tracked by issue #368. The layer is omitted
+        from the output.
         """
         logger.warning(
-            f"Gradient Map adjustment layer is not yet implemented: "
-            f"'{layer.name}' ({layer.kind})"
+            f"Gradient Map adjustment layer is not yet implemented and is "
+            f"omitted from the output: '{layer.name}' ({layer.kind}). "
+            f"See https://github.com/CyberAgent/psd2svg/issues/368."
         )
         return None
 
@@ -661,11 +672,13 @@ class AdjustmentConverter(ConverterProtocol):
     ) -> ET.Element | None:
         """Add a photo filter adjustment layer to the svg document.
 
-        Note: This adjustment layer type is not yet implemented.
+        Note: Not yet implemented, tracked by issue #370. The layer is omitted
+        from the output.
         """
         logger.warning(
-            f"Photo Filter adjustment layer is not yet implemented: "
-            f"'{layer.name}' ({layer.kind})"
+            f"Photo Filter adjustment layer is not yet implemented and is "
+            f"omitted from the output: '{layer.name}' ({layer.kind}). "
+            f"See https://github.com/CyberAgent/psd2svg/issues/370."
         )
         return None
 
@@ -674,11 +687,15 @@ class AdjustmentConverter(ConverterProtocol):
     ) -> ET.Element | None:
         """Add a selective color adjustment layer to the svg document.
 
-        Note: This adjustment layer type is not yet implemented.
+        Note: Not supported. Photoshop's per-hue-range adjustment has no SVG
+        filter equivalent, so the layer is omitted from the output.
         """
         logger.warning(
-            f"Selective Color adjustment layer is not yet implemented: "
-            f"'{layer.name}' ({layer.kind})"
+            f"Selective Color adjustment layer is not supported and is omitted "
+            f"from the output: '{layer.name}' ({layer.kind}). Photoshop adjusts "
+            f"each pixel by which color range its hue falls into, which SVG "
+            f"filter primitives cannot classify. Flatten the adjustment in "
+            f"Photoshop before conversion."
         )
         return None
 
@@ -687,11 +704,15 @@ class AdjustmentConverter(ConverterProtocol):
     ) -> ET.Element | None:
         """Add a vibrance adjustment layer to the svg document.
 
-        Note: This adjustment layer type is not yet implemented.
+        Note: Not supported. The adjustment is nonlinear in each pixel's
+        existing saturation, so the layer is omitted from the output.
         """
         logger.warning(
-            f"Vibrance adjustment layer is not yet implemented: "
-            f"'{layer.name}' ({layer.kind})"
+            f"Vibrance adjustment layer is not supported and is omitted from "
+            f"the output: '{layer.name}' ({layer.kind}). The adjustment is "
+            f"nonlinear in each pixel's existing saturation, which is not a "
+            f"per-channel quantity SVG filters can compute. Flatten the "
+            f"adjustment in Photoshop before conversion."
         )
         return None
 
