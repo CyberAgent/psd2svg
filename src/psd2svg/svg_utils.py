@@ -247,6 +247,18 @@ def create_xhtml_node(
     return node
 
 
+def is_xhtml_element(node: ET.Element) -> bool:
+    """Check whether a node is an XHTML element, i.e. lives inside <foreignObject>.
+
+    Args:
+        node: Element to test.
+
+    Returns:
+        True if the node's tag carries the XHTML namespace.
+    """
+    return isinstance(node.tag, str) and node.tag.startswith(f"{{{XHTML_NAMESPACE}}}")
+
+
 def styles_to_string(styles: dict[str, str]) -> str:
     """Convert a dictionary of CSS styles to a CSS string.
 
@@ -442,6 +454,112 @@ def add_style(node: ET.Element, key: str, value: Any) -> None:
         node.set("style", f"{node.get('style')}; {key}: {value}")
     else:
         node.set("style", f"{key}: {value}")
+
+
+def _split_declarations(style: str) -> list[str]:
+    """Split a style attribute into its non-empty, whitespace-trimmed declarations.
+
+    Note:
+        Naive splitter: it assumes no declaration value contains a semicolon,
+        which holds for the styles psd2svg builds via styles_to_string(). A
+        data URI or a quoted family name with a semicolon would be split apart.
+    """
+    return [part.strip() for part in style.split(";") if part.strip()]
+
+
+def _declaration_property(declaration: str) -> str:
+    """Return the property name of a single CSS declaration, lowercased.
+
+    CSS property names are case-insensitive, so comparisons use this form.
+    """
+    return declaration.split(":", 1)[0].strip().lower()
+
+
+def set_style(node: ET.Element, key: str, value: Any) -> None:
+    """Set a CSS property on an XML node, replacing any existing declaration.
+
+    Unlike :func:`add_style`, calling this twice for the same property leaves a
+    single declaration behind instead of two competing ones.
+
+    Args:
+        node: Element to update.
+        key: CSS property name.
+        value: CSS value. Numbers are formatted like attribute values.
+    """
+    declaration = f"{key}: {num2str(value) if _is_number(value) else value}"
+    style = node.get("style")
+    if not style:
+        node.set("style", declaration)
+        return
+
+    # Replace the first declaration in place, keeping its position relative to
+    # any shorthand, and drop later duplicates: one of those would otherwise
+    # override the value being set here.
+    target = key.lower()
+    declarations: list[str] = []
+    replaced = False
+    for existing in _split_declarations(style):
+        if _declaration_property(existing) != target:
+            declarations.append(existing)
+        elif not replaced:
+            declarations.append(declaration)
+            replaced = True
+    if not replaced:
+        declarations.append(declaration)
+    node.set("style", "; ".join(declarations))
+
+
+def remove_style(node: ET.Element, key: str) -> None:
+    """Remove a CSS property from an XML node, dropping an emptied style attribute.
+
+    Args:
+        node: Element to update.
+        key: CSS property name to remove.
+    """
+    style = node.get("style")
+    if not style:
+        return
+
+    target = key.lower()
+    declarations = _split_declarations(style)
+    kept = [d for d in declarations if _declaration_property(d) != target]
+    if len(kept) == len(declarations):
+        return
+    if kept:
+        node.set("style", "; ".join(kept))
+    else:
+        del node.attrib["style"]
+
+
+def set_presentation_property(node: ET.Element, key: str, value: Any) -> None:
+    """Set a styling property where the node's markup language actually reads it.
+
+    SVG elements take presentation attributes; XHTML elements inside a
+    <foreignObject> have no such attributes, so the property goes into their
+    style declaration instead.
+
+    Args:
+        node: Element to update.
+        key: Property name (e.g. "font-weight").
+        value: Property value.
+    """
+    if is_xhtml_element(node):
+        set_style(node, key, value)
+    else:
+        set_attribute(node, key, value)
+
+
+def remove_presentation_property(node: ET.Element, key: str) -> None:
+    """Remove a styling property set by :func:`set_presentation_property`.
+
+    Args:
+        node: Element to update.
+        key: Property name to remove.
+    """
+    if is_xhtml_element(node):
+        remove_style(node, key)
+    else:
+        node.attrib.pop(key, None)
 
 
 def add_class(node: ET.Element, class_name: str) -> None:

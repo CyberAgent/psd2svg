@@ -18,9 +18,10 @@ import pytest
 from PIL import Image
 from psd_tools import PSDImage
 
-from psd2svg import SVGDocument
+from psd2svg import SVGDocument, svg_utils
 from psd2svg.core.font_utils import FontInfo, create_file_url, encode_font_data_uri
 from psd2svg.core.text import TextWrappingMode
+from psd2svg.core.typesetting import TypeSetting
 from psd2svg.rasterizer import PlaywrightRasterizer, ResvgRasterizer
 from tests.conftest import get_fixture, requires_playwright
 
@@ -661,6 +662,108 @@ class TestSVGDocumentEmbedFonts:
         # Verify font-family is present in style attributes
         # (Even if not resolved, should have font names)
         assert "font-family:" in result or 'font-family="' in result
+
+    def test_foreignobject_weight_and_style_land_in_css(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A resolved bold italic face reaches a <foreignObject> span as CSS.
+
+        XHTML has no font-weight/font-style attributes, so writing them as
+        attributes left the span rendering in the family's Regular face.
+        See GitHub issue #376.
+        """
+        # Times-BoldItalic is in the static mapping, so this resolves to
+        # Times / 700 / italic without touching the system fonts.
+        monkeypatch.setattr(
+            TypeSetting, "get_postscript_name", lambda self, index: "Times-BoldItalic"
+        )
+        psdimage = PSDImage.open(
+            get_fixture("texts/paragraph-shapetype1-justification0.psd")
+        )
+        doc = SVGDocument.from_psd(
+            psdimage,
+            text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT,
+        )
+
+        result = doc.tostring(embed_fonts=False)
+
+        spans = svg_utils.fromstring(result).findall(
+            ".//{http://www.w3.org/1999/xhtml}span"
+        )
+        assert spans, "Should have xhtml spans"
+        for span in spans:
+            style = span.get("style", "")
+            assert "font-weight: 700" in style, f"Unexpected styles: {style}"
+            assert "font-style: italic" in style, f"Unexpected styles: {style}"
+            # The inert attribute form must not survive serialization.
+            assert "font-weight" not in span.attrib
+            assert "font-style" not in span.attrib
+
+    @patch("psd2svg.core.font_utils.encode_font_data_uri")
+    @patch("psd2svg.core.font_utils.FontInfo.resolve")
+    def test_foreignobject_weight_and_style_land_in_css_when_embedding(
+        self, mock_resolve: MagicMock, mock_encode: MagicMock, tmp_path: Path
+    ) -> None:
+        """The embedding path resolves into CSS too, not just the static one.
+
+        embed_fonts=True goes through _resolve_and_collect_fonts() instead of
+        _resolve_postscript_names_static(). See GitHub issue #376.
+        """
+        font_file = tmp_path / "times-bolditalic.ttf"
+        font_file.write_bytes(b"FAKE_TIMES_BOLD_ITALIC")
+        mock_resolve.return_value = FontInfo(
+            postscript_name="Times-BoldItalic",
+            family="Times New Roman",
+            file=str(font_file),
+            weight=200.0,
+            style="Bold Italic",
+            charset=set(),
+        )
+        mock_encode.return_value = "data:font/ttf;base64,FAKE"
+
+        psdimage = PSDImage.open(
+            get_fixture("texts/paragraph-shapetype1-justification0.psd")
+        )
+        doc = SVGDocument.from_psd(
+            psdimage,
+            text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT,
+        )
+
+        result = doc.tostring(embed_fonts=True)
+
+        spans = svg_utils.fromstring(result).findall(
+            ".//{http://www.w3.org/1999/xhtml}span"
+        )
+        assert spans, "Should have xhtml spans"
+        for span in spans:
+            style = span.get("style", "")
+            assert "font-weight: 700" in style, f"Unexpected styles: {style}"
+            assert "font-style: italic" in style, f"Unexpected styles: {style}"
+            assert "font-weight" not in span.attrib
+            assert "font-style" not in span.attrib
+
+    def test_native_text_keeps_presentation_attributes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """SVG text still carries the weight and style as attributes (#376)."""
+        monkeypatch.setattr(
+            TypeSetting, "get_postscript_name", lambda self, index: "Times-BoldItalic"
+        )
+        psdimage = PSDImage.open(
+            get_fixture("texts/paragraph-shapetype1-justification0.psd")
+        )
+        doc = SVGDocument.from_psd(psdimage)
+
+        result = doc.tostring(embed_fonts=False)
+
+        elements = svg_utils.fromstring(result).findall(
+            ".//{http://www.w3.org/2000/svg}text"
+        )
+        assert elements, "Should have text elements"
+        for element in elements:
+            assert element.get("font-weight") == "700"
+            assert element.get("font-style") == "italic"
+            assert "font-weight" not in element.get("style", "")
 
 
 class TestSVGDocumentRasterizeWithFonts:
