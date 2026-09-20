@@ -162,13 +162,40 @@ Adjustment Layers
 
 **Not Yet Implemented:**
 
-* **Black & White** - Converts to grayscale with channel-specific controls
-* **Channel Mixer** - Remixes color channels with custom ratios
-* **Color Lookup** - Applies 3D LUT color grading
+These are planned. Each is tracked by an issue.
+
 * **Gradient Map** - Maps grayscale to gradient colors
-* **Photo Filter** - Applies warming/cooling color filters
-* **Selective Color** - Adjusts specific color ranges (CMYK-based)
-* **Vibrance** - Adjusts saturation with skin tone protection
+  (`#368 <https://github.com/CyberAgent/psd2svg/issues/368>`_)
+* **Channel Mixer** - Remixes color channels with custom ratios
+  (`#369 <https://github.com/CyberAgent/psd2svg/issues/369>`_)
+* **Photo Filter** - Applies warming/cooling color filters; will be an
+  approximation, as Photoshop's "Preserve Luminosity" option cannot be
+  expressed exactly (`#370 <https://github.com/CyberAgent/psd2svg/issues/370>`_)
+
+**Cannot Be Represented in SVG Filters:**
+
+These are not planned. SVG offers ``feColorMatrix`` (a linear combination across
+channels) and ``feComponentTransfer`` (an independent one-dimensional lookup
+table per channel). The following adjustments need per-pixel decisions that
+neither primitive can express, so there is no faithful conversion to implement:
+
+* **Black & White** - Converts to grayscale with channel-specific controls.
+  Which of the six range weights applies depends on the pixel's hue, and that
+  classification has no filter primitive. A fixed luminance matrix would
+  discard the very sliders the user adjusted
+* **Selective Color** - Adjusts specific color ranges (CMYK-based). The same
+  hue-classification problem
+* **Vibrance** - Adjusts saturation with skin tone protection. Nonlinear in each
+  pixel's existing saturation, which is not a per-channel quantity
+* **Color Lookup** - Applies 3D LUT color grading. ``feComponentTransfer`` is
+  one-dimensional and per-channel, so only a separable LUT could be represented.
+  Separately, psd-tools exposes no properties on ``ColorLookup``, so the LUT data
+  cannot be read from the PSD in the first place
+
+Layers of these four types are **omitted from the output**: the rest of the
+document converts normally, but the adjustment is not applied. The converter logs
+a warning naming the layer. Flatten these adjustments in Photoshop before
+conversion, or export a flattened version.
 
 **Technical Limitations:**
 

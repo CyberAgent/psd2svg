@@ -84,7 +84,7 @@ image.save('output.png')
 - **Blending modes**: Some advanced modes approximated due to CSS spec limitations (Dissolve, Linear Burn/Dodge, Darker/Lighter Color, Vivid/Linear/Pin Light, Hard Mix, Subtract, Divide)
 - **Gradients**: Advanced types not supported (Angle, Reflected, Diamond)
 - **Filter effects**: Bevels, embossing, and satin effects not supported; other effects are approximations
-- **Adjustment layers**: Some not yet implemented (Black & White, Channel Mixer, Color Lookup, Gradient Map, Photo Filter, Selective Color, Vibrance)
+- **Adjustment layers**: Gradient Map, Channel Mixer, and Photo Filter are not yet implemented; Black & White, Selective Color, Vibrance, and Color Lookup cannot be represented in SVG filters and are omitted from the output
 - **Smart objects**: Smart object filters not implemented
 - **Thread safety**: APIs are not thread-safe
 
