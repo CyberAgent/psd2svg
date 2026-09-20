@@ -649,28 +649,32 @@ class SVGDocument:
         """Update font attributes on an SVG element based on resolved font info.
 
         Args:
-            element: SVG element to update (text, tspan, etc.)
+            element: Element to update (text, tspan, or an XHTML p/span from a
+                <foreignObject>).
             resolved_font: Resolved font information with family, weight, and style.
 
         Note:
             Only sets font-weight if not 400 (Regular, CSS default).
             Only sets font-style if italic.
+            XHTML has no font-weight/font-style attributes, so for elements
+            inside a <foreignObject> the values go into the style declaration
+            instead, where they actually apply (issue #376).
         """
         # The face's own weight always wins: faux bold is an outline thickening
         # emitted as a stroke in core/text.py, not a font-weight (issue #337).
-        # A Regular face needs no attribute, but any weight already on the
+        # A Regular face needs no declaration, but any weight already on the
         # element has to go, or it would outlive the face it contradicts.
         css_weight = resolved_font.css_weight
         if css_weight != 400:
-            svg_utils.set_attribute(element, "font-weight", css_weight)
+            svg_utils.set_presentation_property(element, "font-weight", css_weight)
         else:
-            element.attrib.pop("font-weight", None)
+            svg_utils.remove_presentation_property(element, "font-weight")
 
         # Set font-style if italic
         # Note: faux italic already set font-style="italic" in core/text.py,
         # so this only adds it for faces that are themselves italic.
         if resolved_font.italic:
-            svg_utils.set_attribute(element, "font-style", "italic")
+            svg_utils.set_presentation_property(element, "font-style", "italic")
 
     def _resolve_postscript_names_static(self, svg: ET.Element) -> None:
         """Resolve PostScript names using static mapping only (no platform queries).

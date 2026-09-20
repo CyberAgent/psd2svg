@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Wrapped text ignored the resolved font weight and style** (#PR)
+  - `<foreignObject>` spans got inert XHTML `font-weight`/`font-style`
+    attributes, so a bold or italic face rendered as Regular
+
 - **Faux bold rendered too heavy and discarded the specified face's weight** (#375)
   - It is now an outline thickening on the resolved face instead of
     `font-weight: 700`, and Japanese `W`-suffixed faces get distinct CSS

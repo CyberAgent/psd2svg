@@ -306,6 +306,68 @@ class TestSetAttribute:
         assert node.get("flag") == "true"
 
 
+class TestStyleDeclarations:
+    """Test set_style/remove_style and the presentation-property dispatch."""
+
+    def test_set_style_creates_and_replaces(self) -> None:
+        """A property is created once and then replaced in place."""
+        node = ET.Element("span")
+        svg_utils.set_style(node, "font-weight", 700)
+        assert node.get("style") == "font-weight: 700"
+        svg_utils.set_style(node, "font-style", "italic")
+        assert node.get("style") == "font-weight: 700; font-style: italic"
+        svg_utils.set_style(node, "font-weight", 900)
+        assert node.get("style") == "font-weight: 900; font-style: italic"
+
+    def test_set_style_keeps_similar_property_names(self) -> None:
+        """A property is matched whole, not as a prefix of another one."""
+        node = ET.Element("span")
+        node.set("style", "font: 12px serif; font-weight: 700")
+        svg_utils.set_style(node, "font", "16px serif")
+        assert node.get("style") == "font: 16px serif; font-weight: 700"
+
+    def test_remove_style_drops_the_emptied_attribute(self) -> None:
+        """Removing the last declaration removes the style attribute itself."""
+        node = ET.Element("span")
+        node.set("style", "font-family: 'Arial'; font-weight: 700")
+        svg_utils.remove_style(node, "font-weight")
+        assert node.get("style") == "font-family: 'Arial'"
+        svg_utils.remove_style(node, "font-family")
+        assert "style" not in node.attrib
+
+    def test_property_names_are_case_insensitive(self) -> None:
+        """CSS property names do not carry case, so neither does the matching."""
+        node = ET.Element("span")
+        node.set("style", "FONT-WEIGHT: 400")
+        svg_utils.set_style(node, "font-weight", 700)
+        assert node.get("style") == "font-weight: 700"
+        svg_utils.remove_style(node, "Font-Weight")
+        assert "style" not in node.attrib
+
+    def test_remove_style_ignores_absent_property(self) -> None:
+        """An unrelated style attribute is left untouched."""
+        node = ET.Element("span")
+        node.set("style", "font-family: 'Arial'")
+        svg_utils.remove_style(node, "font-weight")
+        assert node.get("style") == "font-family: 'Arial'"
+
+    def test_presentation_property_dispatches_on_namespace(self) -> None:
+        """SVG nodes take attributes, XHTML nodes take CSS (issue #376)."""
+        tspan = ET.Element("tspan")
+        span = svg_utils.create_xhtml_node("span")
+
+        svg_utils.set_presentation_property(tspan, "font-weight", 700)
+        svg_utils.set_presentation_property(span, "font-weight", 700)
+        assert tspan.get("font-weight") == "700"
+        assert "font-weight" not in span.attrib
+        assert span.get("style") == "font-weight: 700"
+
+        svg_utils.remove_presentation_property(tspan, "font-weight")
+        svg_utils.remove_presentation_property(span, "font-weight")
+        assert "font-weight" not in tspan.attrib
+        assert "style" not in span.attrib
+
+
 class TestSvgFormatting:
     """Integration tests for SVG-specific formatting scenarios."""
 
