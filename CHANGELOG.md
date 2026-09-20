@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Faux bold rendered too heavy and discarded the specified face's weight** (#375)
+  - It is now an outline thickening on the resolved face instead of
+    `font-weight: 700`, and Japanese `W`-suffixed faces get distinct CSS
+    weights (Hiragino `W2` is 250, not 300); fontconfig weight 215 now maps to
+    `font-weight: 1000`
+
 - **Gradient stops were rounded to a whole percent** (#364)
   - Stop offsets and opacities now go through the shared number formatter,
     keeping the sub-percent positions Photoshop's 0-4096 scale produces
