@@ -33,6 +33,17 @@ uv run mypy src/ tests/
 uv run pytest
 ```
 
+A plain `uv sync` environment silently skips the Playwright tests. Install the
+`browser` extra on the development host so a green run means the whole suite:
+
+```bash
+uv sync --extra browser && uv run playwright install chromium
+```
+
+This matters most for `<foreignObject>` output (`text_wrapping_mode=1`): resvg
+ignores `foreignObject` entirely, so Chromium is the only rasterizer that
+renders it. Verify wrapped-text changes there, not with the default rasterizer.
+
 ## Platform Support
 
 All platforms (Linux, macOS, Windows) are fully supported for text conversion and font embedding.
