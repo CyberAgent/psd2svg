@@ -217,8 +217,10 @@ class TestFontInfoCSSWeight:
         test_cases = [
             (0, 100),  # thin
             (40, 200),  # extralight
+            (45, 250),  # between extralight and light (Hiragino W2)
             (50, 300),  # light
-            (75, 350),  # semilight
+            (55, 350),  # demilight
+            (75, 380),  # book
             (80, 400),  # regular
             (100, 500),  # medium
             (180, 600),  # semibold

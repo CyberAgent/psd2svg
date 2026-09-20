@@ -288,7 +288,7 @@ When ``enable_text=True`` (default), text layers are converted to native SVG ``<
 
 * Text content with multiple paragraphs and styled spans
 * Font family, size, weight (bold), and style (italic)
-* Faux bold and faux italic
+* Faux bold (emitted as an outline thickening of the specified face) and faux italic
 * Font color (solid fill and stroke colors)
 * Horizontal and vertical writing modes
 * Text alignment (left, center, right, justify)
@@ -310,6 +310,12 @@ When ``enable_text=True`` (default), text layers are converted to native SVG ``<
 * Gradient fills and pattern strokes (solid colors only)
 * Advanced OpenType features (e.g., stylistic sets, contextual alternates, positional forms)
 * Variable fonts and font variations
+* Character stroke width (strokes render at 1 user unit, and a stroked span
+  cannot also carry the faux bold thickening)
+* Uniform alpha under faux bold: a translucent fill is composited twice where
+  the thickening underlies it, darkening the stem interior
+* Faux italic slant (``font-style: italic`` selects a real italic face where the
+  family has one, instead of shearing the specified face)
 
 **Text Warp Effects (Experimental):**
 

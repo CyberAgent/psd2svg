@@ -473,6 +473,35 @@ XOR is a combination: ``(A OR B) AND NOT (A AND B)``.
 
 Alternative formulation of XOR is available: ``(A AND NOT B) OR (NOT A AND B)``.
 
+Faux Bold
+=========
+
+Photoshop's faux bold (疑似ボールド) thickens the outline of the *specified*
+face. CSS ``font-weight: 700`` instead asks the renderer for a different,
+genuinely bolder design, and gets it whenever the family has a real bold
+installed - so emitting the flag as a weight both overshoots and discards the
+weight the PSD actually specified.
+
+``core/text.py`` therefore emits it as a stroke on the glyph in its own fill
+colour, with ``paint-order="stroke"`` so the thickening grows the silhouette
+instead of eating into the fill, and leaves ``font-weight`` to the resolved
+face. A centred stroke of width *w* grows every stem by exactly *w*;
+``FAUX_BOLD_STROKE_RATIO`` is 3% of the em, the stem growth measured on the
+``style-faux-bold*.psd`` fixtures — 2.9-3.2% depending on which scanlines are
+sampled. The stroke uses ``stroke-linejoin="round"``: Photoshop offsets the
+contour, which is round at a convex corner, where the default miter join would
+spike instead.
+
+Limitations:
+
+- A span that also carries a PSD character stroke keeps the stroke and loses the
+  thickening; ``stroke``/``stroke-width`` cannot express both, and psd2svg does
+  not read Photoshop's character stroke width yet.
+- A translucent fill is composited twice where the stroke underlies it, so the
+  stem interior reads darker than its fringe. Photoshop keeps one uniform alpha.
+- Faux *italic* is still emitted as ``font-style: italic``, which selects a real
+  italic face where one exists rather than shearing the specified face.
+
 Font Resolution Architecture
 =============================
 
@@ -558,6 +587,35 @@ Backward-compatible wrapper:
 Custom font mapping: Users can provide custom mappings via ``font_mapping`` parameter
 (always checked first, regardless of method used).
 See CLI tool: ``python -m psd2svg.tools.generate_font_mapping``
+
+Weight Scale
+------------
+
+fontconfig stores weights on its own 0-215 scale; OpenType
+(``OS/2.usWeightClass``) and CSS share the 1-1000 scale. ``core/font_weights.py``
+converts between them with fontconfig's own piecewise-linear table, in both
+directions:
+
+.. code-block:: text
+
+   OpenType/CSS  100  200  300  350  380  400  500  600  700  800  900  1000
+   fontconfig      0   40   50   55   75   80  100  180  200  205  210   215
+
+Bucketing into multiples of 100 instead would collapse neighbouring faces onto
+one CSS weight. Hiragino W2 (fontconfig 45) and W3 (50) are the motivating case:
+they are separately installed faces, and two faces sharing a CSS weight also
+produce ``@font-face`` rules with identical ``(family, weight, style)``
+descriptors, so the second shadows the first. Through the table they map back to
+their own ``usWeightClass``, 250 and 300.
+
+``_generate_css_rules_for_fonts()`` additionally detects any remaining
+descriptor collision, emitting the first face and warning about the rest. It
+cannot see two faces that share one font file, because ``resolved_fonts_map``
+is keyed by file path and collapses them before the rules are generated.
+
+Weights that are not points on the table interpolate, so a CSS weight need not
+be a multiple of 100 - fontconfig 215 (extrablack, 200 of the bundled Morisawa
+fonts) becomes ``font-weight: 1000``.
 
 Charset-Based Font Matching
 ----------------------------

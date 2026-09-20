@@ -22,6 +22,7 @@ except ImportError:
 
 from psd2svg import font_subsetting
 from psd2svg.core import font_mapping as _font_mapping
+from psd2svg.core.font_weights import fontconfig_to_opentype_weight
 
 # Windows font resolution
 if sys.platform == "win32":
@@ -188,16 +189,9 @@ class FontInfo:
     def get_css_weight(self, semantic: bool = False) -> int | str:
         """Get CSS font-weight value from fontconfig weight.
 
-        Fontconfig uses numeric weights where:
-        - 0 = thin (CSS 100)
-        - 40 = extralight (CSS 200)
-        - 50 = light (CSS 300)
-        - 80 = regular/normal (CSS 400)
-        - 100 = medium (CSS 500)
-        - 180 = semibold (CSS 600)
-        - 200 = bold (CSS 700)
-        - 205 = extrabold (CSS 800)
-        - 210 = black (CSS 900)
+        Converts through :func:`fontconfig_to_opentype_weight`, so the result is
+        the font's own ``OS/2.usWeightClass`` and neighbouring faces stay
+        distinguishable (Hiragino W2 -> 250, W3 -> 300).
 
         Args:
             semantic: If True, return semantic keyword for common weights
@@ -206,31 +200,10 @@ class FontInfo:
                      variable fonts.
 
         Returns:
-            CSS font-weight value (100-900) or semantic keyword
+            CSS font-weight value (1-1000) or semantic keyword
             ("normal" for 400, "bold" for 700).
         """
-        # Map fontconfig weights to CSS weights
-        # Based on fontconfig documentation and common practice
-        if self.weight <= 0:
-            numeric_weight = 100  # thin
-        elif self.weight <= 40:
-            numeric_weight = 200  # extralight
-        elif self.weight <= 50:
-            numeric_weight = 300  # light
-        elif self.weight < 80:
-            numeric_weight = 350  # semilight (CSS 3 allows non-100 multiples)
-        elif self.weight <= 80:
-            numeric_weight = 400  # normal/regular
-        elif self.weight < 180:
-            numeric_weight = 500  # medium
-        elif self.weight < 200:
-            numeric_weight = 600  # semibold
-        elif self.weight <= 200:
-            numeric_weight = 700  # bold
-        elif self.weight <= 205:
-            numeric_weight = 800  # extrabold
-        else:
-            numeric_weight = 900  # black/heavy
+        numeric_weight = fontconfig_to_opentype_weight(self.weight)
 
         # Return semantic keyword if requested and applicable
         if semantic:
@@ -243,13 +216,13 @@ class FontInfo:
 
     @property
     def css_weight(self) -> int:
-        """Get numeric CSS font-weight value (100-900).
+        """Get numeric CSS font-weight value (1-1000).
 
         This is a convenience property that calls get_css_weight(semantic=False).
         For more control, use get_css_weight() directly.
 
         Returns:
-            CSS font-weight value (100-900).
+            CSS font-weight value (1-1000).
         """
         result = self.get_css_weight(semantic=False)
         assert isinstance(result, int)

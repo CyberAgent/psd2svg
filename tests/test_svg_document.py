@@ -7,6 +7,7 @@ This module tests various SVGDocument methods including:
 - Rasterization with different backends
 """
 
+import logging
 import os
 import sys
 import xml.etree.ElementTree as ET
@@ -161,6 +162,58 @@ class TestFontInfoToFontFaceCss:
 
         assert "font-weight: 700;" in css
         assert "font-style: italic;" in css
+
+
+class TestFontFaceCollision:
+    """Tests for @font-face descriptor collision detection (issue #337)."""
+
+    @staticmethod
+    def _font(postscript_name: str, path: Path, weight: float) -> FontInfo:
+        path.write_bytes(b"")
+        return FontInfo(
+            postscript_name=postscript_name,
+            file=str(path),
+            family="Test Family",
+            style="Test",
+            weight=weight,
+        )
+
+    def test_colliding_descriptors_emit_one_rule(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Two faces with the same (family, weight, style) shadow each other."""
+        doc = SVGDocument(svg=ET.Element("svg"), images={})
+        first = tmp_path / "a.ttf"
+        second = tmp_path / "b.ttf"
+        fonts = [
+            self._font("Test-A", first, 50.0),
+            self._font("Test-B", second, 50.0),
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            rules = doc._generate_css_rules_for_fonts(
+                fonts, subset_fonts=False, font_format="woff2", use_data_uri=False
+            )
+
+        assert len(rules) == 1
+        assert first.name in rules[0]
+        assert str(second) in caplog.text
+
+    def test_distinct_descriptors_both_emitted(self, tmp_path: Path) -> None:
+        """Neighbouring weights stay distinguishable, so both rules survive."""
+        doc = SVGDocument(svg=ET.Element("svg"), images={})
+        fonts = [
+            self._font("Test-W2", tmp_path / "w2.ttf", 45.0),
+            self._font("Test-W3", tmp_path / "w3.ttf", 50.0),
+        ]
+
+        rules = doc._generate_css_rules_for_fonts(
+            fonts, subset_fonts=False, font_format="woff2", use_data_uri=False
+        )
+
+        assert len(rules) == 2
+        assert "font-weight: 250;" in rules[0]
+        assert "font-weight: 300;" in rules[1]
 
 
 class TestSVGDocumentImageHandling:

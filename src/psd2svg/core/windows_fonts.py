@@ -23,6 +23,8 @@ from typing import Any
 
 from fontTools.ttLib import TTFont
 
+from psd2svg.core import font_weights
+
 logger = logging.getLogger(__name__)
 
 # Platform-specific imports
@@ -334,62 +336,21 @@ class WindowsFontResolver:
             font: Loaded TTFont instance.
 
         Returns:
-            Weight value in fontconfig scale (0-210).
+            Weight value in fontconfig scale (0-215).
             Default: 80.0 (regular) if OS/2 table missing or invalid.
 
         Note:
-            Converts CSS weight (100-900) to fontconfig scale:
-            - 100 (thin) -> 0
-            - 200 (extralight) -> 40
-            - 300 (light) -> 50
-            - 400 (regular) -> 80
-            - 500 (medium) -> 100
-            - 600 (semibold) -> 180
-            - 700 (bold) -> 200
-            - 800 (extrabold) -> 205
-            - 900 (black) -> 210
+            ``OS/2.usWeightClass`` is on the OpenType/CSS 1-1000 scale, so it is
+            converted with :func:`font_weights.opentype_to_fontconfig_weight` -
+            the same table fontconfig uses on the other platforms.
         """
         if "OS/2" not in font:
             return 80.0  # Default: regular
 
         try:
-            os2_table = font["OS/2"]
-            css_weight = os2_table.usWeightClass
-
-            # Convert CSS weight (100-900) to fontconfig scale
-            weight_mapping = {
-                100: 0.0,  # thin
-                200: 40.0,  # extralight
-                300: 50.0,  # light
-                400: 80.0,  # regular
-                500: 100.0,  # medium
-                600: 180.0,  # semibold
-                700: 200.0,  # bold
-                800: 205.0,  # extrabold
-                900: 210.0,  # black
-            }
-
-            # Find closest weight
-            if css_weight in weight_mapping:
-                return weight_mapping[css_weight]
-
-            # Interpolate for non-standard weights
-            if css_weight < 100:
-                return 0.0
-            elif css_weight > 900:
-                return 210.0
-            else:
-                # Linear interpolation between nearest values
-                lower = (css_weight // 100) * 100
-                upper = lower + 100
-                if lower in weight_mapping and upper in weight_mapping:
-                    ratio = (css_weight - lower) / 100.0
-                    return weight_mapping[lower] + ratio * (
-                        weight_mapping[upper] - weight_mapping[lower]
-                    )
-
-            return 80.0  # Fallback
-
+            return font_weights.opentype_to_fontconfig_weight(
+                font["OS/2"].usWeightClass
+            )
         except Exception:
             return 80.0  # Default on error
 

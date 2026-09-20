@@ -319,19 +319,80 @@ def test_text_style_italic() -> None:
 def test_text_style_faux_bold() -> None:
     """Test faux bold handling.
 
-    Faux bold (synthetic bold) should set font-weight="700".
-    This ensures proper rendering even with variable fonts.
+    Photoshop's faux bold thickens the outline of the specified face, so it is
+    emitted as a stroke on the glyph - not as font-weight, which would select a
+    different face. See GitHub issue #337.
     """
     svg = convert_psd_to_svg("texts/style-faux-bold.psd")
-    # Find all tspans with font-weight
-    tspans = svg.findall(".//tspan[@font-weight]")
-    assert len(tspans) > 0, "Should have at least one tspan with font-weight"
-
-    # Check that we have a bold tspan (font-weight="700" for faux bold)
-    font_weights = [t.attrib.get("font-weight") for t in tspans]
-    assert "700" in font_weights, (
-        f"Expected to find font-weight='700' (faux bold), got: {font_weights}"
+    assert svg.findall(".//tspan[@font-weight]") == [], (
+        "Faux bold must not set font-weight"
     )
+
+    tspans = svg.findall(".//tspan[@stroke-width]")
+    assert len(tspans) == 1, "Only the faux bold span should be thickened"
+    tspan = tspans[0]
+    assert tspan.attrib["stroke"] == "#000000"  # the span's own fill colour
+    assert tspan.attrib["paint-order"] == "stroke"
+    assert tspan.attrib["stroke-linejoin"] == "round"
+    # 3% of the 32px em
+    assert float(tspan.attrib["stroke-width"]) == pytest.approx(0.96)
+
+
+def test_text_style_faux_bold_yields_to_character_stroke(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A span with a character stroke keeps the stroke and loses the thickening.
+
+    stroke/stroke-width cannot carry both, and Photoshop's character stroke
+    width is not read yet. See GitHub issues #337 and #374.
+    """
+    monkeypatch.setattr(StyleSheet, "stroke_flag", property(lambda self: True))
+    monkeypatch.setattr(
+        StyleSheet, "stroke_color", property(lambda self: (1.0, 1.0, 0.0, 0.0))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        svg = convert_psd_to_svg("texts/style-faux-bold.psd")
+
+    # The character stroke is shared by both spans, so it lands on <text>.
+    text = svg.find(".//text")
+    assert text is not None
+    assert text.attrib["stroke"] == "#ff0000"
+    assert svg.findall(".//*[@stroke-width]") == []
+    assert "Faux bold is not applied" in caplog.text
+
+
+def test_text_style_faux_bold_skips_unfilled_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fully transparent fill has no outline to thicken."""
+    monkeypatch.setattr(
+        StyleSheet, "fill_color", property(lambda self: (0.0, 0.0, 0.0, 0.0))
+    )
+
+    svg = convert_psd_to_svg("texts/style-faux-bold.psd")
+
+    text = svg.find(".//text")
+    assert text is not None
+    assert text.attrib["fill"] == "none"
+    assert svg.findall(".//*[@stroke-width]") == []
+
+
+def test_text_style_faux_bold_keeps_face_weight() -> None:
+    """Faux bold on a non-Regular face must not discard the face's weight."""
+    psdimage = PSDImage.open(get_fixture("texts/style-faux-bold-light.psd"))
+    # tostring() runs the font resolution step that used to drop the weight.
+    svg = ET.fromstring(SVGDocument.from_psd(psdimage).tostring())
+    texts = svg.findall(".//{http://www.w3.org/2000/svg}text")
+    assert len(texts) == 2
+
+    plain, faux = texts
+    # Both lines are HelveticaNeue-Light, so both keep the Light weight.
+    assert plain.attrib["font-weight"] == "300"
+    assert faux.attrib["font-weight"] == "300"
+    assert "stroke-width" not in plain.attrib
+    assert float(faux.attrib["stroke-width"]) == pytest.approx(1.44)  # 3% of 48px
+    assert faux.attrib["paint-order"] == "stroke"
 
 
 def test_text_style_faux_italic() -> None:
@@ -1208,6 +1269,34 @@ def test_text_style_scale_foreign_object(monkeypatch: pytest.MonkeyPatch) -> Non
         style = span.attrib["style"]
         assert "font-size: 64px" in style, f"Unexpected styles: {style}"
         assert "transform: scale(1, 0.5)" in style, f"Unexpected styles: {style}"
+
+
+def test_foreign_object_faux_bold_thickens_the_face(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The foreignObject path thickens the face instead of asking for a weight.
+
+    -webkit-text-stroke is the CSS counterpart of the stroke the native <text>
+    path emits. See GitHub issue #337.
+    """
+    monkeypatch.setattr(StyleSheet, "faux_bold", property(lambda self: True))
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-space-after.psd"))
+    converter = Converter(psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT)
+    converter.build()
+
+    spans = converter.svg.findall(".//{http://www.w3.org/1999/xhtml}span")
+    assert spans, "Should have xhtml spans"
+    for span in spans:
+        style = span.attrib["style"]
+        assert "font-weight" not in style, f"Unexpected styles: {style}"
+        assert "paint-order: stroke" in style, f"Unexpected styles: {style}"
+        size_match = re.search(r"font-size: ([\d.]+)px", style)
+        stroke_match = re.search(r"-webkit-text-stroke: ([\d.]+)px currentColor", style)
+        assert size_match is not None and stroke_match is not None, (
+            f"Unexpected styles: {style}"
+        )
+        expected = 0.03 * float(size_match.group(1))
+        assert float(stroke_match.group(1)) == pytest.approx(expected, abs=0.005)
 
 
 def test_text_style_scale_vertical_writing_direction() -> None:

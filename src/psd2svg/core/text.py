@@ -55,6 +55,15 @@ NEGLIGIBLE_MARGIN_THRESHOLD = 0.01
 # Consistent with Transform.is_translation_only().
 SCALE_TOLERANCE = 1e-6
 
+# Width of the faux-bold outline thickening, as a fraction of the em.
+#
+# Photoshop's faux bold thickens the outline of the specified face; it does not
+# switch to a bolder face the way CSS font-weight does. A centred stroke of
+# width w grows every stem by exactly w, and the stem growth measured on the
+# style-faux-bold*.psd fixtures against their own unthickened line is 2.9-3.2%
+# of the em, depending on which scanlines are sampled. See GitHub issue #337.
+FAUX_BOLD_STROKE_RATIO = 0.03
+
 
 class TextScaling(NamedTuple):
     """Font-size decomposition of a PSD horizontal/vertical character scale.
@@ -707,11 +716,33 @@ class TextConverter(ConverterProtocol):
         elif style.font_baseline == FontBaseline.SUBSCRIPT:
             emitted_font_size *= text_setting.subscript_size
 
-        # Determine font weight - only set for faux bold
-        # (PostScript name encodes actual weight)
-        font_weight: int | str | None = None
+        # Faux bold thickens the outline of the specified face rather than
+        # selecting a bolder one, so emit it as a stroke on the glyph and leave
+        # font-weight to the face itself. paint-order="stroke" keeps the
+        # thickening outside the fill instead of eating into it.
+        stroke = style.get_stroke_color()
+        stroke_width: float | None = None
+        stroke_linejoin: str | None = None
+        paint_order: str | None = None
         if style.faux_bold:
-            font_weight = "700"
+            fill_color = style.get_fill_color()
+            if style.stroke_flag and stroke != "none":
+                # stroke/stroke-width are already taken by the PSD character
+                # stroke, whose own width psd2svg does not read yet.
+                logger.warning(
+                    "Faux bold is not applied to a span that also has a "
+                    "character stroke; the stroke is emitted alone."
+                )
+            elif fill_color != "none":
+                # Thicken the glyph in the colour it is painted in.
+                # get_fill_color() returns None both for SVG's default black and
+                # for a disabled fill, which psd2svg also renders black today.
+                stroke = fill_color if fill_color else "#000000"
+                stroke_width = FAUX_BOLD_STROKE_RATIO * emitted_font_size
+                # Photoshop offsets the contour, which is round at a convex
+                # corner; the default miter join would spike there instead.
+                stroke_linejoin = "round"
+                paint_order = "stroke"
 
         with self.set_current(paragraph_node):
             tspan = self.create_node(
@@ -719,12 +750,14 @@ class TextConverter(ConverterProtocol):
                 text=span.text.strip("\r"),  # Remove carriage return characters
                 font_size=scaled_font_size,
                 font_family=postscript_name,  # Store PostScript name directly
-                font_weight=font_weight,
                 font_style="italic"
                 if style.faux_italic
                 else None,  # Only for faux italic
                 fill=style.get_fill_color(),
-                stroke=style.get_stroke_color(),
+                stroke=stroke,
+                stroke_width=stroke_width,
+                stroke_linejoin=stroke_linejoin,
+                paint_order=paint_order,
                 baseline_shift=style.baseline_shift
                 if style.baseline_shift != 0.0
                 else None,
@@ -1224,9 +1257,9 @@ class TextConverter(ConverterProtocol):
         if style.font_size:
             styles["font-size"] = svg_utils.num2str_with_unit(scaling.font_size)
 
-        # Font weight - only set for faux bold (PostScript name encodes actual weight)
-        if style.faux_bold:
-            styles["font-weight"] = "700"
+        # Font weight is left to the face: the PostScript name encodes it, and
+        # faux bold is emitted as an outline thickening below rather than as a
+        # heavier weight.
 
         # Font style - only set for faux italic (PostScript name encodes actual style)
         if style.faux_italic:
@@ -1288,6 +1321,28 @@ class TextConverter(ConverterProtocol):
         if stroke_color and stroke_color != "none":
             # Note: This is a webkit-specific property but widely supported
             styles["-webkit-text-stroke"] = f"1px {stroke_color}"
+
+        # Faux bold is an outline thickening, like in the native <text> path.
+        if style.faux_bold:
+            fill_color = style.get_fill_color()
+            if style.stroke_flag and stroke_color != "none":
+                logger.warning(
+                    "Faux bold is not applied to a span that also has a "
+                    "character stroke; the stroke is emitted alone."
+                )
+            elif fill_color != "none":
+                # The em the span actually renders at, after any sub/superscript
+                # reduction applied above.
+                em = scaling.font_size
+                if style.font_baseline == FontBaseline.SUPERSCRIPT:
+                    em *= text_setting.superscript_size
+                elif style.font_baseline == FontBaseline.SUBSCRIPT:
+                    em *= text_setting.subscript_size
+                width = svg_utils.num2str_with_unit(FAUX_BOLD_STROKE_RATIO * em)
+                # Thicken the glyph in its own colour, whether the span sets it
+                # ("color" above) or inherits it.
+                styles["-webkit-text-stroke"] = f"{width} currentColor"
+                styles["paint-order"] = "stroke"
 
         return styles
 
