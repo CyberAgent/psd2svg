@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `font-weight: 700`, and Japanese `W`-suffixed faces get distinct CSS
     weights (Hiragino `W2` is 250, not 300); fontconfig weight 215 now maps to
     `font-weight: 1000`
+- **Japanese metrics kerning omitted proportional glyph advances** (#335)
+  - Browser output now enables the font's `palt` or `vpal` OpenType feature
+    when automatic kerning is active
 
 - **Gradient stops were rounded to a whole percent** (#364)
   - Stop offsets and opacities now go through the shared number formatter,
