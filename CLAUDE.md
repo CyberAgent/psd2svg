@@ -158,11 +158,26 @@ branch with `git rebase --signoff main`.
    `### Dependencies` and reference the PR number:
    `- **Short description** (#PR)`. Keep entries concise - one bold summary
    line plus at most one short sub-bullet.
+5. **Keep history out of the docs** - state the current rules and behavior; what
+   changed and why belongs in the issue and the pull request. See
+   [Documentation Structure](#documentation-structure).
 
 ### Documentation Structure
 
 - **README.md** - Quick start guide, basic usage
 - **docs/** - Full Sphinx documentation (comprehensive details)
+- **CONTRIBUTING.md**, **SECURITY.md**, **CODE_OF_CONDUCT.md** - contribution
+  rules, security policy, expected conduct
+- **CLAUDE.md** - this file: commands, architecture, and session conventions
+
+**Documentation states the current rules and behavior. GitHub issues and pull
+requests hold the record of how it got that way.** Do not write what changed,
+what was tried and rejected, or when something was decided. Not history:
+explaining why the code behaves as it does, version and deprecation markers, and
+a link to a currently open issue for a known gap.
+
+Keep documentation and code comments concise - state the rule or the behavior,
+not the argument for it.
 
 For detailed feature documentation, configuration options, and usage examples, refer to the [full documentation](https://psd2svg.readthedocs.io/).
 

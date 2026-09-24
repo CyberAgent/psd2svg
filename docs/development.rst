@@ -316,6 +316,11 @@ Pull Request Guidelines
 * Ensure all CI checks pass
 * Keep PRs focused on a single feature/fix
 
+Explain the reasoning for a change in the pull request description, not in the
+files being changed. The documentation states the rules and behavior that hold
+now, including why the code behaves as it does. ``CHANGELOG.md`` is the
+exception - see `Changelog Maintenance`_.
+
 Commit Messages
 ~~~~~~~~~~~~~~~
 

@@ -144,6 +144,10 @@ For detailed standards, architecture information, and development practices, see
 - **Documentation**: Update docs if changing public API or adding features
 - **Type hints**: Ensure all new code has proper type annotations
 - **No warnings**: Code should not generate new warnings
+- **Reasoning**: Document how the code behaves now, including why it behaves
+  that way. Why a *change* was made belongs in the issue and the pull request,
+  not in the files you changed - `CHANGELOG.md` is the exception, one entry per
+  user-facing change.
 
 ## Test Fixtures
 
