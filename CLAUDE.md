@@ -166,22 +166,26 @@ branch with `git rebase --signoff main`.
 
 - **README.md** - Quick start guide, basic usage
 - **docs/** - Full Sphinx documentation (comprehensive details)
-- **CONTRIBUTING.md**, **SECURITY.md** - the rules contributors follow
+- **CONTRIBUTING.md** - the rules contributors follow
+- **SECURITY.md** - the security policy and how to report a vulnerability
+- **CODE_OF_CONDUCT.md** - expected conduct and how to report a violation
 - **CLAUDE.md** - this file: commands, architecture, and the conventions needed
   in every session
-- **CHANGELOG.md** - released user-facing history, in the format above
+- **CHANGELOG.md** - user-facing changes, in the format under
+  [When Making Changes](#when-making-changes)
 
 **Documentation states the current rules and behavior. GitHub issues and pull
-requests hold the record of how it got that way.** Write what is true now, and
-leave out what changed, what was tried and rejected, and when something was
-decided - a reader cannot act on "this was previously handled by X" or "we
-considered Y and chose Z". That reasoning belongs in the pull request
-description or the issue, not in the file being changed.
+requests hold the record of how it got that way.** Do not write what changed,
+what was tried and rejected, or when something was decided.
 
-`CHANGELOG.md` is the deliberate exception: it records released history for
-users. Linking an issue for a gap that is *currently* open, the way
-[docs/limitations.rst](docs/limitations.rst) does, is a pointer to live status
-and also fine.
+These are not history, and belong in the docs:
+
+- **Why the code behaves as it does** - what
+  [docs/technical-notes.rst](docs/technical-notes.rst) is for
+- **Version and deprecation markers** - they tell a reader what to rely on
+- **A link to a currently open issue** for a known gap, as
+  [docs/limitations.rst](docs/limitations.rst) does
+- **`CHANGELOG.md`**, which records user-facing changes per release
 
 For detailed feature documentation, configuration options, and usage examples, refer to the [full documentation](https://psd2svg.readthedocs.io/).
 

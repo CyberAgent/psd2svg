@@ -316,11 +316,10 @@ Pull Request Guidelines
 * Ensure all CI checks pass
 * Keep PRs focused on a single feature/fix
 
-Explain the reasoning in the pull request description rather than in the files
-being changed. The documentation in this repository states the rules and
-behavior that hold now; the record of what changed, what was tried and
-rejected, and why, lives in the issue and the pull request. ``CHANGELOG.md`` is
-the deliberate exception - see `Changelog Maintenance`_.
+Explain the reasoning for a change in the pull request description, not in the
+files being changed. The documentation states the rules and behavior that hold
+now, including why the code behaves as it does. ``CHANGELOG.md`` is the
+exception - see `Changelog Maintenance`_.
 
 Commit Messages
 ~~~~~~~~~~~~~~~
