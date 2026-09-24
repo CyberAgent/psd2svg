@@ -94,10 +94,10 @@ judged as a person for the project to stay safe.
 
 ### Repository controls
 
-- **Fork pull requests require maintainer approval before CI runs.** This is
-  currently set to first-time contributors only. The intended setting is
-  approval for every outside contributor, since "has merged before" is precisely
-  the status an attacker farms.
+- **Fork pull requests require maintainer approval before CI runs.** This
+  applies to every outside contributor, not only first-time ones - GitHub offers
+  the relaxed setting and we decline it, because "has merged before" is
+  precisely the status an attacker farms.
 - **Binary test fixtures** (`tests/fixtures/**/*.psd`) are accepted from any
   authoring tool, and files from non-Adobe applications are wanted for coverage.
   They are bounded by a documented size cap and reviewed by a person; there is
