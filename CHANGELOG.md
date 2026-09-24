@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     unrepresentable in SVG filters rather than pending, and every unsupported
     adjustment now warns that the layer is omitted from the output
 
+- **Removed `svg_utils.add_font_family()`** (#395)
+  - The helper had no callers and wrote an inert `font-family` attribute on
+    XHTML elements
+
 ### Fixed
 
 - **Pattern overlays emitted a redundant `translate(0, 0)`** (#384)
