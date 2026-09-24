@@ -24,6 +24,7 @@ Note: This module re-exports TypeSetting and TextWrappingMode for backward
 """
 
 import logging
+import unicodedata
 import xml.etree.ElementTree as ET
 from typing import NamedTuple
 
@@ -151,6 +152,78 @@ def _paragraph_advance(
     if writing_direction == WritingDirection.VERTICAL_RL:
         return -leading, None
     return None, leading
+
+
+# Characters that render as part of the preceding character rather than on
+# their own: combining marks, variation selectors and the zero width joiner.
+_VARIATION_SELECTORS = frozenset(chr(code) for code in range(0xFE00, 0xFE10))
+_ZERO_WIDTH_JOINER = "\u200d"
+
+
+def _extends_previous_character(char: str) -> bool:
+    """Check whether a character renders on top of the one before it."""
+    return (
+        unicodedata.category(char) in ("Mn", "Mc", "Me") or char in _VARIATION_SELECTORS
+    )
+
+
+def _trailing_grapheme_length(text: str) -> int:
+    """Return the number of characters in the final grapheme cluster of text.
+
+    Combining marks, variation selectors and zero-width-joiner sequences render
+    as one glyph together with their base character, so a run must never be cut
+    between them.
+    """
+    index = len(text)
+    while True:
+        while index > 0 and _extends_previous_character(text[index - 1]):
+            index -= 1
+        if index > 0:
+            index -= 1  # The base character the marks attach to.
+        if index > 0 and text[index - 1] == _ZERO_WIDTH_JOINER:
+            index -= 1  # The joiner binds the cluster to what precedes it.
+            continue
+        return len(text) - index
+
+
+def _isolate_trailing_letter_spacing(paragraph_node: ET.Element) -> None:
+    """Drop the letter spacing that follows a paragraph's final character.
+
+    Letter spacing is added after every character, the last one included, and
+    ``text-anchor="middle"`` and ``"end"`` count that trailing advance when they
+    place the line. Photoshop tracking only separates glyphs, so the line ends up
+    shifted. Emitting the final character with ``letter-spacing="0"`` removes the
+    trailing advance instead of compensating for it, which also settles the
+    disagreement between renderers over whether it exists at all.
+
+    Args:
+        paragraph_node: Paragraph tspan whose spans have already been added.
+    """
+    for span_node in reversed(list(paragraph_node)):
+        if not span_node.text:
+            continue  # Empty and carriage-return-only runs render nothing.
+        spacing = span_node.get("letter-spacing")
+        if spacing is None or float(spacing) == 0.0:
+            return
+        length = _trailing_grapheme_length(span_node.text)
+        if length == len(span_node.text):
+            # Nothing precedes the final character, so the spacing is all trailing.
+            svg_utils.set_attribute(span_node, "letter-spacing", 0)
+            return
+        # The final character becomes a sibling run rather than a nested one:
+        # merge_common_child_attributes would hoist a lone child's spacing onto
+        # the parent and wipe out the spacing of the rest of the run.
+        final_node = ET.Element(span_node.tag, dict(span_node.attrib))
+        for key in ("x", "y", "dx", "dy"):
+            # Manual kerning applies before a run's first character.
+            final_node.attrib.pop(key, None)
+        svg_utils.set_attribute(final_node, "letter-spacing", 0)
+        final_node.text = span_node.text[-length:]
+        final_node.tail = span_node.tail
+        span_node.text = span_node.text[:-length]
+        span_node.tail = None
+        paragraph_node.insert(list(paragraph_node).index(span_node) + 1, final_node)
+        return
 
 
 def _needs_whitespace_preservation(text: str) -> bool:
@@ -341,6 +414,8 @@ class TextConverter(ConverterProtocol):
                     # such a boundary and must not replace the preceding size.
                     if span.text.strip("\r"):
                         previous_font_size = emitted_font_size
+                if paragraph.get_text_anchor() in ("middle", "end"):
+                    _isolate_trailing_letter_spacing(paragraph_node)
 
         if text_setting.has_warp():
             # When there is <textPath>, we can only optimize at the paragraph level.

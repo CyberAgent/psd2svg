@@ -4,13 +4,19 @@ import re
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 
+import numpy as np
 import pytest
+from PIL import Image
 from psd_tools import PSDImage
 from psd_tools.api.layers import TypeLayer
 
 from psd2svg import SVGDocument
 from psd2svg.core.converter import Converter
-from psd2svg.core.text import TextWrappingMode, _common_span_scale
+from psd2svg.core.text import (
+    TextWrappingMode,
+    _common_span_scale,
+    _isolate_trailing_letter_spacing,
+)
 from psd2svg.core.typesetting import (
     FontBaseline,
     Paragraph,
@@ -20,7 +26,8 @@ from psd2svg.core.typesetting import (
     TypeSetting,
     WritingDirection,
 )
-from tests.conftest import get_fixture
+from psd2svg.rasterizer import PlaywrightRasterizer, ResvgRasterizer
+from tests.conftest import get_fixture, requires_playwright
 
 
 def convert_psd_to_svg(psd_file: str) -> ET.Element:
@@ -790,6 +797,199 @@ def test_text_style_tracking_and_tsume() -> None:
     # Verify that the span with higher tsume has more negative spacing
     assert spacing_values[0] < spacing_values[1], (
         "Span with tsume=1.0 should have more negative spacing than span with tsume=0.0"
+    )
+
+
+# Baselines of the point text layers in texts/style-tracking-alignment.psd. Every
+# layer reads "ABCD" in Helvetica 48px and is anchored at x=300; the rows differ
+# only in justification and tracking.
+_TRACKING_ALIGNMENT_ROWS = {
+    "left-t0": "60",
+    "left-t400": "120",
+    "center-t0": "180",
+    "center-t400": "240",
+    "right-t0": "300",
+    "right-t400": "360",
+    "right-tneg200": "420",
+    "center-mixed": "480",
+}
+
+
+def _tracking_alignment_text_nodes() -> dict[str, ET.Element]:
+    """Convert the tracking/alignment fixture and key each <text> by row name."""
+    svg = convert_psd_to_svg("texts/style-tracking-alignment.psd")
+    by_baseline = {node.attrib["y"]: node for node in svg.iter("text")}
+    return {name: by_baseline[y] for name, y in _TRACKING_ALIGNMENT_ROWS.items()}
+
+
+def test_tracking_isolates_the_final_character_of_anchored_text() -> None:
+    """Centered and right-aligned runs end in a tspan without letter spacing.
+
+    Letter spacing also applies after the last character, and text-anchor counts
+    that trailing advance. Photoshop tracking does not reserve it, so the final
+    character is emitted separately with the spacing switched off.
+    """
+    rows = _tracking_alignment_text_nodes()
+
+    for name in ("center-t400", "right-t400", "right-tneg200"):
+        node = rows[name]
+        spans = list(node)
+        assert [span.text for span in spans] == ["ABC", "D"], (
+            f"Expected {name} to split its final character, got "
+            f"{[span.text for span in spans]}"
+        )
+        assert float(spans[0].attrib["letter-spacing"]) != 0.0
+        assert float(spans[1].attrib["letter-spacing"]) == 0.0
+        assert node.text is None
+
+    # A mixed-style line uses the letter spacing of the final rendered run.
+    mixed = rows["center-mixed"]
+    assert mixed.text == "AB"
+    assert [(span.text, span.attrib["letter-spacing"]) for span in mixed] == [
+        ("C", "19.2"),
+        ("D", "0"),
+    ]
+
+    # Left-aligned text is anchored at its start, and untracked text has no
+    # trailing spacing to remove; both stay a single run.
+    for name in ("left-t0", "left-t400", "center-t0", "right-t0"):
+        node = rows[name]
+        assert node.text == "ABCD", f"Expected {name} to stay one run"
+        assert len(node) == 0
+
+
+def _paragraph_node(*spans: tuple[str, dict[str, str]]) -> ET.Element:
+    """Build a paragraph tspan holding the given (text, attributes) spans."""
+    paragraph_node = ET.Element("tspan")
+    for text, attrib in spans:
+        span_node = ET.SubElement(paragraph_node, "tspan", dict(attrib))
+        span_node.text = text
+    return paragraph_node
+
+
+def test_isolate_trailing_letter_spacing_single_character_run() -> None:
+    """A one-character run carries nothing but trailing spacing, so it is zeroed."""
+    paragraph_node = _paragraph_node(("A", {"letter-spacing": "19.2"}))
+
+    _isolate_trailing_letter_spacing(paragraph_node)
+
+    assert len(paragraph_node) == 1
+    assert paragraph_node[0].text == "A"
+    # Zeroed rather than removed: the optimizer may hoist a non-zero value from
+    # sibling runs onto a shared ancestor, which this run would then inherit.
+    assert paragraph_node[0].attrib["letter-spacing"] == "0"
+
+
+def test_isolate_trailing_letter_spacing_skips_empty_runs() -> None:
+    """Runs that render nothing do not count as the final run."""
+    paragraph_node = _paragraph_node(
+        ("ABC", {"letter-spacing": "4"}),
+        ("", {"letter-spacing": "4"}),
+    )
+
+    _isolate_trailing_letter_spacing(paragraph_node)
+
+    assert [span.text for span in paragraph_node] == ["AB", "C", ""]
+    assert paragraph_node[1].attrib["letter-spacing"] == "0"
+
+
+def test_isolate_trailing_letter_spacing_drops_kerning_from_the_split() -> None:
+    """Manual kerning applies before a run's first character, not its last."""
+    paragraph_node = _paragraph_node(
+        ("AB", {"letter-spacing": "4", "dx": "1.5", "font-size": "48"})
+    )
+
+    _isolate_trailing_letter_spacing(paragraph_node)
+
+    assert [span.text for span in paragraph_node] == ["A", "B"]
+    assert paragraph_node[0].attrib["dx"] == "1.5"
+    assert "dx" not in paragraph_node[1].attrib
+    # Everything else has to survive, or the split character loses its style.
+    assert paragraph_node[1].attrib["font-size"] == "48"
+
+
+def test_isolate_trailing_letter_spacing_keeps_combining_marks_attached() -> None:
+    """A base character and its combining marks are never split apart."""
+    paragraph_node = _paragraph_node(("ae\u0301", {"letter-spacing": "4"}))
+
+    _isolate_trailing_letter_spacing(paragraph_node)
+
+    assert [span.text for span in paragraph_node] == ["a", "e\u0301"]
+
+
+def test_isolate_trailing_letter_spacing_without_spacing_is_a_no_op() -> None:
+    """Untracked text has no trailing advance to remove."""
+    paragraph_node = _paragraph_node(("ABCD", {"font-size": "48"}))
+
+    _isolate_trailing_letter_spacing(paragraph_node)
+
+    assert [span.text for span in paragraph_node] == ["ABCD"]
+
+
+def _band_ink_extent(image: Image.Image, baseline: float) -> tuple[int, int]:
+    """Return the horizontal ink extent of the row sitting on the baseline."""
+    alpha = np.array(image.convert("RGBA"))[..., 3]
+    band = alpha[int(baseline) - 48 : int(baseline) + 12, :] > 32
+    columns = np.flatnonzero(band.any(axis=0))
+    assert columns.size > 0, f"No ink rendered on the baseline at y={baseline}"
+    return int(columns[0]), int(columns[-1]) + 1
+
+
+def _anchored_edge(image: Image.Image, row: str) -> float:
+    """Measure the ink edge that Photoshop keeps fixed for the row's alignment."""
+    left, right = _band_ink_extent(image, float(_TRACKING_ALIGNMENT_ROWS[row]))
+    if row.startswith("left"):
+        return left
+    if row.startswith("right"):
+        return right
+    return (left + right) / 2
+
+
+@pytest.mark.parametrize(
+    "rasterizer_factory",
+    [
+        pytest.param(ResvgRasterizer, id="resvg"),
+        pytest.param(PlaywrightRasterizer, id="chromium", marks=requires_playwright),
+    ],
+)
+@pytest.mark.parametrize(
+    ("reference", "tracked"),
+    [
+        ("left-t0", "left-t400"),
+        ("center-t0", "center-t400"),
+        ("center-t0", "center-mixed"),
+        ("right-t0", "right-t400"),
+        ("right-t0", "right-tneg200"),
+    ],
+)
+def test_tracking_does_not_move_the_anchored_edge(
+    rasterizer_factory: type, reference: str, tracked: str
+) -> None:
+    """Tracking leaves the aligned edge where Photoshop puts it.
+
+    In Photoshop the tracked and untracked rows of the fixture share their left
+    edge, centre or right edge according to their alignment, because tracking
+    never reaches past the final glyph. The comparison is between two rows of the
+    same fixture, so it holds under font substitution as well.
+
+    Renderers disagree about the trailing spacing, so this has to be measured and
+    not read off the SVG: resvg never included it, Chromium did.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/style-tracking-alignment.psd"))
+    svg_string = SVGDocument.from_psd(psdimage).tostring()
+
+    rasterizer = rasterizer_factory()
+    try:
+        image = rasterizer.from_string(svg_string)
+    finally:
+        close = getattr(rasterizer, "close", None)
+        if close is not None:
+            close()
+
+    shift = _anchored_edge(image, tracked) - _anchored_edge(image, reference)
+    assert abs(shift) <= 1.5, (
+        f"Expected {tracked} to keep the aligned edge of {reference}, "
+        f"but it moved by {shift}px"
     )
 
 
