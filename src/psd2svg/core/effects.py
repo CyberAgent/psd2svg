@@ -698,7 +698,7 @@ class EffectConverter(ConverterProtocol):
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.PatternOverlay)
             pattern = self.add_pattern(cast(PSDImage, layer._psd), effect.pattern)
-            reference = layer.tagged_blocks.get_data(Tag.REFERENCE_POINT, (0, 0))
+            reference = tuple(layer.tagged_blocks.get_data(Tag.REFERENCE_POINT, (0, 0)))
             self.set_pattern_effect_transform(pattern, effect, reference)
 
             if isinstance(layer, layers.ShapeLayer):
