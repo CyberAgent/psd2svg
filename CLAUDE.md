@@ -118,12 +118,19 @@ git checkout -b feature/my-change
 
 # Make changes and commit
 git add .
-git commit -m "Description of changes"
+git commit -s -m "Description of changes"
 
 # Push branch and create PR
 git push -u origin feature/my-change
 gh pr create --title "My Change" --body "Description"
 ```
+
+The `-s` flag is required: every commit needs a `Signed-off-by` line
+([DCO](https://developercertificate.org/)). Sign-off uses your own
+`git config user.email` and asserts *your* right to submit the code - it is not
+something an agent asserts on your behalf. `Co-Authored-By:` lines are separate
+and still apply. Fix a missing sign-off with `git commit --amend -s`, or a whole
+branch with `git rebase --signoff main`.
 
 ## Code Quality Standards
 
@@ -138,8 +145,10 @@ gh pr create --title "My Change" --body "Description"
 ### When Making Changes
 
 1. **Create a git branch** - Always work on a feature branch, never directly on main
-2. **Avoid backwards-compatibility hacks** - Delete unused code completely
-3. **Update the changelog for user-facing changes** - In the same pull
+2. **Sign off every commit** - `git commit -s`; every commit needs a
+   `Signed-off-by` line matching the commit author
+3. **Avoid backwards-compatibility hacks** - Delete unused code completely
+4. **Update the changelog for user-facing changes** - In the same pull
    request, add an entry under `## [Unreleased]` in
    [CHANGELOG.md](CHANGELOG.md) when a change affects users (new feature,
    behavior change, bug fix, security fix). Skip it for refactors, test-only
@@ -202,3 +211,5 @@ for layer in psd.descendants():
 - **Development Guide**: [docs/development.rst](docs/development.rst) (setup, architecture, contributing, release process)
 - **Feature Limitations**: [docs/limitations.rst](docs/limitations.rst) (known issues and workarounds)
 - **API Reference**: [docs/api-reference.rst](docs/api-reference.rst) (complete API documentation)
+- **Contribution Policy**: [CONTRIBUTING.md](CONTRIBUTING.md) (DCO sign-off, AI-assisted contributions, test fixtures, review priorities)
+- **Security Policy**: [SECURITY.md](SECURITY.md) (supply-chain and contribution security, reporting vulnerabilities)
