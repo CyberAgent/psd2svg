@@ -156,9 +156,8 @@ cannot author those on your behalf, because the third-party writer's output *is*
 the thing under test.
 
 There is no mechanical way to verify that a PSD contains only what it claims to
-contain - see [SECURITY.md](SECURITY.md#why-fixtures-are-not-mechanically-verified)
-for what we tried. So what we ask for is the context that makes human review
-possible:
+contain - [#387](https://github.com/CyberAgent/psd2svg/issues/387) records what
+we tried. So what we ask for is the context that makes human review possible:
 
 - **Keep it minimal and original.** The smallest document that reproduces the
   issue, created by you for this purpose rather than cut from existing artwork.
