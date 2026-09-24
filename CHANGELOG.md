@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`max_image_dimension` guarded pixel layers only** (#PR)
+  - Layer masks, pattern fills and the no-layer flat composite reached the WebP
+    encoder unchecked and failed with Pillow's error instead of an actionable one
+
 - **Dashed strokes shifted phase at any resolution other than 72 ppi** (#400)
   - `stroke-dashoffset` is stored in points and was emitted as pixels
 

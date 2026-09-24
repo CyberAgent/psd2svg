@@ -10,7 +10,6 @@ from psd_tools.constants import BlendMode, Tag
 from psd2svg import svg_utils
 from psd2svg.core.base import ConverterProtocol
 from psd2svg.core.constants import BLEND_MODE, INACCURATE_BLEND_MODES
-from psd2svg.resource_limits import WEBP_MAX_DIMENSION
 
 logger = logging.getLogger(__name__)
 
@@ -156,11 +155,7 @@ class LayerConverter(ConverterProtocol):
             ValueError: If depth exceeds resource_limits.max_layer_depth.
         """
         # Check depth limit
-        if (
-            hasattr(self, "resource_limits")
-            and self.resource_limits
-            and self.resource_limits.is_layer_depth_limited()
-        ):
+        if self.resource_limits and self.resource_limits.is_layer_depth_limited():
             if depth >= self.resource_limits.max_layer_depth:
                 raise ValueError(
                     f"Layer depth {depth} exceeds limit {self.resource_limits.max_layer_depth}. "  # noqa: E501
@@ -191,28 +186,9 @@ class LayerConverter(ConverterProtocol):
             )
             return None
 
-        # Validate image dimensions
-        if (
-            hasattr(self, "resource_limits")
-            and self.resource_limits
-            and self.resource_limits.is_image_dimension_limited()
-        ):
-            max_dim = self.resource_limits.max_image_dimension
-            if layer.width > max_dim or layer.height > max_dim:
-                # Check if this is the WebP hard limit
-                if max_dim == WEBP_MAX_DIMENSION:
-                    raise ValueError(
-                        f"Layer '{layer.name}' dimensions {layer.width}x{layer.height} exceed limit {max_dim}x{max_dim}. "  # noqa: E501
-                        f"WebP has a {WEBP_MAX_DIMENSION}px hard limit. "
-                        f"To process images larger than this, use image_format='png' and, if necessary, "  # noqa: E501
-                        f"increase PSD2SVG_MAX_IMAGE_DIMENSION (for example, to {max(layer.width, layer.height) + 1000})."  # noqa: E501
-                    )
-                else:
-                    raise ValueError(
-                        f"Layer '{layer.name}' dimensions {layer.width}x{layer.height} exceed limit {max_dim}x{max_dim}. "  # noqa: E501
-                        f"To process: set PSD2SVG_MAX_IMAGE_DIMENSION={max(layer.width, layer.height) + 1000} environment variable, "  # noqa: E501
-                        f"or use ResourceLimits(max_image_dimension={max(layer.width, layer.height) + 1000}) in Python API."  # noqa: E501
-                    )
+        # Validate image dimensions before decoding the layer.
+        description = f"Layer '{layer.name}'"
+        self.check_image_dimension(layer.width, layer.height, description=description)
 
         # We will later fill in the href attribute when embedding images.
         image = layer.topil()
@@ -223,8 +199,7 @@ class LayerConverter(ConverterProtocol):
             return None
 
         # Generate image ID before creating the <image> element
-        image_id = self.auto_id("image")
-        self.images[image_id] = image.convert("RGBA")
+        image_id = self.register_image(image.convert("RGBA"), description=description)
 
         # Raster layers can have both fill opacity and overall opacity.
         fill_opacity = layer.tagged_blocks.get_data(Tag.BLEND_FILL_OPACITY, 255)
@@ -698,11 +673,16 @@ class LayerConverter(ConverterProtocol):
                     **context,  # type: ignore[arg-type]
                 )
 
-        # Mask image.
+        # Mask image. A mask bbox is unclipped, so it can exceed the canvas.
+        description = f"Mask of layer '{layer.name}'"
+        self.check_image_dimension(
+            layer.mask.width, layer.mask.height, description=description
+        )
         mask_image = layer.mask.topil()
         if mask_image is not None:
-            image_id = self.auto_id("image")
-            self.images[image_id] = mask_image.convert("L")
+            image_id = self.register_image(
+                mask_image.convert("L"), description=description
+            )
             with self.set_current(mask):
                 self.create_node(
                     "image",

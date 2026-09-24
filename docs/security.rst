@@ -364,18 +364,26 @@ This is a common issue with professional Photoshop files that contain:
 
 **Automatic Validation** (New in version 0.4.0):
 
-psd2svg now **automatically validates** image dimensions before conversion:
+psd2svg validates every bitmap it embeds, before decoding it. Four sources are
+checked: pixel layers, layer masks, pattern fills, and the flat composite of a
+document with no layers. A mask or pattern extent is not bounded by the canvas,
+so a small document can still carry an oversized bitmap.
 
 .. code-block:: python
 
     from psd2svg import convert
 
-    # Automatically rejects layers exceeding 16K dimension limit
+    # Automatically rejects bitmaps exceeding 16K dimension limit
     try:
         convert("large.psd", "output.svg")
     except ValueError as e:
         print(e)
-        # "Layer 'Background' dimensions 20000x15000 exceed limit 16383x16383"
+        # "Layer 'Background' dimensions 20000x15000 exceed limit 16383x16383. ..."
+        # "Mask of layer 'Ellipse 1' dimensions 20000x10 exceed limit ..."
+        # "Pattern 'Grass' dimensions 20000x20000 exceed limit ..."
+
+Bitmaps supplied directly to ``SVGDocument`` or ``SVGDocument.load()`` bypass
+conversion, and so are not validated.
 
 To customize the dimension limit or disable it:
 

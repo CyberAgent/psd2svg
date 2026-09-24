@@ -249,3 +249,40 @@ class ResourceLimits:
     def is_image_dimension_limited(self) -> bool:
         """Check if image dimension limit is enabled."""
         return self.max_image_dimension > 0
+
+    def check_image_dimension(self, width: int, height: int, description: str) -> None:
+        """Raise ValueError if the given bitmap exceeds max_image_dimension.
+
+        Args:
+            width: Bitmap width in pixels.
+            height: Bitmap height in pixels.
+            description: What the bitmap is, used to open the error message.
+                For example ``"Layer 'Background'"`` or ``"Pattern 'Grass'"``.
+
+        Raises:
+            ValueError: If either dimension exceeds the limit. The message names
+                the limit and how to raise it.
+        """
+        if not self.is_image_dimension_limited():
+            return
+        max_dim = self.max_image_dimension
+        if width <= max_dim and height <= max_dim:
+            return
+
+        suggested = max(width, height) + 1000
+        prefix = (
+            f"{description} dimensions {width}x{height} "
+            f"exceed limit {max_dim}x{max_dim}. "
+        )
+        if max_dim == WEBP_MAX_DIMENSION:
+            raise ValueError(
+                prefix + f"WebP has a {WEBP_MAX_DIMENSION}px hard limit. "
+                f"To process images larger than this, use image_format='png' and, "
+                f"if necessary, increase PSD2SVG_MAX_IMAGE_DIMENSION "
+                f"(for example, to {suggested})."
+            )
+        raise ValueError(
+            prefix + f"To process: set PSD2SVG_MAX_IMAGE_DIMENSION={suggested} "
+            f"environment variable, or use "
+            f"ResourceLimits(max_image_dimension={suggested}) in Python API."
+        )

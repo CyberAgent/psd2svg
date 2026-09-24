@@ -127,14 +127,20 @@ class Converter(
 
         if len(self.psd) == 0 and self.psd.has_preview():
             # Special case: No layers, just a flat image.
-            image_id = self.auto_id("image")
+            # Check before compositing so an oversized canvas is never allocated.
+            description = "Flattened composite"
+            self.check_image_dimension(
+                self.psd.width, self.psd.height, description=description
+            )
+            image_id = self.register_image(
+                self.psd.composite(), description=description
+            )
             self.create_node(
                 "image",
                 id=image_id,
                 width=self.psd.width,
                 height=self.psd.height,
             )
-            self.images[image_id] = self.psd.composite()
         else:
             self.add_children(self.psd)
 
@@ -143,6 +149,47 @@ class Converter(
         if self._id_counter is None:
             self._id_counter = AutoCounter()
         return self._id_counter.get_id(prefix)
+
+    def check_image_dimension(
+        self, width: int, height: int, *, description: str
+    ) -> None:
+        """Check a bitmap size against the configured image dimension limit.
+
+        Call this before decoding whenever the size is known from metadata, so an
+        oversized bitmap is rejected instead of allocated.
+
+        Args:
+            width: Bitmap width in pixels.
+            height: Bitmap height in pixels.
+            description: What the bitmap is, used to open the error message.
+
+        Raises:
+            ValueError: If either dimension exceeds the limit.
+        """
+        if self.resource_limits is not None:
+            self.resource_limits.check_image_dimension(width, height, description)
+
+    def register_image(self, image: Image.Image, *, description: str) -> str:
+        """Validate an image and store it, returning its generated element ID.
+
+        Every bitmap that ends up in the SVG goes through here, so the dimension
+        limit applies to all of them. This does not create the ``<image>`` node;
+        the caller does that with the returned ID.
+
+        Args:
+            image: The bitmap to store.
+            description: What the bitmap is, used to open the error message.
+
+        Returns:
+            The generated element ID to use for the ``<image>`` node.
+
+        Raises:
+            ValueError: If either dimension exceeds the limit.
+        """
+        self.check_image_dimension(image.width, image.height, description=description)
+        image_id = self.auto_id("image")
+        self.images[image_id] = image
+        return image_id
 
     def create_node(
         self,
