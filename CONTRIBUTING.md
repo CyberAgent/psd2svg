@@ -147,38 +147,29 @@ For detailed standards, architecture information, and development practices, see
 
 ## Test Fixtures
 
-Tests run against PSD files in `tests/fixtures/`. All 309 fixtures in the
-repository today were authored in Adobe Photoshop, which leaves no coverage of
-files written by other applications - and third-party writers are where
-interesting parser edge cases live. **Fixtures from Clip Studio Paint, Affinity
-Photo, Krita, GIMP, Photopea and similar tools are welcome.** A maintainer
-cannot author those on your behalf, because the third-party writer's output *is*
-the thing under test.
+Tests run against PSD files in `tests/fixtures/`. Every fixture there today was
+authored in Adobe Photoshop, so files written by other applications - Clip Studio
+Paint, Affinity Photo, Krita, GIMP, Photopea - are especially welcome. A
+maintainer cannot author those on your behalf, because the third-party writer's
+output *is* the thing under test.
 
-There is no mechanical way to verify that a PSD contains only what it claims to
-contain - [#387](https://github.com/CyberAgent/psd2svg/issues/387) records what
-we tried. So what we ask for is the context that makes human review possible:
+Every fixture is reviewed by a person, so send one that a person can review:
 
 - **Keep it minimal and original.** The smallest document that reproduces the
   issue, created by you for this purpose rather than cut from existing artwork.
-  That keeps the file reviewable and keeps third-party artwork licensing out of
-  the repository. If recreating the document loses the bug, a minimized copy of
-  a file you own is fine - say so in the PR.
+  If recreating it loses the bug, a minimized copy of a file you own is fine -
+  say so in the PR.
 - **Name the authoring tool and version** in the PR description, e.g.
   `Clip Studio Paint 3.0.6 (Windows)`.
-- **Keep it under 1 MB**, or say why it needs to be larger. Current fixtures run
-  to a median of 40 KB, p90 of 104 KB, and a largest of 942 KB.
+- **Keep it under 1 MB**, or say why it needs to be larger.
 - **No linked smart objects** or other references to files outside the PSD,
   unless that reference is itself what the fixture tests - say so if it is.
-- **Your DCO sign-off covers the fixture**, certifying you have the right to
-  contribute that file under the MIT License. For binary artwork this matters
-  more than it does for code.
+- **Sign off the commit that adds it.** Your DCO sign-off certifies you have
+  the right to contribute that file under the MIT License, which matters more
+  for binary artwork than it does for code.
 
-A reviewer's first question is then: **is the bulk of this file explained by
-what it is for?** 900 KB in a pattern-overlay fixture is explained by the pattern
-data; 900 KB in a fixture for a one-line stroke bug is not. That question catches
-an implausible file, not a small payload hidden in a plausible one - which is why
-these rules lean on minimality and provenance rather than on inspection.
+Expect a reviewer to ask whether the size of the file is explained by what it is
+for: 900 KB is plausible for a pattern overlay, not for a one-line stroke bug.
 
 ## How We Review
 

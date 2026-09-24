@@ -101,10 +101,8 @@ change that trades on it.
 - **Commits must carry a DCO sign-off** - see
   [CONTRIBUTING.md](CONTRIBUTING.md#sign-your-commits-dco).
 - **Binary test fixtures** are accepted from any authoring tool, bounded by a
-  documented size cap and reviewed by a person. There is no automated integrity
-  check; two were designed and tested, and both failed
-  ([#387](https://github.com/CyberAgent/psd2svg/issues/387) records the
-  measurements). See [CONTRIBUTING.md](CONTRIBUTING.md#test-fixtures).
+  size cap and reviewed by a person rather than by an automated integrity check.
+  See [CONTRIBUTING.md](CONTRIBUTING.md#test-fixtures).
 
 ### What these controls do not do
 
