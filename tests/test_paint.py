@@ -133,8 +133,8 @@ def test_dash_offset_is_scaled_from_points_to_pixels() -> None:
     """The dash offset is stored in points, the rest of the stroke in pixels.
 
     This fixture is 144 ppi with a 7 pt offset, so the correct pixel value is
-    14. Emitting the stored 7 unchanged shifts the dash phase by a quarter of
-    the 40 px period.
+    14. Emitting the stored 7 unchanged shifts the dash phase by 7 px against
+    a 40 px period.
     """
     psdimage = PSDImage.open(get_fixture("paint/stroke-3-dash-offset-144ppi.psd"))
     converter = Converter(psdimage)
@@ -145,7 +145,8 @@ def test_dash_offset_is_scaled_from_points_to_pixels() -> None:
     ]
     assert len(nodes) == 1
     assert nodes[0].attrib["stroke-dashoffset"] == "14"
-    # Line width and dash set are already pixels and must not be rescaled.
+    # The line width is in pixels and the dash set is multiples of it;
+    # neither is rescaled by the resolution.
     assert nodes[0].attrib["stroke-width"] == "8"
     assert nodes[0].attrib["stroke-dasharray"] == "24,16"
 

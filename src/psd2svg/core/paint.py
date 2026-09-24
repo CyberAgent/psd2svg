@@ -40,10 +40,11 @@ POINTS_PER_INCH = 72.0
 def get_dash_offset_in_pixels(stroke: Stroke) -> float:
     """Return the stroke dash offset in pixels.
 
-    Photoshop stores ``strokeStyleLineDashOffset`` in points, unlike the line
-    width and the dash set, which are already in pixels. The scale is
-    ``strokeStyleResolution``, the ppi the stroke style was authored at, so
-    points and pixels coincide only at 72 ppi.
+    Photoshop stores ``strokeStyleLineDashOffset`` in points. The line width
+    is in pixels and the dash set entries are multiples of it, so those two
+    need no ppi scale. The offset does: ``strokeStyleResolution`` is the ppi
+    the stroke style was authored at, and points and pixels coincide only at
+    72 ppi.
     """
     offset = stroke._data.get(
         b"strokeStyleLineDashOffset", UnitFloat(unit=Unit.Points, value=0.0)
