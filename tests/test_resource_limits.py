@@ -16,9 +16,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from PIL import Image
 from psd_tools import PSDImage
+from psd_tools.api import pil_io
+from psd_tools.api.layers import PixelLayer
+from psd_tools.api.mask import Mask
 
 from psd2svg import ResourceLimits, SVGDocument, convert
+from psd2svg.core.converter import Converter
 from psd2svg.resource_limits import WEBP_MAX_DIMENSION
 from psd2svg.timeout_utils import with_timeout
 from tests.conftest import get_fixture
@@ -420,8 +425,160 @@ class TestImageDimensionValidation:
         limits = ResourceLimits(max_image_dimension=1)
 
         # Should raise ValueError for oversized image
-        with pytest.raises(ValueError, match="dimensions .* exceed limit"):
+        with pytest.raises(ValueError, match=r"Layer '.*' dimensions .* exceed limit"):
             SVGDocument.from_psd(psdimage, resource_limits=limits)
+
+    def test_layer_mask_is_validated(self) -> None:
+        """Test a layer mask is rejected by the dimension limit.
+
+        A mask bbox is unclipped, so a small document can carry an oversized
+        mask. This fixture has no pixel layer, so the mask is the only source.
+        """
+        psdimage = PSDImage.open(get_fixture("adjustments/invert-mask.psd"))
+
+        with pytest.raises(ValueError, match=r"Mask of layer 'Invert 1' dimensions"):
+            SVGDocument.from_psd(
+                psdimage, resource_limits=ResourceLimits(max_image_dimension=1)
+            )
+
+    def test_pattern_is_validated(self) -> None:
+        """Test a pattern bitmap is rejected by the dimension limit.
+
+        A pattern is not bounded by the canvas either: this 128x128 document
+        carries a 946x946 pattern. It has no pixel layer and no mask.
+        """
+        psdimage = PSDImage.open(get_fixture("paint/pattern-1.psd"))
+
+        with pytest.raises(ValueError, match=r"Pattern 'Grass' dimensions 946x946"):
+            SVGDocument.from_psd(
+                psdimage, resource_limits=ResourceLimits(max_image_dimension=1)
+            )
+
+    def test_flat_composite_is_validated(self) -> None:
+        """Test the no-layer flat composite is rejected by the dimension limit."""
+        psdimage = PSDImage.frompil(Image.new("RGB", (64, 48), "red"))
+        assert len(psdimage) == 0 and psdimage.has_preview()
+
+        with pytest.raises(ValueError, match=r"Flattened composite dimensions 64x48"):
+            SVGDocument.from_psd(
+                psdimage, resource_limits=ResourceLimits(max_image_dimension=1)
+            )
+
+    @pytest.mark.parametrize(
+        "fixture",
+        [
+            "layer-types/pixel-layer.psd",
+            "adjustments/invert-mask.psd",
+            "paint/pattern-1.psd",
+        ],
+    )
+    def test_sources_succeed_when_limit_disabled(self, fixture: str) -> None:
+        """Test every validated source still converts when the limit is off."""
+        psdimage = PSDImage.open(get_fixture(fixture))
+
+        document = SVGDocument.from_psd(
+            psdimage, resource_limits=ResourceLimits(max_image_dimension=0)
+        )
+        assert document.images
+
+    def test_oversized_sources_are_rejected_before_decoding(self) -> None:
+        """Test an oversized bitmap is never decoded.
+
+        Rejecting after decoding would defeat the limit, whose purpose is to
+        prevent the allocation in the first place.
+        """
+        limits = ResourceLimits(max_image_dimension=1)
+
+        with patch.object(
+            PixelLayer, "topil", side_effect=AssertionError("decoded")
+        ) as topil:
+            with pytest.raises(ValueError, match="exceed limit"):
+                SVGDocument.from_psd(
+                    PSDImage.open(get_fixture("layer-types/pixel-layer.psd")),
+                    resource_limits=limits,
+                )
+            topil.assert_not_called()
+
+        with patch.object(
+            Mask, "topil", side_effect=AssertionError("decoded")
+        ) as mask_topil:
+            with pytest.raises(ValueError, match="exceed limit"):
+                SVGDocument.from_psd(
+                    PSDImage.open(get_fixture("adjustments/invert-mask.psd")),
+                    resource_limits=limits,
+                )
+            mask_topil.assert_not_called()
+
+        with patch.object(
+            pil_io, "convert_pattern_to_pil", side_effect=AssertionError("decoded")
+        ) as to_pil:
+            with pytest.raises(ValueError, match="exceed limit"):
+                SVGDocument.from_psd(
+                    PSDImage.open(get_fixture("paint/pattern-1.psd")),
+                    resource_limits=limits,
+                )
+            to_pil.assert_not_called()
+
+    def test_register_image_validates_any_writer(self) -> None:
+        """Test Converter.register_image() guards bitmaps from any source."""
+        converter = Converter(
+            PSDImage.open(get_fixture("layer-types/pixel-layer.psd")),
+            resource_limits=ResourceLimits(max_image_dimension=8),
+        )
+
+        with pytest.raises(ValueError, match=r"Widget dimensions 16x4 exceed limit"):
+            converter.register_image(Image.new("L", (16, 4)), description="Widget")
+        assert converter.images == {}
+
+        image_id = converter.register_image(
+            Image.new("L", (8, 8)), description="Widget"
+        )
+        assert converter.images[image_id].size == (8, 8)
+
+
+class TestCheckImageDimension:
+    """Tests for ResourceLimits.check_image_dimension()."""
+
+    def test_within_limit_passes(self) -> None:
+        """Test dimensions at or below the limit are accepted."""
+        limits = ResourceLimits(max_image_dimension=100)
+
+        limits.check_image_dimension(
+            100, 100, description="Layer 'a'"
+        )  # Boundary is inclusive.
+        limits.check_image_dimension(1, 1, description="Layer 'a'")
+
+    def test_disabled_limit_accepts_anything(self) -> None:
+        """Test no check is performed when the limit is disabled."""
+        ResourceLimits(max_image_dimension=0).check_image_dimension(
+            10**6, 1, description="Layer"
+        )
+
+    def test_webp_limit_message_points_at_png(self) -> None:
+        """Test the default limit explains the WebP ceiling and the PNG escape."""
+        limits = ResourceLimits(max_image_dimension=WEBP_MAX_DIMENSION)
+
+        with pytest.raises(ValueError) as excinfo:
+            limits.check_image_dimension(20000, 10, description="Layer 'foo'")
+
+        message = str(excinfo.value)
+        assert "Layer 'foo' dimensions 20000x10" in message
+        assert f"exceed limit {WEBP_MAX_DIMENSION}x{WEBP_MAX_DIMENSION}" in message
+        assert "image_format='png'" in message
+        assert "21000" in message  # Suggested limit: longest side plus 1000.
+
+    def test_custom_limit_message_points_at_the_setting(self) -> None:
+        """Test a non-WebP limit names how to raise it and omits WebP advice."""
+        limits = ResourceLimits(max_image_dimension=100)
+
+        with pytest.raises(ValueError) as excinfo:
+            limits.check_image_dimension(10, 200, description="Mask of layer 'foo'")
+
+        message = str(excinfo.value)
+        assert "Mask of layer 'foo' dimensions 10x200 exceed limit 100x100" in message
+        assert "PSD2SVG_MAX_IMAGE_DIMENSION=1200" in message
+        assert "ResourceLimits(max_image_dimension=1200)" in message
+        assert "WebP" not in message
 
 
 class TestResourceLimitsIntegration:

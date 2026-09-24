@@ -390,8 +390,15 @@ class PaintConverter(ConverterProtocol):
         pattern_data = psdimage._get_pattern(pattern_id)
         if pattern_data is None:
             raise ValueError(f"Pattern data not found: {pattern_id}")
+        # A pattern bitmap is not bounded by the canvas. Its size is in the
+        # record, so check it before convert_pattern_to_pil() allocates.
+        name = pattern_data.name.rstrip("\x00") or pattern_id
+        description = f"Pattern '{name}'"
+        top, left, bottom, right = pattern_data.data.rectangle
+        self.check_image_dimension(right - left, bottom - top, description=description)
+
         image = pil_io.convert_pattern_to_pil(pattern_data)
-        image_id = self.auto_id("image")
+        image_id = self.register_image(image, description=description)
 
         node = self.create_node(
             "pattern",
@@ -401,14 +408,13 @@ class PaintConverter(ConverterProtocol):
             patternUnits="userSpaceOnUse",
         )
         with self.set_current(node):
+            # We will later fill in the href attribute when embedding images.
             self.create_node(
                 "image",
                 id=image_id,
                 width=image.width,
                 height=image.height,
             )
-        # We will later fill in the href attribute when embedding images.
-        self.images[image_id] = image
         return node
 
     def set_pattern_transform(

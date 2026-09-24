@@ -1,6 +1,6 @@
 import contextlib
 import xml.etree.ElementTree as ET
-from typing import TYPE_CHECKING, Any, Iterator, Protocol
+from typing import Any, Iterator, Protocol
 
 from PIL import Image
 from psd_tools import PSDImage
@@ -8,8 +8,7 @@ from psd_tools.api import adjustments, layers
 from psd_tools.constants import BlendMode
 from psd_tools.psd.descriptor import Descriptor
 
-if TYPE_CHECKING:
-    pass
+from psd2svg.resource_limits import ResourceLimits
 
 
 class ConverterProtocol(Protocol):
@@ -19,6 +18,7 @@ class ConverterProtocol(Protocol):
     svg: ET.Element
     current: ET.Element
     images: dict[str, Image.Image]
+    resource_limits: ResourceLimits | None
     # Note: fonts dict removed - PostScript names stored directly in SVG
 
     # Flags to control the conversion.
@@ -180,6 +180,10 @@ class ConverterProtocol(Protocol):
 
     # Utilities
     def auto_id(self, prefix: str = "") -> str: ...
+    def check_image_dimension(
+        self, width: int, height: int, *, description: str
+    ) -> None: ...
+    def register_image(self, image: Image.Image, *, description: str) -> str: ...
     def create_node(
         self,
         tag: str,
