@@ -360,7 +360,7 @@ This is a common issue with professional Photoshop files that contain:
 - Detailed panoramic images
 - Individual layers exceeding 16383 pixels on either width or height
 
-**Impact**: Conversion will fail with a WebP encoding error when encountering oversized layers.
+**Impact**: Conversion rejects an oversized bitmap rather than producing output.
 
 **Automatic Validation** (New in version 0.4.0):
 
@@ -378,6 +378,7 @@ so a small document can still carry an oversized bitmap.
         convert("large.psd", "output.svg")
     except ValueError as e:
         print(e)
+        # One of, depending on which bitmap is oversized:
         # "Layer 'Background' dimensions 20000x15000 exceed limit 16383x16383. ..."
         # "Mask of layer 'Ellipse 1' dimensions 20000x10 exceed limit ..."
         # "Pattern 'Grass' dimensions 20000x20000 exceed limit ..."

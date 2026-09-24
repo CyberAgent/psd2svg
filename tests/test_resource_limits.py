@@ -543,19 +543,23 @@ class TestCheckImageDimension:
         """Test dimensions at or below the limit are accepted."""
         limits = ResourceLimits(max_image_dimension=100)
 
-        limits.check_image_dimension(100, 100, "Layer 'a'")  # Boundary is inclusive.
-        limits.check_image_dimension(1, 1, "Layer 'a'")
+        limits.check_image_dimension(
+            100, 100, description="Layer 'a'"
+        )  # Boundary is inclusive.
+        limits.check_image_dimension(1, 1, description="Layer 'a'")
 
     def test_disabled_limit_accepts_anything(self) -> None:
         """Test no check is performed when the limit is disabled."""
-        ResourceLimits(max_image_dimension=0).check_image_dimension(10**6, 1, "Layer")
+        ResourceLimits(max_image_dimension=0).check_image_dimension(
+            10**6, 1, description="Layer"
+        )
 
     def test_webp_limit_message_points_at_png(self) -> None:
         """Test the default limit explains the WebP ceiling and the PNG escape."""
         limits = ResourceLimits(max_image_dimension=WEBP_MAX_DIMENSION)
 
         with pytest.raises(ValueError) as excinfo:
-            limits.check_image_dimension(20000, 10, "Layer 'foo'")
+            limits.check_image_dimension(20000, 10, description="Layer 'foo'")
 
         message = str(excinfo.value)
         assert "Layer 'foo' dimensions 20000x10" in message
@@ -568,7 +572,7 @@ class TestCheckImageDimension:
         limits = ResourceLimits(max_image_dimension=100)
 
         with pytest.raises(ValueError) as excinfo:
-            limits.check_image_dimension(10, 200, "Mask of layer 'foo'")
+            limits.check_image_dimension(10, 200, description="Mask of layer 'foo'")
 
         message = str(excinfo.value)
         assert "Mask of layer 'foo' dimensions 10x200 exceed limit 100x100" in message

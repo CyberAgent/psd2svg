@@ -1,7 +1,7 @@
 import contextlib
 import logging
 import xml.etree.ElementTree as ET
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import Any, Iterator
 
 from PIL import Image
 from psd_tools import PSDImage
@@ -14,9 +14,7 @@ from psd2svg.core.layer import LayerConverter
 from psd2svg.core.paint import PaintConverter
 from psd2svg.core.shape import ShapeConverter
 from psd2svg.core.text import TextConverter
-
-if TYPE_CHECKING:
-    from psd2svg.resource_limits import ResourceLimits
+from psd2svg.resource_limits import ResourceLimits
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +88,7 @@ class Converter(
         text_letter_spacing_offset: float = 0.0,
         text_wrapping_mode: int = 0,
         font_mapping: dict[str, dict[str, float | str]] | None = None,
-        resource_limits: "ResourceLimits | None" = None,
+        resource_limits: ResourceLimits | None = None,
     ) -> None:
         """Initialize the converter internal state."""
         # Source PSD image.
@@ -167,7 +165,9 @@ class Converter(
             ValueError: If either dimension exceeds the limit.
         """
         if self.resource_limits is not None:
-            self.resource_limits.check_image_dimension(width, height, description)
+            self.resource_limits.check_image_dimension(
+                width, height, description=description
+            )
 
     def register_image(self, image: Image.Image, *, description: str) -> str:
         """Validate an image and store it, returning its generated element ID.

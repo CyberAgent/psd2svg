@@ -250,7 +250,9 @@ class ResourceLimits:
         """Check if image dimension limit is enabled."""
         return self.max_image_dimension > 0
 
-    def check_image_dimension(self, width: int, height: int, description: str) -> None:
+    def check_image_dimension(
+        self, width: int, height: int, *, description: str
+    ) -> None:
         """Raise ValueError if the given bitmap exceeds max_image_dimension.
 
         Args:
