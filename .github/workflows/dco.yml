@@ -1,0 +1,85 @@
+name: DCO
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dco:
+    name: DCO Sign-off
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check every commit for a matching sign-off
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          PR_COMMITS: ${{ github.event.pull_request.commits }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          commits="$RUNNER_TEMP/commits.json"
+          gh api "repos/$REPO/pulls/$PR/commits" --paginate --jq '.[]' > "$commits"
+
+          # This endpoint returns at most 250 commits and stops without an error.
+          fetched=$(wc -l < "$commits" | tr -d ' ')
+          if [ "$fetched" -ne "$PR_COMMITS" ]; then
+            echo "::error::Read $fetched of $PR_COMMITS commits - this endpoint returns at most 250. Split the pull request."
+            exit 1
+          fi
+
+          # Merge commits are not checked. A bot may sign off from
+          # <support@github.com>, the only address Dependabot signs off from and
+          # not the one it authors from.
+          unsigned=$(jq -r -s '
+            def signoffs:
+              .commit.message
+              | split("\n")
+              | map(ascii_downcase
+                    | sub("^\\s+"; "")
+                    | sub("\\s+$"; "")
+                    | sub("^signed-off-by:\\s+"; "signed-off-by: "))
+              | map(select(startswith("signed-off-by: ")));
+
+            .[]
+            | select(.parents | length < 2)
+            | . as $c
+            | ($c.commit.author.name // "") as $who
+            | ($c.commit.author.email // "") as $addr
+            | ($who | ascii_downcase) as $name
+            | ($addr | ascii_downcase) as $email
+            | ($c | signoffs) as $lines
+            | select(
+                ($lines | any(. == "signed-off-by: " + $name + " <" + $email + ">"))
+                or ($c.author.type == "Bot"
+                    and ($lines | any(. == "signed-off-by: " + $name + " <support@github.com>")))
+                | not
+              )
+            | "\($c.sha[0:8])  \($c.commit.message | split("\n")[0] | gsub("`"; ""))  --  \($who) <\($addr)>"
+          ' "$commits")
+
+          if [ -z "$unsigned" ]; then
+            echo "Every commit carries a Signed-off-by line matching its author."
+            exit 0
+          fi
+
+          {
+            echo "## DCO check failed"
+            echo
+            echo 'No `Signed-off-by` line matching the commit author:'
+            echo
+            echo '```text'
+            echo "$unsigned"
+            echo '```'
+            echo
+            echo 'Sign off with `git commit --amend -s` for the last commit, or'
+            echo "\`git rebase --signoff $BASE\` for the whole branch, then force-push."
+            echo "See [Sign Your Commits (DCO)](https://github.com/$REPO/blob/main/CONTRIBUTING.md#sign-your-commits-dco)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "::error::$(printf '%s\n' "$unsigned" | wc -l | tr -d ' ') commit(s) without a matching Signed-off-by line - see the job summary."
+          exit 1

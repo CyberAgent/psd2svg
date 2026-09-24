@@ -96,6 +96,8 @@ For detailed architecture documentation, see [docs/development.rst](docs/develop
 
 - **Test Workflow** (`.github/workflows/test.yml`): Runs on every push and PR
 - **Release Workflow** (`.github/workflows/release.yml`): Triggered by version tags on main branch
+- **DCO Workflow** (`.github/workflows/dco.yml`): Fails a PR whose commits lack a `Signed-off-by` line matching the author
+- **Security Workflow** (`.github/workflows/security.yml`): Dependency audit and Trivy scan on pushes to main, PRs, and weekly
 
 For release process details, see [docs/development.rst](docs/development.rst).
 
