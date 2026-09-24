@@ -158,11 +158,30 @@ branch with `git rebase --signoff main`.
    `### Dependencies` and reference the PR number:
    `- **Short description** (#PR)`. Keep entries concise - one bold summary
    line plus at most one short sub-bullet.
+5. **Keep history out of the docs** - documentation states the current rules and
+   behavior; the record of what changed and why lives in the issue and the pull
+   request. See [Documentation Structure](#documentation-structure).
 
 ### Documentation Structure
 
 - **README.md** - Quick start guide, basic usage
 - **docs/** - Full Sphinx documentation (comprehensive details)
+- **CONTRIBUTING.md**, **SECURITY.md** - the rules contributors follow
+- **CLAUDE.md** - this file: commands, architecture, and the conventions needed
+  in every session
+- **CHANGELOG.md** - released user-facing history, in the format above
+
+**Documentation states the current rules and behavior. GitHub issues and pull
+requests hold the record of how it got that way.** Write what is true now, and
+leave out what changed, what was tried and rejected, and when something was
+decided - a reader cannot act on "this was previously handled by X" or "we
+considered Y and chose Z". That reasoning belongs in the pull request
+description or the issue, not in the file being changed.
+
+`CHANGELOG.md` is the deliberate exception: it records released history for
+users. Linking an issue for a gap that is *currently* open, the way
+[docs/limitations.rst](docs/limitations.rst) does, is a pointer to live status
+and also fine.
 
 For detailed feature documentation, configuration options, and usage examples, refer to the [full documentation](https://psd2svg.readthedocs.io/).
 

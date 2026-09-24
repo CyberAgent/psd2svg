@@ -144,6 +144,11 @@ For detailed standards, architecture information, and development practices, see
 - **Documentation**: Update docs if changing public API or adding features
 - **Type hints**: Ensure all new code has proper type annotations
 - **No warnings**: Code should not generate new warnings
+- **Reasoning**: Put *why* in the PR description, not in the files you changed.
+  The documentation in this repository states the rules and behavior that hold
+  now; the record of what changed and why lives in the issue and the pull
+  request. `CHANGELOG.md` is the exception - it records released history for
+  users, one entry per user-facing change.
 
 ## Test Fixtures
 
