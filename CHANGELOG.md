@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Pattern overlays emitted a redundant `translate(0, 0)`** (#384)
+  - The layer reference point is a `ListElement`, so it never compared equal
+    to the `(0, 0)` default and an inert `patternTransform` was always written
+
 - **Wrapped text ignored the resolved font weight and style** (#380)
   - `<foreignObject>` spans got inert XHTML `font-weight`/`font-style`
     attributes, so a bold or italic face rendered as Regular
