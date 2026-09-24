@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Tracked text drifted when centered or right-aligned** (#406)
+  - The final character of an anchored line is now emitted without letter
+    spacing, which SVG counts in the alignment but Photoshop does not
+
 - **`max_image_dimension` guarded pixel layers only** (#402)
   - Layer masks, pattern fills and the no-layer flat composite reached the WebP
     encoder unchecked and failed with Pillow's error instead of an actionable one
