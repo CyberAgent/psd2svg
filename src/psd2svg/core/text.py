@@ -178,9 +178,24 @@ def _paragraph_advance(
 _EXTENDING_CATEGORIES = ("Mn", "Mc", "Me")
 _EMOJI_MODIFIERS = frozenset(chr(code) for code in range(0x1F3FB, 0x1F400))
 _REGIONAL_INDICATORS = frozenset(chr(code) for code in range(0x1F1E6, 0x1F200))
+# Tag characters spell out the subdivision of a flag and end it with a
+# cancel tag.
+_TAG_CHARACTERS = frozenset(chr(code) for code in range(0xE0020, 0xE0080))
+# Hangul vowel and trailing-consonant jamo complete the syllable they follow.
+_CONJOINING_JAMO = frozenset(
+    chr(code)
+    for start, end in ((0x1160, 0x11FF), (0xD7B0, 0xD7C6), (0xD7CB, 0xD7FB))
+    for code in range(start, end + 1)
+)
 # Thai and Lao SARA AM carry a mark over the character they follow.
 _COMPOSING_VOWEL_SIGNS = frozenset("\u0e33\u0eb3")
 _ZERO_WIDTH_JOINER = "\u200d"
+# A virama asks the renderer to conjoin the letters on either side of it.
+_VIRAMA_COMBINING_CLASS = 9
+# Letters of these scripts join up with their neighbours. Arabic, Syriac and
+# Thaana are covered by the Arabic Letter bidirectional class instead; these
+# are N'Ko, Mongolian and Adlam, which are not.
+_CURSIVE_RANGES = ((0x07C0, 0x07FF), (0x1800, 0x18AF), (0x1E900, 0x1E95F))
 
 
 def _extends_previous_character(char: str) -> bool:
@@ -188,6 +203,8 @@ def _extends_previous_character(char: str) -> bool:
     return (
         unicodedata.category(char) in _EXTENDING_CATEGORIES
         or char in _EMOJI_MODIFIERS
+        or char in _TAG_CHARACTERS
+        or char in _CONJOINING_JAMO
         or char in _COMPOSING_VOWEL_SIGNS
     )
 
@@ -206,31 +223,44 @@ def _trailing_grapheme_length(text: str) -> int:
             index -= 1
         if index > 0:
             index -= 1  # The base character the marks attach to.
-        if (
-            index > 0
-            and text[index] in _REGIONAL_INDICATORS
-            and text[index - 1] in _REGIONAL_INDICATORS
-        ):
-            index -= 1  # A flag is a pair of regional indicators.
+        if index > 0 and text[index] in _REGIONAL_INDICATORS:
+            # A flag is a pair of regional indicators, and a run of them pairs
+            # up from its start, so the last pair is only complete when an odd
+            # number of indicators comes before this one.
+            preceding = 0
+            while (
+                index - preceding > 0
+                and text[index - preceding - 1] in _REGIONAL_INDICATORS
+            ):
+                preceding += 1
+            if preceding % 2 == 1:
+                index -= 1
         if index > 0 and text[index - 1] == _ZERO_WIDTH_JOINER:
             index -= 1  # The joiner binds the cluster to what precedes it.
             continue
         return len(text) - index
 
 
+def _joins_cursively(char: str) -> bool:
+    """Check whether a character belongs to a script that joins up its letters."""
+    if unicodedata.bidirectional(char) == "AL":
+        return True
+    code = ord(char)
+    return any(start <= code <= end for start, end in _CURSIVE_RANGES)
+
+
 def _shapes_with_next(char: str, following: str) -> bool:
     """Check whether a character and the text after it shape as one unit.
 
     Renderers shape each styled run on its own, so a run boundary inside a
-    cursive join, an Indic conjunct or a combining sequence renders the
-    sequence as separate glyphs.
+    cursive join or an Indic conjunct renders the sequence as separate glyphs.
     """
     if not char or not following:
         return False
     return (
-        unicodedata.category(char) in _EXTENDING_CATEGORIES
-        or unicodedata.bidirectional(char) == "AL"
-        or unicodedata.bidirectional(following[0]) == "AL"
+        unicodedata.combining(char) == _VIRAMA_COMBINING_CLASS
+        or _joins_cursively(char)
+        or _joins_cursively(following[0])
     )
 
 

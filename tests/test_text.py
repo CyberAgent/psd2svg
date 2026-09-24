@@ -953,6 +953,7 @@ def test_isolate_trailing_letter_spacing_keeps_what_tracking_did_not_add() -> No
     ("text", "description"),
     [
         ("\u0628\u064a\u062a", "Arabic letters join cursively"),
+        ("\u1820\u1821\u1822", "so do Mongolian letters, which are not bidi AL"),
         ("\u0915\u0915\u094d\u0937", "a Devanagari conjunct spans the boundary"),
     ],
 )
@@ -965,6 +966,67 @@ def test_isolate_trailing_letter_spacing_leaves_shaped_text_alone(
     _isolate_trailing_letter_spacing(paragraph_node, 0.0)
 
     assert [span.text for span in paragraph_node] == [text], description
+
+
+@pytest.mark.parametrize(
+    ("text", "head", "final"),
+    [
+        ("A\u1100\u1161\u11a8", "A", "\u1100\u1161\u11a8"),
+        ("A\uac00\u11a8", "A", "\uac00\u11a8"),
+        ("AB\U0001f44d\U0001f3fb", "AB", "\U0001f44d\U0001f3fb"),
+        ("AB\U0001f1ef\U0001f1f5", "AB", "\U0001f1ef\U0001f1f5"),
+        ("\U0001f1fa\U0001f1f8\U0001f1e6", "\U0001f1fa\U0001f1f8", "\U0001f1e6"),
+        (
+            "A\U0001f3f4\U000e0067\U000e0062\U000e0077\U000e006c\U000e0073\U000e007f",
+            "A",
+            "\U0001f3f4\U000e0067\U000e0062\U000e0077\U000e006c\U000e0073\U000e007f",
+        ),
+        ("AB\u0e01\u0e33", "AB", "\u0e01\u0e33"),
+        ("Ae\u0301B", "Ae\u0301", "B"),
+    ],
+    ids=[
+        "hangul-jamo",
+        "hangul-syllable-with-final",
+        "emoji-modifier",
+        "flag",
+        "odd-run-of-regional-indicators",
+        "emoji-tag-sequence",
+        "thai-sara-am",
+        "combining-mark-before-the-boundary",
+    ],
+)
+def test_isolate_trailing_letter_spacing_splits_whole_clusters(
+    text: str, head: str, final: str
+) -> None:
+    """The final run is a complete grapheme cluster, never part of one."""
+    paragraph_node = _paragraph_node((text, {"letter-spacing": "8"}))
+
+    _isolate_trailing_letter_spacing(paragraph_node, 0.0)
+
+    assert [span.text for span in paragraph_node] == [head, final]
+
+
+def test_trailing_letter_spacing_keeps_tsume_and_the_offset() -> None:
+    """The span reports what the tracking did not contribute.
+
+    Tracking is the only part Photoshop leaves out after the final glyph, so
+    the tsume and ``text_letter_spacing_offset`` terms have to survive the
+    arithmetic that removes it.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/style-tracking.psd"))
+    _, text_setting = _first_text_setting("texts/style-tracking.psd")
+    source_span = next(iter(next(iter(text_setting))))
+    style_data = dict(source_span.style.style_sheet_data)
+    style_data.update(FontSize=40.0, Tracking=100, Tsume=0.5)
+    span = Span(0, 1, "A", StyleSheet(name="", style_sheet_data=style_data))
+
+    converter = Converter(psdimage, text_letter_spacing_offset=0.25)
+    emitted = converter._add_text_span(text_setting, ET.Element("tspan"), span)
+
+    # Tracking 100 at 40px adds 4.0, tsume 0.5 takes 2.0 away, and the offset
+    # adds 0.25; only the 4.0 is trailing.
+    assert float(emitted.node.attrib["letter-spacing"]) == pytest.approx(2.25)
+    assert emitted.trailing_letter_spacing == pytest.approx(-1.75)
 
 
 def _band_ink_extent(image: Image.Image, baseline: float) -> tuple[int, int]:
