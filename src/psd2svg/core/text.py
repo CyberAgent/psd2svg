@@ -24,6 +24,7 @@ Note: This module re-exports TypeSetting and TextWrappingMode for backward
 """
 
 import logging
+import unicodedata
 import xml.etree.ElementTree as ET
 from typing import NamedTuple
 
@@ -63,6 +64,25 @@ SCALE_TOLERANCE = 1e-6
 # style-faux-bold*.psd fixtures against their own unthickened line is 2.9-3.2%
 # of the em, depending on which scanlines are sampled. See GitHub issue #337.
 FAUX_BOLD_STROKE_RATIO = 0.03
+
+
+class EmittedSpan(NamedTuple):
+    """A rendered ``<tspan>`` and the metrics the rest of the paragraph needs.
+
+    Attributes:
+        node: The emitted span element.
+        font_size: Effective font size of the span in the local SVG coordinate
+            system.
+        trailing_letter_spacing: Letter spacing that still applies after the
+            span's final character once the tracking is taken out. Photoshop
+            tracking separates glyphs without reserving space after the last
+            one, unlike tsume and ``text_letter_spacing_offset``, which change
+            the character's own advance.
+    """
+
+    node: ET.Element
+    font_size: float
+    trailing_letter_spacing: float
 
 
 class TextScaling(NamedTuple):
@@ -151,6 +171,152 @@ def _paragraph_advance(
     if writing_direction == WritingDirection.VERTICAL_RL:
         return -leading, None
     return None, leading
+
+
+# Characters that render as part of the character before them instead of on
+# their own.
+_EXTENDING_CATEGORIES = ("Mn", "Mc", "Me")
+_EMOJI_MODIFIERS = frozenset(chr(code) for code in range(0x1F3FB, 0x1F400))
+_REGIONAL_INDICATORS = frozenset(chr(code) for code in range(0x1F1E6, 0x1F200))
+# Tag characters spell out the subdivision of a flag and end it with a
+# cancel tag.
+_TAG_CHARACTERS = frozenset(chr(code) for code in range(0xE0020, 0xE0080))
+# Hangul vowel and trailing-consonant jamo complete the syllable they follow.
+_CONJOINING_JAMO = frozenset(
+    chr(code)
+    for start, end in ((0x1160, 0x11FF), (0xD7B0, 0xD7C6), (0xD7CB, 0xD7FB))
+    for code in range(start, end + 1)
+)
+# Thai and Lao SARA AM carry a mark over the character they follow.
+_COMPOSING_VOWEL_SIGNS = frozenset("\u0e33\u0eb3")
+_ZERO_WIDTH_JOINER = "\u200d"
+# A virama asks the renderer to conjoin the letters on either side of it.
+_VIRAMA_COMBINING_CLASS = 9
+# Letters of these scripts join up with their neighbours. Arabic, Syriac and
+# Thaana are covered by the Arabic Letter bidirectional class instead; these
+# are N'Ko, Mongolian and Adlam, which are not.
+_CURSIVE_RANGES = ((0x07C0, 0x07FF), (0x1800, 0x18AF), (0x1E900, 0x1E95F))
+
+
+def _extends_previous_character(char: str) -> bool:
+    """Check whether a character renders as part of the one before it."""
+    return (
+        unicodedata.category(char) in _EXTENDING_CATEGORIES
+        or char in _EMOJI_MODIFIERS
+        or char in _TAG_CHARACTERS
+        or char in _CONJOINING_JAMO
+        or char in _COMPOSING_VOWEL_SIGNS
+    )
+
+
+def _trailing_grapheme_length(text: str) -> int:
+    """Return the number of characters in the final grapheme cluster of text.
+
+    Combining marks (variation selectors among them), emoji modifiers,
+    regional indicator pairs and zero-width-joiner sequences render as a single
+    glyph together with their base character, so a run must never be cut
+    between them.
+    """
+    index = len(text)
+    while True:
+        while index > 0 and _extends_previous_character(text[index - 1]):
+            index -= 1
+        if index > 0:
+            index -= 1  # The base character the marks attach to.
+        if index > 0 and text[index] in _REGIONAL_INDICATORS:
+            # A flag is a pair of regional indicators, and a run of them pairs
+            # up from its start, so the last pair is only complete when an odd
+            # number of indicators comes before this one.
+            preceding = 0
+            while (
+                index - preceding > 0
+                and text[index - preceding - 1] in _REGIONAL_INDICATORS
+            ):
+                preceding += 1
+            if preceding % 2 == 1:
+                index -= 1
+        if index > 0 and text[index - 1] == _ZERO_WIDTH_JOINER:
+            index -= 1  # The joiner binds the cluster to what precedes it.
+            continue
+        return len(text) - index
+
+
+def _joins_cursively(char: str) -> bool:
+    """Check whether a character belongs to a script that joins up its letters."""
+    if unicodedata.bidirectional(char) == "AL":
+        return True
+    code = ord(char)
+    return any(start <= code <= end for start, end in _CURSIVE_RANGES)
+
+
+def _shapes_with_next(char: str, following: str) -> bool:
+    """Check whether a character and the text after it shape as one unit.
+
+    Renderers shape each styled run on its own, so a run boundary inside a
+    cursive join or an Indic conjunct renders the sequence as separate glyphs.
+    """
+    if not char or not following:
+        return False
+    return (
+        unicodedata.combining(char) == _VIRAMA_COMBINING_CLASS
+        or _joins_cursively(char)
+        or _joins_cursively(following[0])
+    )
+
+
+def _isolate_trailing_letter_spacing(
+    paragraph_node: ET.Element, trailing_spacing: float
+) -> None:
+    """Take the tracking out of the letter spacing after the final character.
+
+    Letter spacing is added after every character, the last one included, and
+    ``text-anchor="middle"`` and ``"end"`` count that trailing advance when they
+    place the line. Photoshop tracking only separates glyphs, so the line ends
+    up shifted. Emitting the final character in its own run without the tracking
+    removes the trailing advance instead of compensating for it, which also
+    settles the disagreement between renderers over whether it exists at all.
+
+    Args:
+        paragraph_node: Paragraph tspan whose spans have already been added.
+        trailing_spacing: Letter spacing the final character keeps, that is
+            everything the tracking did not contribute.
+    """
+    rendered = [node for node in paragraph_node if node.text]
+    if not rendered:
+        return  # Empty and carriage-return-only runs render nothing.
+    span_node = rendered[-1]
+    # Compare the serialized values: the attribute is rounded, so comparing
+    # floats would split a run whose two halves then read the same.
+    if span_node.get("letter-spacing", "0") == svg_utils.num2str(trailing_spacing):
+        return
+
+    text = span_node.text or ""
+    length = _trailing_grapheme_length(text)
+    if length == len(text):
+        preceding = (rendered[-2].text or "")[-1:] if len(rendered) > 1 else ""
+    else:
+        preceding = text[-length - 1]
+    if _shapes_with_next(preceding, text[-length:]):
+        return
+
+    if length == len(text):
+        # The run is the final character, so all of its spacing is trailing.
+        svg_utils.set_attribute(span_node, "letter-spacing", trailing_spacing)
+        return
+
+    # The final character becomes a sibling run rather than a nested one:
+    # merge_common_child_attributes hoists a lone child's spacing onto the
+    # parent, which would wipe out the spacing of the rest of the run.
+    final_node = ET.Element(span_node.tag, dict(span_node.attrib))
+    for key in ("x", "y", "dx", "dy"):
+        # Manual kerning applies before a run's first character.
+        final_node.attrib.pop(key, None)
+    svg_utils.set_attribute(final_node, "letter-spacing", trailing_spacing)
+    final_node.text = text[-length:]
+    final_node.tail = span_node.tail
+    span_node.text = text[:-length]
+    span_node.tail = None
+    paragraph_node.insert(list(paragraph_node).index(span_node) + 1, final_node)
 
 
 def _needs_whitespace_preservation(text: str) -> bool:
@@ -327,8 +493,9 @@ class TextConverter(ConverterProtocol):
                 origin_x += paragraph_offset_x
                 origin_y += paragraph_offset_y
                 previous_font_size: float | None = None
+                final_span: EmittedSpan | None = None
                 for span in paragraph:
-                    _, emitted_font_size = self._add_text_span(
+                    emitted = self._add_text_span(
                         text_setting,
                         paragraph_node,
                         span,
@@ -340,7 +507,17 @@ class TextConverter(ConverterProtocol):
                     # character. Empty and carriage-return-only runs do not create
                     # such a boundary and must not replace the preceding size.
                     if span.text.strip("\r"):
-                        previous_font_size = emitted_font_size
+                        previous_font_size = emitted.font_size
+                        final_span = emitted
+                # An anchored line is placed by its advance width, which counts
+                # the tracking that follows its last character.
+                if final_span is not None and paragraph.get_text_anchor() in (
+                    "middle",
+                    "end",
+                ):
+                    _isolate_trailing_letter_spacing(
+                        paragraph_node, final_span.trailing_letter_spacing
+                    )
 
         if text_setting.has_warp():
             # When there is <textPath>, we can only optimize at the paragraph level.
@@ -692,7 +869,7 @@ class TextConverter(ConverterProtocol):
         paragraph_origin: tuple[float, float] = (0.0, 0.0),
         text_element_scale: float | None = None,
         kerning_reference_size: float | None = None,
-    ) -> tuple[ET.Element, float]:
+    ) -> EmittedSpan:
         """Add a text span to the paragraph node.
 
         Args:
@@ -707,8 +884,8 @@ class TextConverter(ConverterProtocol):
                 character, or None at a paragraph boundary.
 
         Returns:
-            The emitted ``<tspan>`` and its effective font size in the local SVG
-            coordinate system.
+            The emitted ``<tspan>`` with the metrics later spans and the
+            paragraph need.
         """
         style = span.style
         # Get PostScript name from font index - no font resolution needed
@@ -845,7 +1022,8 @@ class TextConverter(ConverterProtocol):
         # to letter spacing.
         # NOTE: There is a slight offset difference for the first charactor because
         # letter-spacing applies after the character.
-        letter_spacing = style.tracking / 1000 * scaled_font_size
+        tracking_spacing = style.tracking / 1000 * scaled_font_size
+        letter_spacing = tracking_spacing
         letter_spacing -= style.tsume / 10 * scaled_font_size  # Tsume tightens spacing
         # NOTE: Unlike tracking and tsume, the offset is an absolute value in pixels,
         # so it is divided by the scale of the <text> element to keep it absolute.
@@ -923,7 +1101,7 @@ class TextConverter(ConverterProtocol):
             # NOTE: glyph-orientation-vertical is deprecated but may help
             # with compatibility.
             # svg_utils.set_attribute(tspan, "glyph-orientation-vertical", "90")
-        return tspan, emitted_font_size
+        return EmittedSpan(tspan, emitted_font_size, letter_spacing - tracking_spacing)
 
     def _calculate_text_scaling(
         self,
