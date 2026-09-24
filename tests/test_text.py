@@ -31,6 +31,28 @@ def convert_psd_to_svg(psd_file: str) -> ET.Element:
     return converter.svg
 
 
+def _first_text_setting(psd_file: str) -> tuple[PSDImage, TypeSetting]:
+    """Open a fixture and wrap the first type layer in a TypeSetting."""
+    psdimage = PSDImage.open(get_fixture(psd_file))
+    layer = next(
+        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
+    )
+    return psdimage, TypeSetting(layer._data)
+
+
+def _font_feature_settings(svg: ET.Element) -> list[tuple[str | None, str]]:
+    """Collect the (text, font-feature-settings) pairs present in the SVG."""
+    return [
+        (node.text, value)
+        for node in svg.iter()
+        if (
+            value := _parse_style_string(node.attrib.get("style", "")).get(
+                "font-feature-settings"
+            )
+        )
+    ]
+
+
 def _parse_scale(transform: str) -> tuple[float, float]:
     """Extract the scale factors from an SVG transform string."""
     match = re.search(r"scale\(([^,)]+),\s*([^)]+)\)", transform)
@@ -1509,42 +1531,58 @@ def test_text_japanese_notosans_cjk_jp() -> None:
     font_family = text_node.attrib.get("font-family")
     assert font_family is not None, "font-family should be set"
 
-    assert any(
-        "font-feature-settings: 'palt'" in node.attrib.get("style", "")
-        for node in svg.iter()
-    )
 
-
-def test_text_japanese_palt_requires_auto_kerning(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Japanese proportional metrics stay disabled when auto kerning is off."""
-    monkeypatch.setattr(StyleSheet, "auto_kerning", property(lambda _style: False))
+def test_text_japanese_horizontal_auto_kerning_uses_palt() -> None:
+    """Horizontal Japanese text with automatic kerning requests palt."""
+    _, text_setting = _first_text_setting("texts/fonts-notosans-cjk-jp.psd")
+    span = next(iter(next(iter(text_setting))))
+    assert text_setting.writing_direction == WritingDirection.HORIZONTAL_TB
+    assert text_setting.is_japanese_font(span.style.font)
+    assert span.style.auto_kerning is True
 
     svg = convert_psd_to_svg("texts/fonts-notosans-cjk-jp.psd")
 
-    assert all(
-        "font-feature-settings" not in node.attrib.get("style", "")
-        for node in svg.iter()
-    )
+    assert _font_feature_settings(svg) == [("美しい日本語", "'palt'")]
 
 
-def test_text_japanese_vertical_auto_kerning_uses_vpal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_text_japanese_disabled_auto_kerning_drops_palt() -> None:
+    """Japanese spans without automatic kerning drop proportional metrics.
+
+    Photoshop turns automatic kerning off per character pair, so the first
+    character of the layer keeps it and every following character carries
+    ``AutoKerning: false``.
+    """
+    fixture = "texts/fonts-notosans-cjk-jp-autokerning-off.psd"
+    _, text_setting = _first_text_setting(fixture)
+    spans = [span for paragraph in text_setting for span in paragraph]
+    assert all(text_setting.is_japanese_font(span.style.font) for span in spans)
+    assert spans[0].style.auto_kerning is True
+    assert all(span.style.auto_kerning is False for span in spans[1:])
+
+    svg = convert_psd_to_svg(fixture)
+
+    text_node = svg.find(".//text")
+    assert text_node is not None
+    assert "".join(text_node.itertext()) == "美しい日本語"
+    # Only the automatically kerned first character keeps proportional metrics.
+    assert _font_feature_settings(svg) == [("美", "'palt'")]
+
+
+def test_text_japanese_vertical_auto_kerning_uses_vpal() -> None:
     """Vertical Japanese text requests vertical proportional metrics."""
-    monkeypatch.setattr(
-        TypeSetting,
-        "writing_direction",
-        property(lambda _text_setting: WritingDirection.VERTICAL_RL),
-    )
+    fixture = "texts/fonts-notosans-cjk-jp-writingdirection2.psd"
+    _, text_setting = _first_text_setting(fixture)
+    span = next(iter(next(iter(text_setting))))
+    assert text_setting.writing_direction == WritingDirection.VERTICAL_RL
+    assert text_setting.is_japanese_font(span.style.font)
+    assert span.style.auto_kerning is True
 
-    svg = convert_psd_to_svg("texts/fonts-notosans-cjk-jp.psd")
+    svg = convert_psd_to_svg(fixture)
 
-    assert any(
-        "font-feature-settings: 'vpal'" in node.attrib.get("style", "")
-        for node in svg.iter()
-    )
+    text_node = svg.find(".//text")
+    assert text_node is not None
+    assert text_node.attrib.get("writing-mode") == "vertical-rl"
+    assert _font_feature_settings(svg) == [("日本語", "'vpal'")]
 
 
 def test_text_latin_auto_kerning_does_not_use_palt() -> None:
@@ -1559,11 +1597,7 @@ def test_text_latin_auto_kerning_does_not_use_palt() -> None:
 
 def test_foreign_object_japanese_auto_kerning_uses_palt() -> None:
     """The browser-only foreignObject mode carries proportional metrics too."""
-    psdimage = PSDImage.open(get_fixture("texts/fonts-notosans-cjk-jp.psd"))
-    layer = next(
-        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
-    )
-    text_setting = TypeSetting(layer._data)
+    psdimage, text_setting = _first_text_setting("texts/fonts-notosans-cjk-jp.psd")
     paragraph = next(iter(text_setting))
     span = next(iter(paragraph))
     converter = Converter(psdimage)
@@ -1571,6 +1605,20 @@ def test_foreign_object_japanese_auto_kerning_uses_palt() -> None:
     styles = converter._get_foreign_object_span_styles(span, text_setting, paragraph)
 
     assert styles["font-feature-settings"] == "'palt'"
+
+
+def test_foreign_object_japanese_vertical_auto_kerning_uses_vpal() -> None:
+    """The foreignObject mode carries vertical proportional metrics too."""
+    psdimage, text_setting = _first_text_setting(
+        "texts/fonts-notosans-cjk-jp-writingdirection2.psd"
+    )
+    paragraph = next(iter(text_setting))
+    span = next(iter(paragraph))
+    converter = Converter(psdimage)
+
+    styles = converter._get_foreign_object_span_styles(span, text_setting, paragraph)
+
+    assert styles["font-feature-settings"] == "'vpal'"
 
 
 def test_text_japanese_with_custom_css() -> None:
