@@ -368,6 +368,9 @@ def test_paint_pattern(psd_file: str) -> None:
         "paint/stroke-1-gradient.psd",
         "paint/stroke-1-pattern.psd",
         "paint/stroke-2-dashed.psd",  # Dashed stroke with a fractional offset.
+        # Dash offset at 144 ppi, where points and pixels diverge. Emitting the
+        # stored 7 pt as 7 px instead of 14 px scores MSE 3.4e-02 here.
+        "paint/stroke-3-dash-offset-144ppi.psd",
     ],
 )
 def test_paint_stroke(psd_file: str) -> None:
