@@ -381,6 +381,27 @@ class TestStyleDeclarations:
         assert "font-weight" not in tspan.attrib
         assert "style" not in span.attrib
 
+    def test_set_presentation_property_drops_competing_svg_style(self) -> None:
+        """A style declaration would outrank the attribute on SVG (issue #382)."""
+        tspan = ET.Element("tspan")
+        tspan.set("style", "font-weight: 900; fill: red")
+        svg_utils.set_presentation_property(tspan, "font-weight", 700)
+        assert tspan.get("font-weight") == "700"
+        assert tspan.get("style") == "fill: red"
+
+    def test_remove_presentation_property_clears_svg_style(self) -> None:
+        """Removal on SVG covers both the attribute and the style (issue #382)."""
+        tspan = ET.Element("tspan")
+        tspan.set("font-weight", "700")
+        tspan.set("style", "font-weight: 900; fill: red")
+        svg_utils.remove_presentation_property(tspan, "font-weight")
+        assert "font-weight" not in tspan.attrib
+        assert tspan.get("style") == "fill: red"
+
+        tspan.set("style", "font-weight: 900")
+        svg_utils.remove_presentation_property(tspan, "font-weight")
+        assert "style" not in tspan.attrib
+
 
 class TestSvgFormatting:
     """Integration tests for SVG-specific formatting scenarios."""
