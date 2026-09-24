@@ -516,6 +516,12 @@ def test_text_style_tracking() -> None:
     assert letter_spacing != 0
 
 
+def test_auto_kerning_reads_engine_data_key() -> None:
+    """Read auto kerning from the EngineData AutoKerning key."""
+    style = StyleSheet(name="", style_sheet_data={"AutoKerning": False})
+    assert style.auto_kerning is False
+
+
 def test_text_style_kerning() -> None:
     """Test kerning using dx attributes.
 
@@ -1502,6 +1508,69 @@ def test_text_japanese_notosans_cjk_jp() -> None:
     # Verify font-family attribute is set (font substitution may occur)
     font_family = text_node.attrib.get("font-family")
     assert font_family is not None, "font-family should be set"
+
+    assert any(
+        "font-feature-settings: 'palt'" in node.attrib.get("style", "")
+        for node in svg.iter()
+    )
+
+
+def test_text_japanese_palt_requires_auto_kerning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Japanese proportional metrics stay disabled when auto kerning is off."""
+    monkeypatch.setattr(StyleSheet, "auto_kerning", property(lambda _style: False))
+
+    svg = convert_psd_to_svg("texts/fonts-notosans-cjk-jp.psd")
+
+    assert all(
+        "font-feature-settings" not in node.attrib.get("style", "")
+        for node in svg.iter()
+    )
+
+
+def test_text_japanese_vertical_auto_kerning_uses_vpal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vertical Japanese text requests vertical proportional metrics."""
+    monkeypatch.setattr(
+        TypeSetting,
+        "writing_direction",
+        property(lambda _text_setting: WritingDirection.VERTICAL_RL),
+    )
+
+    svg = convert_psd_to_svg("texts/fonts-notosans-cjk-jp.psd")
+
+    assert any(
+        "font-feature-settings: 'vpal'" in node.attrib.get("style", "")
+        for node in svg.iter()
+    )
+
+
+def test_text_latin_auto_kerning_does_not_use_palt() -> None:
+    """Automatic kerning must not enable CJK features on Latin fonts."""
+    svg = convert_psd_to_svg("texts/style-tracking.psd")
+
+    assert all(
+        "font-feature-settings" not in node.attrib.get("style", "")
+        for node in svg.iter()
+    )
+
+
+def test_foreign_object_japanese_auto_kerning_uses_palt() -> None:
+    """The browser-only foreignObject mode carries proportional metrics too."""
+    psdimage = PSDImage.open(get_fixture("texts/fonts-notosans-cjk-jp.psd"))
+    layer = next(
+        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
+    )
+    text_setting = TypeSetting(layer._data)
+    paragraph = next(iter(text_setting))
+    span = next(iter(paragraph))
+    converter = Converter(psdimage)
+
+    styles = converter._get_foreign_object_span_styles(span, text_setting, paragraph)
+
+    assert styles["font-feature-settings"] == "'palt'"
 
 
 def test_text_japanese_with_custom_css() -> None:
