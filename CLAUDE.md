@@ -158,34 +158,26 @@ branch with `git rebase --signoff main`.
    `### Dependencies` and reference the PR number:
    `- **Short description** (#PR)`. Keep entries concise - one bold summary
    line plus at most one short sub-bullet.
-5. **Keep history out of the docs** - documentation states the current rules and
-   behavior; the record of what changed and why lives in the issue and the pull
-   request. See [Documentation Structure](#documentation-structure).
+5. **Keep history out of the docs** - state the current rules and behavior; what
+   changed and why belongs in the issue and the pull request. See
+   [Documentation Structure](#documentation-structure).
 
 ### Documentation Structure
 
 - **README.md** - Quick start guide, basic usage
 - **docs/** - Full Sphinx documentation (comprehensive details)
-- **CONTRIBUTING.md** - the rules contributors follow
-- **SECURITY.md** - the security policy and how to report a vulnerability
-- **CODE_OF_CONDUCT.md** - expected conduct and how to report a violation
-- **CLAUDE.md** - this file: commands, architecture, and the conventions needed
-  in every session
-- **CHANGELOG.md** - user-facing changes, in the format under
-  [When Making Changes](#when-making-changes)
+- **CONTRIBUTING.md**, **SECURITY.md**, **CODE_OF_CONDUCT.md** - contribution
+  rules, security policy, expected conduct
+- **CLAUDE.md** - this file: commands, architecture, and session conventions
 
 **Documentation states the current rules and behavior. GitHub issues and pull
 requests hold the record of how it got that way.** Do not write what changed,
-what was tried and rejected, or when something was decided.
+what was tried and rejected, or when something was decided. Not history:
+explaining why the code behaves as it does, version and deprecation markers, and
+a link to a currently open issue for a known gap.
 
-These are not history, and belong in the docs:
-
-- **Why the code behaves as it does** - what
-  [docs/technical-notes.rst](docs/technical-notes.rst) is for
-- **Version and deprecation markers** - they tell a reader what to rely on
-- **A link to a currently open issue** for a known gap, as
-  [docs/limitations.rst](docs/limitations.rst) does
-- **`CHANGELOG.md`**, which records user-facing changes per release
+Keep documentation and code comments concise - state the rule or the behavior,
+not the argument for it.
 
 For detailed feature documentation, configuration options, and usage examples, refer to the [full documentation](https://psd2svg.readthedocs.io/).
 
