@@ -22,6 +22,7 @@ import xml.etree.ElementTree as ET
 
 from psd_tools import PSDImage
 from psd_tools.api import adjustments, layers, pil_io
+from psd_tools.api.shape import Stroke
 from psd_tools.constants import Tag
 from psd_tools.psd.descriptor import Descriptor, UnitFloat
 from psd_tools.terminology import Enum, Key, Klass, Unit
@@ -32,6 +33,28 @@ from psd2svg.core.base import ConverterProtocol
 from psd2svg.core.gradient import GradientInterpolation
 
 logger = logging.getLogger(__name__)
+
+POINTS_PER_INCH = 72.0
+
+
+def get_dash_offset_in_pixels(stroke: Stroke) -> float:
+    """Return the stroke dash offset in pixels.
+
+    Photoshop stores ``strokeStyleLineDashOffset`` in points. The line width
+    is in pixels and the dash set entries are multiples of it, so those two
+    need no ppi scale. The offset does: ``strokeStyleResolution`` is the ppi
+    the stroke style was authored at, and points and pixels coincide only at
+    72 ppi.
+    """
+    offset = stroke._data.get(
+        b"strokeStyleLineDashOffset", UnitFloat(unit=Unit.Points, value=0.0)
+    )
+    if offset.unit is not Unit.Points:
+        if offset.unit is not Unit.Pixels:
+            logger.warning(f"Unsupported dash offset unit: {offset.unit}")
+        return float(offset)
+    resolution = float(stroke._data.get(b"strokeStyleResolution", POINTS_PER_INCH))
+    return float(offset) * resolution / POINTS_PER_INCH
 
 
 class PaintConverter(ConverterProtocol):
@@ -200,7 +223,9 @@ class PaintConverter(ConverterProtocol):
                 float(x.value) * stroke.line_width for x in stroke.line_dash_set
             ]
             svg_utils.set_attribute(node, "stroke-dasharray", line_dash_set)
-            svg_utils.set_attribute(node, "stroke-dashoffset", stroke.line_dash_offset)
+            svg_utils.set_attribute(
+                node, "stroke-dashoffset", get_dash_offset_in_pixels(stroke)
+            )
         # NOTE: Stroke blend mode is handled in apply_vector_stroke() for the <use>
         # element. The strokeStyleBlendMode field exists in PSD format but is not
         # settable via Photoshop UI (as of recent versions), so it typically remains

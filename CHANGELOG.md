@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dashed strokes shifted phase at any resolution other than 72 ppi** (#400)
+  - `stroke-dashoffset` is stored in points and was emitted as pixels
+
 - **Pattern overlays emitted a redundant `translate(0, 0)`** (#384)
   - The layer reference point is a `ListElement`, so it never compared equal
     to the `(0, 0)` default and an inert `patternTransform` was always written

@@ -1,5 +1,6 @@
 """Tests for paint functionality."""
 
+import logging
 from typing import Any
 from unittest.mock import Mock
 from xml.etree import ElementTree as ET
@@ -9,11 +10,12 @@ from psd_tools import PSDImage
 from psd_tools.api.layers import Layer
 from psd_tools.constants import Tag
 from psd_tools.psd import descriptor
+from psd_tools.psd.descriptor import UnitFloat
 from psd_tools.psd.tagged_blocks import ListElement, TaggedBlocks
 from psd_tools.terminology import Key, Unit
 
 from psd2svg.core.converter import Converter
-from psd2svg.core.paint import PaintConverter
+from psd2svg.core.paint import PaintConverter, get_dash_offset_in_pixels
 from tests.conftest import get_fixture
 
 
@@ -105,12 +107,10 @@ def test_grayscale_solid_fill_colors() -> None:
 def test_dashed_stroke_is_converted() -> None:
     """Cover the dashed branch of stroke conversion end to end.
 
-    This is the only fixture with a non-empty ``line_dash_set``, so it is the
-    only test that reaches that branch at all. The rounding it depends on is
-    unit-tested separately in ``tests/test_svg_utils.py``; what is asserted
-    here is that the whole path produces the right attributes, including that
-    ``Stroke.line_dash_offset`` -- a ``UnitFloat`` despite psd-tools
-    annotating it as ``float`` -- is formatted rather than stringified.
+    The rounding it depends on is unit-tested separately in
+    ``tests/test_svg_utils.py``; what is asserted here is that the whole path
+    produces the right attributes for a 72 ppi document, where the
+    points-to-pixels scale is 1.
     """
     psdimage = PSDImage.open(get_fixture("paint/stroke-2-dashed.psd"))
     converter = Converter(psdimage)
@@ -121,11 +121,57 @@ def test_dashed_stroke_is_converted() -> None:
     ]
     assert len(nodes) == 1
     # Photoshop stores 1.3333333; unformatted it would reach the SVG in full.
+    # This fixture is 72 ppi, so the points-to-pixels scale is 1.
     assert nodes[0].attrib["stroke-dashoffset"] == "1.33"
     # Dash set entries are unitless multiples of the line width, so they are
-    # scaled by it. The offset is stored in points and is not.
+    # scaled by it.
     assert nodes[0].attrib["stroke-width"] == "8"
     assert nodes[0].attrib["stroke-dasharray"] == "24,16"
+
+
+def test_dash_offset_is_scaled_from_points_to_pixels() -> None:
+    """The dash offset is stored in points, the rest of the stroke in pixels.
+
+    This fixture is 144 ppi with a 7 pt offset, so the correct pixel value is
+    14. Emitting the stored 7 unchanged shifts the dash phase by 7 px against
+    a 40 px period.
+    """
+    psdimage = PSDImage.open(get_fixture("paint/stroke-3-dash-offset-144ppi.psd"))
+    converter = Converter(psdimage)
+    converter.build()
+
+    nodes = [
+        node for node in converter.svg.iter() if "stroke-dashoffset" in node.attrib
+    ]
+    assert len(nodes) == 1
+    assert nodes[0].attrib["stroke-dashoffset"] == "14"
+    # The line width is in pixels and the dash set is multiples of it;
+    # neither is rescaled by the resolution.
+    assert nodes[0].attrib["stroke-width"] == "8"
+    assert nodes[0].attrib["stroke-dasharray"] == "24,16"
+
+
+def test_dash_offset_in_pixels_honors_the_stored_unit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only a points offset is scaled; a pixels offset is already user units."""
+    psdimage = PSDImage.open(get_fixture("paint/stroke-3-dash-offset-144ppi.psd"))
+    stroke = next(
+        layer.stroke for layer in psdimage.descendants() if layer.has_stroke()
+    )
+    assert stroke is not None
+    assert get_dash_offset_in_pixels(stroke) == 14.0
+
+    stroke._data[b"strokeStyleLineDashOffset"] = UnitFloat(unit=Unit.Pixels, value=7.0)
+    assert get_dash_offset_in_pixels(stroke) == 7.0
+
+    # Any other unit is passed through unconverted, but noisily.
+    stroke._data[b"strokeStyleLineDashOffset"] = UnitFloat(
+        unit=Unit.Millimeters, value=7.0
+    )
+    with caplog.at_level(logging.WARNING, logger="psd2svg.core.paint"):
+        assert get_dash_offset_in_pixels(stroke) == 7.0
+    assert "Unsupported dash offset unit" in caplog.text
 
 
 def test_gradient_stops_keep_sub_percent_precision() -> None:
