@@ -406,9 +406,9 @@ To enable text wrapping:
 **Important Notes:**
 
 * foreignObject text cannot be edited in vector graphics editors (appears as embedded HTML)
-* Centered and right-aligned lines with non-zero tracking sit up to one letter
-  spacing off their Photoshop position, because CSS counts the spacing that
-  follows the last character of each line
+* Centered and right-aligned foreignObject lines with non-zero tracking sit up
+  to one letter spacing off their Photoshop position, because CSS counts the
+  spacing that follows the last character of each line
   (`#404 <https://github.com/CyberAgent/psd2svg/issues/404>`_)
 * Point text (ShapeType=0) always uses native SVG ``<text>`` elements, regardless of this setting
 * Default behavior (``text_wrapping_mode=0``) maintains backward compatibility with native SVG text

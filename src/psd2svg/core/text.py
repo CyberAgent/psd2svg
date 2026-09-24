@@ -176,7 +176,6 @@ def _paragraph_advance(
 # Characters that render as part of the character before them instead of on
 # their own.
 _EXTENDING_CATEGORIES = ("Mn", "Mc", "Me")
-_VARIATION_SELECTORS = frozenset(chr(code) for code in range(0xFE00, 0xFE10))
 _EMOJI_MODIFIERS = frozenset(chr(code) for code in range(0x1F3FB, 0x1F400))
 _REGIONAL_INDICATORS = frozenset(chr(code) for code in range(0x1F1E6, 0x1F200))
 # Thai and Lao SARA AM carry a mark over the character they follow.
@@ -188,7 +187,6 @@ def _extends_previous_character(char: str) -> bool:
     """Check whether a character renders as part of the one before it."""
     return (
         unicodedata.category(char) in _EXTENDING_CATEGORIES
-        or char in _VARIATION_SELECTORS
         or char in _EMOJI_MODIFIERS
         or char in _COMPOSING_VOWEL_SIGNS
     )
@@ -197,9 +195,10 @@ def _extends_previous_character(char: str) -> bool:
 def _trailing_grapheme_length(text: str) -> int:
     """Return the number of characters in the final grapheme cluster of text.
 
-    Combining marks, variation selectors, emoji modifiers, regional indicator
-    pairs and zero-width-joiner sequences render as a single glyph together
-    with their base character, so a run must never be cut between them.
+    Combining marks (variation selectors among them), emoji modifiers,
+    regional indicator pairs and zero-width-joiner sequences render as a single
+    glyph together with their base character, so a run must never be cut
+    between them.
     """
     index = len(text)
     while True:
@@ -256,7 +255,9 @@ def _isolate_trailing_letter_spacing(
     if not rendered:
         return  # Empty and carriage-return-only runs render nothing.
     span_node = rendered[-1]
-    if float(span_node.get("letter-spacing", 0.0)) == trailing_spacing:
+    # Compare the serialized values: the attribute is rounded, so comparing
+    # floats would split a run whose two halves then read the same.
+    if span_node.get("letter-spacing", "0") == svg_utils.num2str(trailing_spacing):
         return
 
     text = span_node.text or ""
