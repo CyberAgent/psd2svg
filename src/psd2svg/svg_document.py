@@ -333,7 +333,10 @@ class SVGDocument:
             svg_utils.write(svg, f, indent=indent)
 
     def rasterize(
-        self, dpi: int = 0, rasterizer: BaseRasterizer | None = None
+        self,
+        dpi: int = 0,
+        rasterizer: BaseRasterizer | None = None,
+        image_format: str = DEFAULT_IMAGE_FORMAT,
     ) -> Image.Image:
         """Rasterize the SVG document to PIL Image.
 
@@ -346,6 +349,11 @@ class SVGDocument:
                 ResvgRasterizer with the specified dpi. Use this to specify
                 alternative rasterizers like PlaywrightRasterizer for better
                 SVG 2.0 feature support.
+            image_format: Image format to use when embedding images for the
+                rasterizer. Use "png" for images larger than WebP's 16383px
+                limit. Formats without alpha ("jpeg") flatten each embedded
+                image onto white, so the rasterized composite loses
+                transparency.
 
         Returns:
             PIL Image object in RGBA mode containing the rasterized SVG.
@@ -380,7 +388,7 @@ class SVGDocument:
             subset_fonts=False,  # No subsetting for file URLs (faster)
             font_format="ttf",  # Not used for file URLs
             image_prefix=None,
-            image_format=DEFAULT_IMAGE_FORMAT,
+            image_format=image_format,
             optimize=False,  # No optimization needed for rasterization
             svg_filepath=None,
             use_data_uri_for_fonts=False,  # Use file:// URLs for better performance

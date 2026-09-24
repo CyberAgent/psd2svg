@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`rasterize()` accepts `image_format`** (#403)
+  - Matches `tostring()`, `save()` and `export()`; pass `"png"` for images
+    beyond WebP's 16383px limit
+
 ### Changed
 
 - **Unsupported adjustment layers now say so precisely** (#371)

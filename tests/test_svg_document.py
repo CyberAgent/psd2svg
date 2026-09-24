@@ -322,6 +322,32 @@ class TestSVGDocumentImageHandling:
         finally:
             os.chdir(old_cwd)
 
+    @pytest.mark.parametrize(
+        ("image_format", "mime_type"),
+        [(None, "image/webp"), ("png", "image/png")],
+    )
+    def test_rasterize_image_format(
+        self, image_format: str | None, mime_type: str
+    ) -> None:
+        """Test rasterize() embeds images in the requested format."""
+        svg_elem = ET.Element("svg", width="10", height="10")
+        ET.SubElement(svg_elem, "image", id="image")
+
+        document = SVGDocument(
+            svg=svg_elem,
+            images={"image": Image.new("RGB", (10, 10), color="red")},
+        )
+
+        with patch.object(ResvgRasterizer, "from_string") as mock_from_string:
+            mock_from_string.return_value = Image.new("RGBA", (10, 10))
+            if image_format is None:
+                document.rasterize()
+            else:
+                document.rasterize(image_format=image_format)
+
+        svg_arg = mock_from_string.call_args[0][0]
+        assert f"data:{mime_type};base64," in svg_arg
+
     def test_handle_images_empty_document(self) -> None:
         """Test _handle_images() returns early when no images present."""
         svg_elem = ET.Element("svg")
