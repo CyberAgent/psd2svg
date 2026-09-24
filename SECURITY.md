@@ -60,6 +60,64 @@ For comprehensive security documentation including:
 
 **See the [Security Considerations](https://psd2svg.readthedocs.io/en/latest/security.html) documentation.**
 
+## Supply Chain and Contribution Security
+
+psd2svg is open to anyone: first-time contributors are welcome, and nothing here
+restricts who may open a pull request. Trust in a *change*, however, is never
+inherited from trust in a *contributor*. The attack this guards against is a
+contributor who builds a real track record over months and then submits one
+change that trades on it.
+
+### Contribution trust model
+
+- **Merged-PR count confers nothing.** Contribution history is precisely what an
+  attacker farms, so it is never the reason to extend trust or access.
+- **Repository access is managed through teams.** `psd2svg`,
+  `psd2svg-maintainer` and `psd2svg-admin` carry write, maintain and admin
+  permission. External contributors work from forks. CyberAgent organization
+  owners hold inherited admin, as they do on every repository in the
+  organization.
+- **Review effort scales with blast radius, not with diff size or author.** CI
+  configuration, dependency manifests, release tooling, filesystem and
+  subprocess code, and binary files get detailed review regardless of who sent
+  them.
+
+### Repository controls
+
+- **`main` requires a pull request** with the full test matrix green. The
+  ruleset has no bypass actors, so it applies to maintainers too. Required
+  approvals are zero: the pull request and the checks are enforced, the review
+  is convention.
+- **Fork pull requests require maintainer approval before CI runs** - for all
+  outside contributors, not only first-time ones, since "has merged before" is
+  the status an attacker farms.
+- **Releases publish to PyPI via Trusted Publishing** (OIDC), so no long-lived
+  token exists in repository secrets. The `release` environment requires
+  reviewer approval and accepts deployments only from `v*` tags, and creating,
+  moving or deleting a `v*` tag is restricted to the maintainer and admin teams.
+- **Workflow tokens are read-only by default**, and GitHub Actions cannot
+  approve pull requests. Workflows that need to write declare it in their own
+  `permissions:` block.
+- **Commits must carry a DCO sign-off** - see
+  [CONTRIBUTING.md](CONTRIBUTING.md#sign-your-commits-dco).
+- **Binary test fixtures** are accepted from any authoring tool, bounded by a
+  size cap and reviewed by a person rather than by an automated integrity check.
+  See [CONTRIBUTING.md](CONTRIBUTING.md#test-fixtures).
+
+### What these controls do not do
+
+They narrow what a single account can reach and how far a bad change spreads.
+They do not catch a malicious change that passes an ordinary review, and this
+repository has no independent reviewer: required approvals are zero, so whoever
+can merge may merge their own work. Approving a fork's CI run grants execution,
+not validation. Administrators can bypass the release environment, the release
+approver may be the person who pushed the tag, and nothing checks that a tagged
+commit reached `main` through a pull request.
+
+DCO sign-off and contribution history are provenance records, not guarantees. A
+determined attacker will sign off truthfully and contribute genuinely useful
+code for as long as it takes.
+
 ## Automated Security Scanning
 
 This project uses automated security scanning:

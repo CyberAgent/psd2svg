@@ -71,7 +71,7 @@ For detailed setup instructions, architecture overview, and debugging tips, see 
 
    ```bash
    git add .
-   git commit -m "Description of changes"
+   git commit -s -m "Description of changes"
    git push -u origin feature/your-feature-name
    ```
 
@@ -91,6 +91,38 @@ uv run pytest                    # Run tests
 ```
 
 All checks must pass before your PR can be merged.
+
+## Sign Your Commits (DCO)
+
+psd2svg uses the [Developer Certificate of Origin](https://developercertificate.org/).
+Every commit must carry a `Signed-off-by` line:
+
+```bash
+git commit -s -m "Description of changes"
+```
+
+By signing off you certify that you wrote the patch, or otherwise have the right to
+submit it under the MIT License. It is a one-line assertion, **not** a copyright
+assignment - you keep the copyright in your contribution, and there is no CLA to
+sign. The same requirement applies to maintainers and CyberAgent employees.
+
+The sign-off must match the commit author's name and email. Forgot one?
+`git commit --amend -s` fixes the last commit, and `git rebase --signoff main`
+fixes a whole branch of your own commits - it signs off as the current
+committer, so do not use it on commits authored by someone else.
+
+## AI-Assisted Contributions
+
+AI assistance is welcome - this project is developed with it (see [CLAUDE.md](CLAUDE.md)).
+Two conditions:
+
+- **Disclose it.** Say in the PR description which parts were AI-generated.
+- **Stand behind it.** You must understand every line you submit and be able to
+  explain why it is correct. Run the [Pre-Commit Checklist](#pre-commit-checklist)
+  locally. "The model produced it" and "CI was green" are not review.
+
+If you cannot explain your own diff, we will ask - and a PR that stays
+unexplained will be closed, whether or not it works.
 
 ## Code Quality Standards
 
@@ -113,6 +145,46 @@ For detailed standards, architecture information, and development practices, see
 - **Type hints**: Ensure all new code has proper type annotations
 - **No warnings**: Code should not generate new warnings
 
+## Test Fixtures
+
+Tests run against PSD files in `tests/fixtures/`. Every fixture there today was
+authored in Adobe Photoshop, so files written by other applications - Clip Studio
+Paint, Affinity Photo, Krita, GIMP, Photopea - are especially welcome. A
+maintainer cannot author those on your behalf, because the third-party writer's
+output *is* the thing under test.
+
+Every fixture is reviewed by a person, so send one that a person can review:
+
+- **Keep it minimal and original.** The smallest document that reproduces the
+  issue, created by you for this purpose rather than cut from existing artwork.
+  If recreating it loses the bug, a minimized copy of a file you own is fine -
+  say so in the PR.
+- **Name the authoring tool and version** in the PR description, e.g.
+  `Clip Studio Paint 3.0.6 (Windows)`.
+- **Keep it under 1 MB**, or say why it needs to be larger.
+- **No linked smart objects** or other references to files outside the PSD,
+  unless that reference is itself what the fixture tests - say so if it is.
+- **Sign off the commit that adds it.** Your DCO sign-off certifies you have
+  the right to contribute that file under the MIT License, which matters more
+  for binary artwork than it does for code.
+
+Expect a reviewer to ask whether the size of the file is explained by what it is
+for: 900 KB is plausible for a pattern overlay, not for a one-line stroke bug.
+
+## How We Review
+
+Review attention scales with what a change can affect - not with who wrote it, and
+not with how large the diff is. These areas get slower, more detailed review from
+everyone, maintainers included:
+
+- `.github/workflows/**`, `pyproject.toml`, `uv.lock` - build, CI, and dependency surfaces
+- Code that reads or writes files, spawns a process, or loads fonts from disk
+- Binary files of any kind
+
+A one-line change in one of those areas may take longer to merge than a
+hundred-line change to a converter. That isn't distrust - it's the same standard
+applied to every PR.
+
 ## Getting Help
 
 - **Documentation**: [psd2svg.readthedocs.io](https://psd2svg.readthedocs.io/)
@@ -121,4 +193,7 @@ For detailed standards, architecture information, and development practices, see
 
 ## License
 
-By contributing to psd2svg, you agree that your contributions will be licensed under the [MIT License](LICENSE).
+By contributing to psd2svg, you agree that your contributions will be licensed
+under the [MIT License](LICENSE). You keep the copyright in your contribution;
+your DCO sign-off asserts that you have the right to submit it under that
+license.

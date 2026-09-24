@@ -300,7 +300,9 @@ Workflow
       uv run mypy src/ tests/
       uv run pytest
 
-6. **Commit your changes**: ``git commit -m "Add my feature"``
+6. **Commit your changes**: ``git commit -s -m "Add my feature"`` (the
+   ``-s`` sign-off is required; see `CONTRIBUTING.md
+   <https://github.com/CyberAgent/psd2svg/blob/main/CONTRIBUTING.md>`_)
 7. **Push to your fork**: ``git push origin feature/my-feature``
 8. **Open a Pull Request** on GitHub
 
@@ -508,7 +510,7 @@ For maintainers, this project follows a pull request workflow for all changes to
 
    # 4. Commit and push
    git add pyproject.toml CHANGELOG.md uv.lock
-   git commit -m "Prepare release v0.10.0"
+   git commit -s -m "Prepare release v0.10.0"
    git push -u origin release/v0.10.0
 
    # 5. Create PR for release

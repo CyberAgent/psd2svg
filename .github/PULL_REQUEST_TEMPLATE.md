@@ -24,6 +24,8 @@ Closes #
 <!-- Verify all items before submitting. All checks must pass for merge. -->
 
 - [ ] I have read the [CONTRIBUTING.md](https://github.com/CyberAgent/psd2svg/blob/main/CONTRIBUTING.md) guidelines
+- [ ] All my commits are signed off (`git commit -s`)
+- [ ] If I added a PSD fixture, I named the authoring tool and version above
 - [ ] My code follows the project's code quality standards
 - [ ] I have run `uv run ruff format src/ tests/` to format the code
 - [ ] I have run `uv run ruff check src/ tests/` and fixed all linting issues
