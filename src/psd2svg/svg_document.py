@@ -350,7 +350,10 @@ class SVGDocument:
                 alternative rasterizers like PlaywrightRasterizer for better
                 SVG 2.0 feature support.
             image_format: Image format to use when embedding images for the
-                rasterizer. Use "png" for images larger than WebP's 16383px limit.
+                rasterizer. Use "png" for images larger than WebP's 16383px
+                limit. Formats without alpha ("jpeg") flatten each embedded
+                image onto white, so the rasterized composite loses
+                transparency.
 
         Returns:
             PIL Image object in RGBA mode containing the rasterized SVG.

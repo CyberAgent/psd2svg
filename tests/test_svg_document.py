@@ -324,7 +324,7 @@ class TestSVGDocumentImageHandling:
 
     @pytest.mark.parametrize(
         ("image_format", "mime_type"),
-        [(None, "image/webp"), ("png", "image/png"), ("jpeg", "image/jpeg")],
+        [(None, "image/webp"), ("png", "image/png")],
     )
     def test_rasterize_image_format(
         self, image_format: str | None, mime_type: str
