@@ -536,7 +536,8 @@ def set_presentation_property(node: ET.Element, key: str, value: Any) -> None:
 
     SVG elements take presentation attributes; XHTML elements inside a
     <foreignObject> have no such attributes, so the property goes into their
-    style declaration instead.
+    style declaration instead. On an SVG element, a competing declaration in
+    ``style`` is dropped, since it would outrank the attribute.
 
     Args:
         node: Element to update.
@@ -546,19 +547,22 @@ def set_presentation_property(node: ET.Element, key: str, value: Any) -> None:
     if is_xhtml_element(node):
         set_style(node, key, value)
     else:
+        remove_style(node, key)
         set_attribute(node, key, value)
 
 
 def remove_presentation_property(node: ET.Element, key: str) -> None:
     """Remove a styling property set by :func:`set_presentation_property`.
 
+    On an SVG element, both the presentation attribute and any declaration in
+    ``style`` are removed.
+
     Args:
         node: Element to update.
         key: Property name to remove.
     """
-    if is_xhtml_element(node):
-        remove_style(node, key)
-    else:
+    remove_style(node, key)
+    if not is_xhtml_element(node):
         node.attrib.pop(key, None)
 
 
