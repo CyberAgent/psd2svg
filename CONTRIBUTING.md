@@ -108,7 +108,8 @@ sign. The same requirement applies to maintainers and CyberAgent employees.
 
 The sign-off must match the commit author's name and email. Forgot one?
 `git commit --amend -s` fixes the last commit, and `git rebase --signoff main`
-fixes a whole branch.
+fixes a whole branch of your own commits - it signs off as the current
+committer, so do not use it on commits authored by someone else.
 
 ## AI-Assisted Contributions
 
@@ -120,7 +121,8 @@ Two conditions:
   explain why it is correct. Run the [Pre-Commit Checklist](#pre-commit-checklist)
   locally. "The model produced it" and "CI was green" are not review.
 
-A PR whose author cannot explain their own diff will be closed, whether or not it works.
+If you cannot explain your own diff, we will ask - and a PR that stays
+unexplained will be closed, whether or not it works.
 
 ## Code Quality Standards
 
@@ -159,21 +161,25 @@ for what we tried. So what we ask for is the context that makes human review
 possible:
 
 - **Keep it minimal and original.** The smallest document that reproduces the
-  issue, created by you for this purpose - not an excerpt of existing artwork.
+  issue, created by you for this purpose rather than cut from existing artwork.
   That keeps the file reviewable and keeps third-party artwork licensing out of
-  the repository.
+  the repository. If recreating the document loses the bug, a minimized copy of
+  a file you own is fine - say so in the PR.
 - **Name the authoring tool and version** in the PR description, e.g.
   `Clip Studio Paint 3.0.6 (Windows)`.
 - **Keep it under 1 MB**, or say why it needs to be larger. Current fixtures run
   to a median of 40 KB, p90 of 104 KB, and a largest of 942 KB.
-- **No linked smart objects** or other references to files outside the PSD.
+- **No linked smart objects** or other references to files outside the PSD,
+  unless that reference is itself what the fixture tests - say so if it is.
 - **Your DCO sign-off covers the fixture**, certifying you have the right to
   contribute that file under the MIT License. For binary artwork this matters
   more than it does for code.
 
-A reviewer's job is then one question: **is the bulk of this file explained by
+A reviewer's first question is then: **is the bulk of this file explained by
 what it is for?** 900 KB in a pattern-overlay fixture is explained by the pattern
-data; 900 KB in a fixture for a one-line stroke bug is not.
+data; 900 KB in a fixture for a one-line stroke bug is not. That question catches
+an implausible file, not a small payload hidden in a plausible one - which is why
+these rules lean on minimality and provenance rather than on inspection.
 
 ## How We Review
 

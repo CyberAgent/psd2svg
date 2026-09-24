@@ -69,9 +69,10 @@ inherited from trust in a *contributor*.
 The realistic supply-chain attack on a project this size is not a single hostile
 pull request that a reviewer catches. It is a contributor who builds a genuine
 track record over months and then submits one change that trades on it. The
-controls below are designed so that accrued goodwill never converts into the
-ability to land an unreviewed change - and so that no contributor has to be
-judged as a person for the project to stay safe.
+controls below are designed to limit what any single account can reach, and so
+that no contributor has to be judged as a person for the project to stay safe.
+They do not, and cannot, catch a malicious change that passes an ordinary
+review.
 
 ### Contribution trust model
 
@@ -108,9 +109,11 @@ judged as a person for the project to stay safe.
   requires reviewer approval and accepts deployments only from `v*` tags, and
   creating, moving or deleting a `v*` tag is restricted to the maintainer and
   admin teams. Pushing a tag is therefore not sufficient to ship a release - a
-  human has to approve the deployment. With a single maintainer that approver
-  may be the person who pushed the tag, so this is a deliberate-action gate
-  rather than a separation of duties.
+  human has to approve the deployment. Three limits are worth stating plainly:
+  repository administrators can bypass the environment, the approver may be the
+  same person who pushed the tag, and nothing checks that the tagged commit is
+  one that reached `main` through a pull request. It is a deliberate-action
+  gate, not a separation of duties.
 - **Commits must carry a DCO sign-off**, giving a per-commit record of who
   asserted the right to submit the code. This is a documented requirement
   checked at review today; mechanical enforcement in CI is being added
@@ -129,8 +132,9 @@ recorded here so it is not re-litigated:
   the file size. Exact for Photoshop output, but not for other writers, because
   psd-tools normalizes padding. Measured against the psd-tools test corpus,
   which unlike ours contains non-Adobe output: its `cactus_top`,
-  `transparentbg-gimp` and `broken-groups` files came back 4, 2 and 6 bytes
-  short, while every Photoshop file tested round-tripped exactly. As a gate it
+  `transparentbg-gimp` and `broken-groups` files re-serialized 4, 2 and 6 bytes
+  *larger* than they are on disk, while every Photoshop file tested
+  round-tripped exactly. As a gate it
   would have rejected third-party fixtures and nothing else - precisely the
   contributions we want.
 - **Declared-length tiling** - walk the section lengths in the raw bytes, with
@@ -138,12 +142,16 @@ recorded here so it is not re-litigated:
   carries no declared length, so 3 KB appended to a valid PSD passes the check
   and parses identically to the original.
 - **Detecting that reliably** would mean decoding the image data stream to find
-  its true end: reimplementing part of the codec to defend a file that is
-  parsed, never executed, and therefore has no path to running a payload.
+  its true end - reimplementing part of the codec. We judged that cost too high
+  for the benefit. That is a judgement about cost, not a claim that appended
+  bytes are harmless: a hostile fixture's realistic paths to harm are a parser
+  vulnerability in psd-tools and a later change that reads the fixture as data,
+  neither of which needs the file to be executable.
 
-What remains is a size cap and human review. That is a weaker guarantee than a
-green check mark would imply, which is the honest position - and a reason to
-keep weight on the controls above that do not depend on inspecting a binary.
+What remains is a documented size cap and human review. That is a weaker
+guarantee than a green check mark would imply, which is the honest position -
+and a reason to keep weight on the controls above that do not depend on
+inspecting a binary.
 
 ### What these controls are not
 
@@ -153,6 +161,12 @@ genuinely useful code for as long as it takes. The controls that carry weight ar
 the ones that do not depend on judging a person: team-scoped access, a mandatory
 pull request, blast-radius-weighted scrutiny, a release path that a tag push
 alone cannot trigger, and CI that an outside fork cannot run without approval.
+
+None of them substitutes for an independent reviewer, and this repository does
+not have one: required approvals are set to zero, so anyone who can merge can
+merge their own change. Approving a fork's CI run grants execution, not
+validation. These controls narrow who can do damage and how far it spreads;
+they do not catch a bad change that receives a routine approval.
 
 ## Automated Security Scanning
 
