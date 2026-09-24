@@ -1,5 +1,6 @@
 """Tests for paint functionality."""
 
+import logging
 from typing import Any
 from unittest.mock import Mock
 from xml.etree import ElementTree as ET
@@ -106,12 +107,10 @@ def test_grayscale_solid_fill_colors() -> None:
 def test_dashed_stroke_is_converted() -> None:
     """Cover the dashed branch of stroke conversion end to end.
 
-    This is the only fixture with a non-empty ``line_dash_set``, so it is the
-    only test that reaches that branch at all. The rounding it depends on is
-    unit-tested separately in ``tests/test_svg_utils.py``; what is asserted
-    here is that the whole path produces the right attributes, including that
-    ``Stroke.line_dash_offset`` -- a ``UnitFloat`` despite psd-tools
-    annotating it as ``float`` -- is formatted rather than stringified.
+    The rounding it depends on is unit-tested separately in
+    ``tests/test_svg_utils.py``; what is asserted here is that the whole path
+    produces the right attributes for a 72 ppi document, where the
+    points-to-pixels scale is 1.
     """
     psdimage = PSDImage.open(get_fixture("paint/stroke-2-dashed.psd"))
     converter = Converter(psdimage)
@@ -151,7 +150,9 @@ def test_dash_offset_is_scaled_from_points_to_pixels() -> None:
     assert nodes[0].attrib["stroke-dasharray"] == "24,16"
 
 
-def test_dash_offset_in_pixels_honors_the_stored_unit() -> None:
+def test_dash_offset_in_pixels_honors_the_stored_unit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Only a points offset is scaled; a pixels offset is already user units."""
     psdimage = PSDImage.open(get_fixture("paint/stroke-3-dash-offset-144ppi.psd"))
     stroke = next(
@@ -162,6 +163,14 @@ def test_dash_offset_in_pixels_honors_the_stored_unit() -> None:
 
     stroke._data[b"strokeStyleLineDashOffset"] = UnitFloat(unit=Unit.Pixels, value=7.0)
     assert get_dash_offset_in_pixels(stroke) == 7.0
+
+    # Any other unit is passed through unconverted, but noisily.
+    stroke._data[b"strokeStyleLineDashOffset"] = UnitFloat(
+        unit=Unit.Millimeters, value=7.0
+    )
+    with caplog.at_level(logging.WARNING, logger="psd2svg.core.paint"):
+        assert get_dash_offset_in_pixels(stroke) == 7.0
+    assert "Unsupported dash offset unit" in caplog.text
 
 
 def test_gradient_stops_keep_sub_percent_precision() -> None:

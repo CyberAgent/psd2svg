@@ -21,7 +21,8 @@ import logging
 import xml.etree.ElementTree as ET
 
 from psd_tools import PSDImage
-from psd_tools.api import adjustments, layers, pil_io, shape
+from psd_tools.api import adjustments, layers, pil_io
+from psd_tools.api.shape import Stroke
 from psd_tools.constants import Tag
 from psd_tools.psd.descriptor import Descriptor, UnitFloat
 from psd_tools.terminology import Enum, Key, Klass, Unit
@@ -36,7 +37,7 @@ logger = logging.getLogger(__name__)
 POINTS_PER_INCH = 72.0
 
 
-def get_dash_offset_in_pixels(stroke: shape.Stroke) -> float:
+def get_dash_offset_in_pixels(stroke: Stroke) -> float:
     """Return the stroke dash offset in pixels.
 
     Photoshop stores ``strokeStyleLineDashOffset`` in points, unlike the line
@@ -48,6 +49,8 @@ def get_dash_offset_in_pixels(stroke: shape.Stroke) -> float:
         b"strokeStyleLineDashOffset", UnitFloat(unit=Unit.Points, value=0.0)
     )
     if offset.unit is not Unit.Points:
+        if offset.unit is not Unit.Pixels:
+            logger.warning(f"Unsupported dash offset unit: {offset.unit}")
         return float(offset)
     resolution = float(stroke._data.get(b"strokeStyleResolution", POINTS_PER_INCH))
     return float(offset) * resolution / POINTS_PER_INCH

@@ -111,9 +111,8 @@ class TestNum2Str:
             (Double(-0.5), "-0.5"),
             (Integer(3), "3"),
             (UnitFloat(unit=Unit.Percent, value=50.0), "50"),
-            # Stroke.line_dash_offset is a UnitFloat; core/paint.py converts it
-            # to a plain float before it reaches set_attribute, but other
-            # descriptor values still arrive wrapped.
+            # No converter path passes a wrapper to num2str today; this
+            # guards the documented __float__ contract, not a live shape.
             (UnitFloat(unit=Unit.Points, value=1.0 / 3.0), "0.33"),
         ],
     )
