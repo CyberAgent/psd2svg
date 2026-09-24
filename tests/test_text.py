@@ -657,11 +657,11 @@ def test_manual_kerning_uses_previous_size_for_vertical_text() -> None:
         "A",
         StyleSheet(name="", style_sheet_data=previous_style_data),
     )
-    _, previous_size = converter._add_text_span(
+    previous_size = converter._add_text_span(
         text_setting,
         paragraph_node,
         previous_span,
-    )
+    ).font_size
 
     current_style_data = dict(source_span.style.style_sheet_data)
     current_style_data.update(FontSize=100.0, VerticalScale=2.0, Kerning=-100)
@@ -671,12 +671,12 @@ def test_manual_kerning_uses_previous_size_for_vertical_text() -> None:
         "B",
         StyleSheet(name="", style_sheet_data=current_style_data),
     )
-    tspan, _ = converter._add_text_span(
+    tspan = converter._add_text_span(
         text_setting,
         paragraph_node,
         current_span,
         kerning_reference_size=previous_size,
-    )
+    ).node
 
     assert "dx" not in tspan.attrib
     assert float(tspan.attrib["dy"]) == pytest.approx(-5.0)
@@ -818,7 +818,16 @@ _TRACKING_ALIGNMENT_ROWS = {
 def _tracking_alignment_text_nodes() -> dict[str, ET.Element]:
     """Convert the tracking/alignment fixture and key each <text> by row name."""
     svg = convert_psd_to_svg("texts/style-tracking-alignment.psd")
-    by_baseline = {node.attrib["y"]: node for node in svg.iter("text")}
+    by_baseline = {}
+    for node in svg.iter("text"):
+        # The optimizer hoists the baseline onto <text> when it can, and leaves
+        # it on the paragraph tspan otherwise.
+        baseline = next(
+            (element.attrib["y"] for element in node.iter() if "y" in element.attrib),
+            None,
+        )
+        assert baseline is not None, f"No baseline on {ET.tostring(node)!r}"
+        by_baseline[baseline] = node
     return {name: by_baseline[y] for name, y in _TRACKING_ALIGNMENT_ROWS.items()}
 
 
@@ -871,7 +880,7 @@ def test_isolate_trailing_letter_spacing_single_character_run() -> None:
     """A one-character run carries nothing but trailing spacing, so it is zeroed."""
     paragraph_node = _paragraph_node(("A", {"letter-spacing": "19.2"}))
 
-    _isolate_trailing_letter_spacing(paragraph_node)
+    _isolate_trailing_letter_spacing(paragraph_node, 0.0)
 
     assert len(paragraph_node) == 1
     assert paragraph_node[0].text == "A"
@@ -887,7 +896,7 @@ def test_isolate_trailing_letter_spacing_skips_empty_runs() -> None:
         ("", {"letter-spacing": "4"}),
     )
 
-    _isolate_trailing_letter_spacing(paragraph_node)
+    _isolate_trailing_letter_spacing(paragraph_node, 0.0)
 
     assert [span.text for span in paragraph_node] == ["AB", "C", ""]
     assert paragraph_node[1].attrib["letter-spacing"] == "0"
@@ -899,7 +908,7 @@ def test_isolate_trailing_letter_spacing_drops_kerning_from_the_split() -> None:
         ("AB", {"letter-spacing": "4", "dx": "1.5", "font-size": "48"})
     )
 
-    _isolate_trailing_letter_spacing(paragraph_node)
+    _isolate_trailing_letter_spacing(paragraph_node, 0.0)
 
     assert [span.text for span in paragraph_node] == ["A", "B"]
     assert paragraph_node[0].attrib["dx"] == "1.5"
@@ -912,7 +921,7 @@ def test_isolate_trailing_letter_spacing_keeps_combining_marks_attached() -> Non
     """A base character and its combining marks are never split apart."""
     paragraph_node = _paragraph_node(("ae\u0301", {"letter-spacing": "4"}))
 
-    _isolate_trailing_letter_spacing(paragraph_node)
+    _isolate_trailing_letter_spacing(paragraph_node, 0.0)
 
     assert [span.text for span in paragraph_node] == ["a", "e\u0301"]
 
@@ -921,15 +930,52 @@ def test_isolate_trailing_letter_spacing_without_spacing_is_a_no_op() -> None:
     """Untracked text has no trailing advance to remove."""
     paragraph_node = _paragraph_node(("ABCD", {"font-size": "48"}))
 
-    _isolate_trailing_letter_spacing(paragraph_node)
+    _isolate_trailing_letter_spacing(paragraph_node, 0.0)
 
     assert [span.text for span in paragraph_node] == ["ABCD"]
 
 
+def test_isolate_trailing_letter_spacing_keeps_what_tracking_did_not_add() -> None:
+    """Only the tracking is taken out; tsume and the global offset stay.
+
+    Tracking separates glyphs without reserving space after the last one, while
+    tsume and ``text_letter_spacing_offset`` change the character's own advance.
+    """
+    paragraph_node = _paragraph_node(("ABCD", {"letter-spacing": "19.7"}))
+
+    _isolate_trailing_letter_spacing(paragraph_node, 0.5)
+
+    assert [span.text for span in paragraph_node] == ["ABC", "D"]
+    assert paragraph_node[1].attrib["letter-spacing"] == "0.5"
+
+
+@pytest.mark.parametrize(
+    ("text", "description"),
+    [
+        ("\u0628\u064a\u062a", "Arabic letters join cursively"),
+        ("\u0915\u0915\u094d\u0937", "a Devanagari conjunct spans the boundary"),
+    ],
+)
+def test_isolate_trailing_letter_spacing_leaves_shaped_text_alone(
+    text: str, description: str
+) -> None:
+    """Runs are shaped separately, so a boundary inside a cluster is refused."""
+    paragraph_node = _paragraph_node((text, {"letter-spacing": "8"}))
+
+    _isolate_trailing_letter_spacing(paragraph_node, 0.0)
+
+    assert [span.text for span in paragraph_node] == [text], description
+
+
 def _band_ink_extent(image: Image.Image, baseline: float) -> tuple[int, int]:
-    """Return the horizontal ink extent of the row sitting on the baseline."""
+    """Return the horizontal ink extent of the row sitting on the baseline.
+
+    The rows are 60px apart and every one of them reads "ABCD", so a band from
+    46px above the baseline to 6px below it holds the whole row with room to
+    spare, whichever face the renderer substitutes.
+    """
     alpha = np.array(image.convert("RGBA"))[..., 3]
-    band = alpha[int(baseline) - 48 : int(baseline) + 12, :] > 32
+    band = alpha[int(baseline) - 46 : int(baseline) + 6, :] > 32
     columns = np.flatnonzero(band.any(axis=0))
     assert columns.size > 0, f"No ink rendered on the baseline at y={baseline}"
     return int(columns[0]), int(columns[-1]) + 1
@@ -973,7 +1019,9 @@ def test_tracking_does_not_move_the_anchored_edge(
     same fixture, so it holds under font substitution as well.
 
     Renderers disagree about the trailing spacing, so this has to be measured and
-    not read off the SVG: resvg never included it, Chromium did.
+    not read off the SVG: resvg never included it, Chromium did. The resvg case
+    therefore guards against a regression rather than covering the fix, and only
+    the Chromium case fails without it.
     """
     psdimage = PSDImage.open(get_fixture("texts/style-tracking-alignment.psd"))
     svg_string = SVGDocument.from_psd(psdimage).tostring()
