@@ -8,7 +8,7 @@ from typing import Any, NoReturn
 import pytest
 from PIL import Image
 
-from psd2svg.rasterizer import PlaywrightRasterizer
+from psd2svg.rasterizer import PlaywrightRasterizer, ResvgRasterizer
 from tests.conftest import requires_playwright
 
 
@@ -169,6 +169,16 @@ def test_rasterizer_fractional_dimensions(fractional_svg: str) -> None:
 
 
 @requires_playwright
+@pytest.mark.parametrize("dpi", [0, 96, 144, 192, 300])
+def test_rasterizer_dpi_matches_resvg(simple_svg: str, dpi: int) -> None:
+    """Test that both backends scale a whole-pixel document to the same size."""
+    with PlaywrightRasterizer(dpi=dpi) as rasterizer:
+        browser_image = rasterizer.from_string(simple_svg)
+
+    assert browser_image.size == ResvgRasterizer(dpi=dpi).from_string(simple_svg).size
+
+
+@requires_playwright
 def test_rasterizer_vertical_text(vertical_text_svg: str) -> None:
     """Test rendering of vertical text with SVG 2.0 features.
 
@@ -181,6 +191,93 @@ def test_rasterizer_vertical_text(vertical_text_svg: str) -> None:
         assert isinstance(image, Image.Image)
         assert image.mode == "RGBA"
         assert image.size == (200, 200)
+
+
+@requires_playwright
+@pytest.mark.parametrize(
+    ("size", "expected"),
+    # 100pt is 133.33 CSS pixels, and the viewport rounds up so nothing clips
+    [("1in", (96, 96)), ("100pt", (134, 134)), ("25.4mm", (96, 96))],
+)
+def test_rasterizer_physical_units(size: str, expected: tuple[int, int]) -> None:
+    """Test that a document sized in physical units resolves per CSS."""
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}"'
+        ' viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        image = rasterizer.from_string(svg)
+
+    assert image.size == expected
+
+
+@requires_playwright
+@pytest.mark.parametrize(
+    "root_size", ['width="0" height="0"', 'width="0%" height="0%"']
+)
+def test_rasterizer_zero_sized_root_renders_nothing(root_size: str) -> None:
+    """Test that a root sized to zero still disables its own rendering."""
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" {root_size}'
+        ' viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        image = rasterizer.from_string(svg)
+
+    # The canvas falls back to the viewBox, but the document draws nothing
+    assert image.size == (100, 100)
+    assert image.getchannel("A").getbbox() is None
+
+
+@requires_playwright
+@pytest.mark.parametrize(
+    ("nested_size", "expected_bbox"),
+    [
+        ('width="50" height="50"', (0, 0, 50, 50)),
+        ('width="25%" height="25%"', (0, 0, 50, 50)),
+    ],
+)
+def test_rasterizer_nested_svg_keeps_its_size(
+    nested_size: str, expected_bbox: tuple[int, int, int, int]
+) -> None:
+    """Test that only the root carries the resolved size, not a nested <svg>."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"'
+        f' viewBox="0 0 200 200"><svg x="0" y="0" {nested_size}>'
+        '<rect width="100%" height="100%" fill="red"/></svg></svg>'
+    )
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        image = rasterizer.from_string(svg)
+
+    assert image.size == (200, 200)
+    assert image.getchannel("A").getbbox() == expected_bbox
+
+
+@requires_playwright
+@pytest.mark.parametrize(
+    ("root_size", "expected"),
+    [
+        ('width="50%" height="50%"', (50, 50)),
+        ('width="100%" height="100%"', (100, 100)),
+        ('width="200%" height="200%"', (200, 200)),
+    ],
+)
+def test_rasterizer_percentage_size(root_size: str, expected: tuple[int, int]) -> None:
+    """Test that a percentage root size is resolved once, not twice."""
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" {root_size}'
+        ' viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        image = rasterizer.from_string(svg)
+
+    # The document fills the canvas it was measured for
+    assert image.size == expected
+    assert image.getchannel("A").getbbox() == (0, 0, *expected)
 
 
 @requires_playwright
@@ -272,7 +369,7 @@ def test_rasterizer_reuse() -> None:
 
 @requires_playwright
 def test_rasterizer_invalid_svg() -> None:
-    """Test handling of invalid SVG content."""
+    """Test that a root element with no resolvable size raises ValueError."""
     invalid_svg = "<svg>invalid</not-svg>"
 
     with PlaywrightRasterizer(dpi=96) as rasterizer:

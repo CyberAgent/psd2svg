@@ -9,7 +9,6 @@ import asyncio
 import concurrent.futures
 import logging
 import math
-import xml.etree.ElementTree as ET
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Literal, Union
 
@@ -203,7 +202,20 @@ class PlaywrightRasterizer(BaseRasterizer):
         )
 
         # Parse SVG to get dimensions
-        dimensions = self._get_svg_dimensions(svg_str)
+        root = self._svg_root(svg_str)
+        dimensions = None if root is None else self._root_dimensions(root)
+        if root is None or dimensions is None:
+            raise ValueError("Could not determine SVG dimensions")
+        css_width, css_height = dimensions
+
+        # A root that sizes itself keeps that size, so an explicit zero still
+        # renders nothing. Only a relative or missing size is resolved here,
+        # where the page would otherwise resolve it a second time.
+        root_size_css = (
+            ""
+            if self._root_keeps_own_size(root)
+            else f"width: {css_width}px; height: {css_height}px;"
+        )
 
         # The viewport holds the document's CSS size, rounded up so a
         # fractional document is not clipped; DPI scaling comes from
@@ -211,15 +223,15 @@ class PlaywrightRasterizer(BaseRasterizer):
         # Both are passed to new_page(): set_viewport_size() takes no timeout
         # and can hang, and device_scale_factor is creation-only.
         viewport: ViewportSize = {
-            "width": math.ceil(dimensions["width"]),
-            "height": math.ceil(dimensions["height"]),
+            "width": math.ceil(css_width),
+            "height": math.ceil(css_height),
         }
 
         # Create page and set content
         assert self._browser is not None
         page = self._browser.new_page(
             viewport=viewport,
-            device_scale_factor=self.dpi / 96.0 if self.dpi > 0 else 1.0,
+            device_scale_factor=self._dpi_scale(self.dpi),
         )
 
         try:
@@ -232,11 +244,13 @@ class PlaywrightRasterizer(BaseRasterizer):
         body {{
             margin: 0;
             padding: 0;
-            width: {dimensions["width"]}px;
-            height: {dimensions["height"]}px;
+            width: {css_width}px;
+            height: {css_height}px;
         }}
-        svg {{
+        /* Only the root: a nested <svg> is sized by the document. */
+        body > svg {{
             display: block;
+            {root_size_css}
         }}
     </style>
 </head>
@@ -261,65 +275,6 @@ class PlaywrightRasterizer(BaseRasterizer):
 
         finally:
             page.close()
-
-    def _get_svg_dimensions(self, svg_content: str) -> dict[str, float]:
-        """Extract width and height from SVG content.
-
-        Args:
-            svg_content: SVG content as string.
-
-        Returns:
-            Dictionary with 'width' and 'height' keys in pixels.
-
-        Raises:
-            ValueError: If SVG dimensions cannot be determined.
-        """
-        try:
-            root = ET.fromstring(svg_content)
-
-            # Try to get width and height attributes
-            width_str = root.get("width", "")
-            height_str = root.get("height", "")
-
-            # Parse dimensions (assuming px units or unitless)
-            width = self._parse_dimension(width_str)
-            height = self._parse_dimension(height_str)
-
-            if width and height:
-                return {"width": width, "height": height}
-
-            # Fall back to viewBox if width/height not specified
-            viewbox = root.get("viewBox", "")
-            if viewbox:
-                parts = viewbox.split()
-                if len(parts) == 4:
-                    return {"width": float(parts[2]), "height": float(parts[3])}
-
-            raise ValueError("Could not determine SVG dimensions")
-
-        except ET.ParseError as e:
-            raise ValueError("Could not determine SVG dimensions") from e
-
-    def _parse_dimension(self, value: str) -> float | None:
-        """Parse dimension value from SVG attribute.
-
-        Args:
-            value: Dimension string (e.g., "100", "100px", "10cm").
-
-        Returns:
-            Dimension in pixels, or None if parsing fails.
-        """
-        if not value:
-            return None
-
-        # Remove common units (assuming px or unitless)
-        value = value.strip().lower()
-        value = value.replace("px", "").replace("pt", "").strip()
-
-        try:
-            return float(value)
-        except ValueError:
-            return None
 
     def close(self) -> None:
         """Close the browser and cleanup resources.

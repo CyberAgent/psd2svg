@@ -181,8 +181,9 @@ API Reference
            """Initialize the resvg rasterizer.
 
            Args:
-               dpi: Dots per inch for rendering. If 0 (default), uses 96 DPI.
-                   Higher values produce larger, higher resolution images.
+               dpi: Dots per inch for rendering. Default is 96 DPI; 0 also
+                   means 96 DPI. Higher values produce larger, higher
+                   resolution images.
            """
 
        def from_file(self, filepath: str) -> Image.Image:

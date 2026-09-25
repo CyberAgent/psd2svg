@@ -341,10 +341,11 @@ class SVGDocument:
         """Rasterize the SVG document to PIL Image.
 
         Args:
-            dpi: Dots per inch for rendering. If 0 (default), uses the
-                rasterizer's default (96 DPI for ResvgRasterizer). Higher values
-                produce larger, higher resolution images (e.g., 300 DPI for print
-                quality). Only used if rasterizer is None.
+            dpi: Dots per inch for rendering. 0 (default) and 96 both render
+                the document at its own pixel size; higher values produce
+                larger, higher resolution images (e.g., 300 DPI for print
+                quality) and cost `(dpi / 96) ** 2` times the pixels. Only
+                used if rasterizer is None.
             rasterizer: Optional custom rasterizer instance. If None, uses
                 ResvgRasterizer with the specified dpi. Use this to specify
                 alternative rasterizers like PlaywrightRasterizer for better

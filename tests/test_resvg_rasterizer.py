@@ -1,5 +1,6 @@
 """Tests for ResvgRasterizer."""
 
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -112,11 +113,7 @@ def test_rasterizer_from_file(simple_svg: str) -> None:
 
 
 def test_rasterizer_dpi_scaling() -> None:
-    """Test DPI scaling with physical dimensions (e.g., inches).
-
-    Note: DPI only affects scaling when SVG uses physical units.
-    When SVG has explicit pixel dimensions, output size stays constant.
-    """
+    """Test DPI scaling with physical dimensions (e.g., inches)."""
     # SVG with physical dimensions (1 inch x 1 inch)
     svg_inches = """<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1in" height="1in" viewBox="0 0 100 100">
@@ -132,6 +129,191 @@ def test_rasterizer_dpi_scaling() -> None:
     # 1 inch at 96 DPI = 96 pixels, at 192 DPI = 192 pixels
     assert image_96.size == (96, 96)
     assert image_192.size == (192, 192)
+
+
+def test_rasterizer_dpi_zero_renders_physical_units() -> None:
+    """Test that dpi=0 resolves physical units at 96 DPI rather than at 0."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1in" height="1in">'
+        '<rect width="1in" height="1in" fill="red"/></svg>'
+    )
+
+    assert ResvgRasterizer(dpi=0).from_string(svg).size == (96, 96)
+
+
+def test_rasterizer_dpi_does_not_scale_twice() -> None:
+    """Test that DPI scales the rendering, not the physical units within it."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">'
+        '<rect width="1in" height="1in" fill="red"/></svg>'
+    )
+
+    image = ResvgRasterizer(dpi=192).from_string(svg)
+
+    # The inch square stays an inch: 96 CSS pixels, rendered at a 2x scale
+    assert image.size == (400, 400)
+    assert image.getchannel("A").getbbox() == (0, 0, 192, 192)
+
+
+def test_rasterizer_dpi_rounds_half_up() -> None:
+    """Test that a scale landing on a half pixel rounds up, as a browser does."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">'
+        '<rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    # 100 x 300/96 is exactly 312.5
+    assert ResvgRasterizer(dpi=300).from_string(svg).size == (313, 313)
+
+
+def test_rasterizer_dpi_scales_pixel_dimensions() -> None:
+    """Test that DPI scales a document sized in pixels, not only in physical units."""
+    svg = """<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50" viewBox="0 0 100 50">
+    <rect x="0" y="0" width="50" height="50" fill="red"/>
+</svg>"""
+
+    assert ResvgRasterizer(dpi=0).from_string(svg).size == (100, 50)
+    assert ResvgRasterizer(dpi=96).from_string(svg).size == (100, 50)
+    assert ResvgRasterizer(dpi=144).from_string(svg).size == (150, 75)
+    assert ResvgRasterizer(dpi=192).from_string(svg).size == (200, 100)
+
+    # The content scales with the canvas: the rect still covers the left half
+    image = ResvgRasterizer(dpi=192).from_string(svg)
+    assert image.getchannel("A").getbbox() == (0, 0, 100, 100)
+
+
+def test_rasterizer_dpi_scales_without_viewbox() -> None:
+    """Test that DPI scales a document that has no viewBox."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">'
+        '<rect x="0" y="0" width="50" height="50" fill="red"/></svg>'
+    )
+
+    image = ResvgRasterizer(dpi=192).from_string(svg)
+
+    assert image.size == (200, 100)
+    assert image.getchannel("A").getbbox() == (0, 0, 100, 100)
+
+
+@pytest.mark.parametrize(
+    ("root_size", "expected_96", "expected_192"),
+    [
+        ('width="200"', (200, 100), (400, 200)),
+        ('height="200"', (100, 200), (200, 400)),
+        ('width="50%" height="50%"', (50, 50), (100, 100)),
+        ('width="200" height="50%"', (200, 50), (400, 100)),
+    ],
+)
+def test_rasterizer_dpi_scales_partially_sized_root(
+    root_size: str, expected_96: tuple[int, int], expected_192: tuple[int, int]
+) -> None:
+    """Test that DPI scales a root that sizes only one axis, or sizes it relatively.
+
+    Each axis resolves on its own, so the scale stays dpi / 96 rather than
+    being skewed by the viewBox of the axis that is left out.
+    """
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" {root_size}'
+        ' viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    assert ResvgRasterizer(dpi=96).from_string(svg).size == expected_96
+    assert ResvgRasterizer(dpi=192).from_string(svg).size == expected_192
+
+
+def test_rasterizer_dpi_oversized_document(caplog: pytest.LogCaptureFixture) -> None:
+    """Test that an unrenderable canvas still fails as a ValueError."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1e30" height="1e30">'
+        '<rect width="10" height="10" fill="red"/></svg>'
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError, match="Failed to rasterize SVG content"):
+            ResvgRasterizer(dpi=192).from_string(svg)
+
+    assert "exceed" in caplog.text
+
+
+def test_rasterizer_dpi_non_finite_dimensions() -> None:
+    """Test that a non-finite root size renders unscaled instead of overflowing."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1e400" height="1e400">'
+        '<rect width="10" height="10" fill="red"/></svg>'
+    )
+
+    assert ResvgRasterizer(dpi=192).from_string(svg).size == (10, 10)
+
+
+def test_rasterizer_dpi_tall_document(caplog: pytest.LogCaptureFixture) -> None:
+    """Test that the height is checked against the limit, not just the width."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="1e300">'
+        '<rect width="10" height="10" fill="red"/></svg>'
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError, match="Failed to rasterize SVG content"):
+            ResvgRasterizer(dpi=192).from_string(svg)
+
+    assert "exceed" in caplog.text
+
+
+def test_rasterizer_dpi_overflows_when_scaled(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test a finite root size that only overflows once the scale is applied."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1e308" height="1e308">'
+        '<rect width="10" height="10" fill="red"/></svg>'
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError, match="Failed to rasterize SVG content"):
+            ResvgRasterizer(dpi=300).from_string(svg)
+
+    assert "exceed" in caplog.text
+
+
+def test_rasterizer_dpi_scales_viewbox_only() -> None:
+    """Test that DPI scales a document sized by its viewBox alone."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 150">'
+        '<rect width="200" height="150" fill="blue"/></svg>'
+    )
+
+    assert ResvgRasterizer(dpi=96).from_string(svg).size == (200, 150)
+    assert ResvgRasterizer(dpi=192).from_string(svg).size == (400, 300)
+
+
+def test_rasterizer_dpi_scales_file(tmp_path: Path) -> None:
+    """Test that from_file() honours DPI the same way from_string() does."""
+    svg_path = tmp_path / "input.svg"
+    svg_path.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"'
+        ' viewBox="0 0 100 50"><rect width="100" height="50" fill="red"/></svg>',
+        encoding="utf-8",
+    )
+
+    assert ResvgRasterizer(dpi=96).from_file(str(svg_path)).size == (100, 50)
+    assert ResvgRasterizer(dpi=192).from_file(str(svg_path)).size == (200, 100)
+
+
+def test_rasterizer_dpi_unknown_dimensions(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test that an unsizable document renders at 96 DPI with a warning."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">'
+        '<rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    with caplog.at_level(logging.WARNING):
+        image = ResvgRasterizer(dpi=192).from_string(svg)
+
+    assert image.size == (100, 100)
+    assert "Could not determine SVG dimensions" in caplog.text
 
 
 def test_rasterizer_high_dpi() -> None:
@@ -299,14 +481,15 @@ def test_rasterizer_malformed_svg() -> None:
         rasterizer.from_string(malformed_svg)
 
 
-def test_rasterizer_missing_file() -> None:
+@pytest.mark.parametrize("dpi", [96, 300])
+def test_rasterizer_missing_file(dpi: int) -> None:
     """Test that missing SVG file raises ValueError instead of crashing.
 
     Note: This test requires resvg-py >= 0.2.5. Earlier versions would
     crash (SIGABRT) instead of raising exceptions. The library raises
     ValueError for missing files rather than FileNotFoundError.
     """
-    rasterizer = ResvgRasterizer(dpi=96)
+    rasterizer = ResvgRasterizer(dpi=dpi)
     nonexistent_path = "/nonexistent/path/to/file.svg"
 
     with pytest.raises(ValueError, match="Failed to rasterize SVG file"):
