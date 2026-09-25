@@ -18,6 +18,16 @@ from psd2svg.core.gradient import GradientInterpolation
 logger = logging.getLogger(__name__)
 
 
+def stroke_position(effect: effects.Stroke) -> bytes:
+    """Return a stroke effect's position, defaulting to Photoshop's Outside.
+
+    ``Stroke.position`` is ``None`` when the descriptor omits the key, which
+    Photoshop draws as Outside.
+    """
+    position = effect.position
+    return Enum.OutsetFrame.value if position is None else position
+
+
 class EffectConverter(ConverterProtocol):
     """Effect converter mixin."""
 
@@ -175,9 +185,10 @@ class EffectConverter(ConverterProtocol):
         SVG does not allow stroking a raster image directly, so we create a filter.
         """
         filter = self.create_node("filter", id=self.auto_id("stroke"))
+        position = stroke_position(effect)
         with self.set_current(filter):
             # Create stroke area using morphology and composite.
-            if effect.position == Enum.OutsetFrame:
+            if position == Enum.OutsetFrame:
                 self.create_node(
                     "feMorphology",
                     operator="dilate",
@@ -190,7 +201,7 @@ class EffectConverter(ConverterProtocol):
                     in2="SourceAlpha",
                     result="STROKEAREA",
                 )
-            elif effect.position == Enum.InsetFrame:
+            elif position == Enum.InsetFrame:
                 self.create_node(
                     "feMorphology",
                     operator="erode",
@@ -203,7 +214,7 @@ class EffectConverter(ConverterProtocol):
                     in2="SourceAlpha",
                     result="STROKEAREA",
                 )
-            elif effect.position == Enum.CenteredFrame:
+            elif position == Enum.CenteredFrame:
                 self.create_node(
                     "feMorphology",
                     operator="dilate",
@@ -226,12 +237,7 @@ class EffectConverter(ConverterProtocol):
                     result="STROKEAREA",
                 )
             else:
-                position_str = (
-                    effect.position.decode()
-                    if isinstance(effect.position, bytes)
-                    else str(effect.position)
-                )
-                raise ValueError(f"Unsupported stroke position: {position_str}")
+                raise ValueError(f"Unsupported stroke position: {position.decode()}")
 
             # Gradient and pattern strokes needs feImage.
             if effect.fill_type == Enum.SolidColor:
@@ -350,10 +356,11 @@ class EffectConverter(ConverterProtocol):
             svg_utils.set_attribute(use, "stroke-width", float(effect.size))
 
         # NOTE: Check position, phase, and offset.
-        if effect.position != Enum.CenteredFrame:
-            position = Enum(effect.position)  # For validation.
+        position = stroke_position(effect)
+        if position != Enum.CenteredFrame:
             logger.info(
-                f"Only centered stroke position is supported in SVG: {position.name}"
+                "Only centered stroke position is supported in SVG: "
+                f"{Enum(position).name}"
             )
 
         return use

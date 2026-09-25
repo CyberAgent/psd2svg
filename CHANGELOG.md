@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stroke effects whose descriptor omits the position crashed the conversion** (#PR)
+  - psd-tools now reports an omitted stroke position as `None`; it falls back
+    to Photoshop's Outside default
+
 - **Paragraph space before/after was dropped in native SVG output** (#420)
   - Both properties now widen the paragraph advance, summed across a break and
     suppressed before the first paragraph, as Photoshop draws them
