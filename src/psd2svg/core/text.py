@@ -675,8 +675,10 @@ class TextConverter(ConverterProtocol):
         )
 
         # Add paragraphs
-        for paragraph in paragraphs:
-            self._add_foreign_object_paragraph(div, paragraph, text_setting)
+        for index, paragraph in enumerate(paragraphs):
+            self._add_foreign_object_paragraph(
+                div, paragraph, text_setting, first_paragraph=index == 0
+            )
 
         return foreign_obj
 
@@ -1216,6 +1218,7 @@ class TextConverter(ConverterProtocol):
         container: ET.Element,
         paragraph: Paragraph,
         text_setting: TypeSetting,
+        first_paragraph: bool = False,
     ) -> None:
         """Add a paragraph as XHTML <p> element.
 
@@ -1223,9 +1226,10 @@ class TextConverter(ConverterProtocol):
             container: Parent XHTML div element.
             paragraph: Paragraph object containing style and spans.
             text_setting: TypeSetting object for font info lookup.
+            first_paragraph: Whether this is the first paragraph of the layer.
         """
         # Get paragraph CSS styles
-        p_styles = self._get_foreign_object_paragraph_styles(paragraph)
+        p_styles = self._get_foreign_object_paragraph_styles(paragraph, first_paragraph)
 
         # Check if any span in this paragraph needs whitespace preservation
         needs_preserve = any(
@@ -1245,7 +1249,7 @@ class TextConverter(ConverterProtocol):
             self._add_foreign_object_span(p_elem, span, text_setting, paragraph)
 
     def _get_foreign_object_paragraph_styles(
-        self, paragraph: Paragraph
+        self, paragraph: Paragraph, first_paragraph: bool = False
     ) -> dict[str, str]:
         """Convert paragraph settings to CSS styles.
 
@@ -1259,6 +1263,8 @@ class TextConverter(ConverterProtocol):
 
         Args:
             paragraph: Paragraph object containing style and formatting.
+            first_paragraph: Whether this is the first paragraph of the layer,
+                which alone carries the half-leading compensation.
 
         Returns:
             Dictionary of CSS property names to values.
@@ -1296,17 +1302,16 @@ class TextConverter(ConverterProtocol):
         if leading > 0:
             styles["line-height"] = svg_utils.num2str_with_unit(leading)
 
-            # Calculate half-leading compensation for all paragraphs
-            # CSS line-height centers text within a line box, adding unwanted space
-            # above each line. We calculate the negative margin as:
-            # margin-top = -(leading - font_size) / 2
-            # This removes the half-leading space above each paragraph.
-            if paragraph.spans:
-                # Get font size from the first span
-                first_span = paragraph.spans[0]
-                font_size = first_span.style.font_size
+            # Half-leading compensation, first paragraph only. CSS centers the
+            # text within the line box, so half the leading sits above the first
+            # line and pushes the block down; a negative margin takes it back.
+            # Later paragraphs must not repeat it: adjacent line boxes already
+            # sit exactly one line-height apart, and a second negative margin
+            # would pull every paragraph break closer by half the leading.
+            if first_paragraph and paragraph.spans:
+                # The tallest span is the one that set the leading above
+                font_size = max(span.style.font_size for span in paragraph.spans)
                 if leading > font_size:
-                    # Calculate half-leading compensation
                     margin_top_compensation = -(leading - font_size) / 2
 
         # First line indent

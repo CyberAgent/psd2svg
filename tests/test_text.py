@@ -1218,15 +1218,124 @@ def test_text_letter_spacing_offset_zero_tracking() -> None:
 
 
 def test_text_style_leading() -> None:
-    """Test leading (line height) handling."""
+    """Test leading (line height) handling.
+
+    The fixture sets an explicit 16px leading, which is used as-is.
+    """
     svg = convert_psd_to_svg("texts/style-leading.psd")
     # Leading affects dy attribute on tspan elements for subsequent paragraphs
     tspans = svg.findall(".//tspan[@dy]")
     # Should have at least one tspan with dy attribute (second paragraph onwards)
     assert len(tspans) > 0
-    # dy should be non-zero
     dy = float(tspans[0].attrib.get("dy", "0"))
-    assert dy != 0
+    assert dy == pytest.approx(16.0)
+
+
+def test_text_auto_leading_scales_the_font_size() -> None:
+    """Auto leading advances lines by font size times the paragraph percentage."""
+    svg = convert_psd_to_svg("texts/paragraph-shapetype1-multiple.psd")
+    tspans = svg.findall(".//text/tspan")
+    assert len(tspans) == 3, "Fixture should have 3 paragraphs"
+    # 32px font with the default 1.2 Auto Leading percentage
+    for tspan in tspans[1:]:
+        assert float(tspan.attrib["dy"]) == pytest.approx(38.4)
+
+
+def test_text_auto_leading_ignores_the_stored_leading() -> None:
+    """A leading left over from an earlier manual value does not reach the output.
+
+    Photoshop keeps writing the ``Leading`` field while auto leading is on, so
+    the span carries a stale 16px that must not affect the line height.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/style-bold.psd"))
+    layer = next(
+        child for child in psdimage.descendants() if isinstance(child, TypeLayer)
+    )
+    span = list(TypeSetting(layer._data))[0].spans[0]
+    assert span.style.auto_leading is True
+    assert span.style.leading == pytest.approx(16.0), (
+        "Fixture should keep a stale value"
+    )
+
+    svg = convert_psd_to_svg("texts/style-bold.psd")
+    dy = float(svg.findall(".//tspan[@dy]")[0].attrib["dy"])
+    assert dy == pytest.approx(38.4), "Line height should be 32 * 1.2, not 32 + 16"
+
+
+def test_text_auto_leading_honors_a_non_default_percentage() -> None:
+    """The paragraph Auto Leading percentage scales the computed line height."""
+    style = StyleSheet(
+        name="",
+        style_sheet_data={"FontSize": 32.0, "AutoLeading": True, "Leading": 16.0},
+    )
+    span = Span(0, 5, "Lorem", style)
+    for percentage, expected in ((1.2, 38.4), (1.5, 48.0), (0.8, 25.6)):
+        sheet = ParagraphSheet(
+            name="", default_style_sheet=0, properties={"AutoLeading": percentage}
+        )
+        paragraph = Paragraph(style=sheet, spans=[span])
+        assert paragraph.compute_leading() == pytest.approx(expected)
+
+
+def test_text_manual_leading_ignores_the_paragraph_percentage() -> None:
+    """Manual leading is used unscaled whatever the paragraph percentage says."""
+    style = StyleSheet(
+        name="",
+        style_sheet_data={"FontSize": 32.0, "AutoLeading": False, "Leading": 16.0},
+    )
+    sheet = ParagraphSheet(
+        name="", default_style_sheet=0, properties={"AutoLeading": 2.0}
+    )
+    paragraph = Paragraph(style=sheet, spans=[Span(0, 5, "Lorem", style)])
+    assert paragraph.compute_leading() == pytest.approx(16.0)
+
+
+def test_text_leading_takes_the_largest_span() -> None:
+    """A paragraph advances by the largest leading among its spans."""
+    sheet = ParagraphSheet(name="", default_style_sheet=0, properties={})
+    small = StyleSheet(name="", style_sheet_data={"FontSize": 16.0})
+    large = StyleSheet(name="", style_sheet_data={"FontSize": 32.0})
+    manual = StyleSheet(
+        name="",
+        style_sheet_data={"FontSize": 8.0, "AutoLeading": False, "Leading": 50.0},
+    )
+    paragraph = Paragraph(
+        style=sheet,
+        spans=[Span(0, 5, "Lorem", small), Span(5, 10, "Ipsum", large)],
+    )
+    assert paragraph.compute_leading() == pytest.approx(38.4)
+
+    mixed = Paragraph(
+        style=sheet,
+        spans=[Span(0, 5, "Lorem", large), Span(5, 10, "Ipsum", manual)],
+    )
+    assert mixed.compute_leading() == pytest.approx(50.0)
+
+
+def test_text_auto_leading_follows_each_paragraph_font_size() -> None:
+    """Each paragraph advances by its own font size, not the layer's first."""
+    svg = convert_psd_to_svg("texts/font-sizes-1.psd")
+    tspans = svg.findall(".//text/tspan")
+    assert len(tspans) == 4, "Fixture should have 4 paragraphs"
+    # Paragraphs run 16, 18.667, 21.333 and 24px; each advance is size * 1.2
+    advances = [float(tspan.attrib["dy"]) for tspan in tspans[1:]]
+    assert advances == pytest.approx([22.4, 25.6, 28.8])
+
+
+def test_text_auto_leading_advances_vertical_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vertical text advances columns leftward by the same auto leading."""
+    monkeypatch.setattr(
+        TypeSetting,
+        "writing_direction",
+        property(lambda self: WritingDirection.VERTICAL_RL),
+    )
+    svg = convert_psd_to_svg("texts/font-sizes-1.psd")
+    tspans = svg.findall(".//text/tspan")
+    assert len(tspans) == 4, "Fixture should have 4 paragraphs"
+    advances = [float(tspan.attrib["dx"]) for tspan in tspans[1:]]
+    assert advances == pytest.approx([-22.4, -25.6, -28.8])
 
 
 def test_text_style_horizontal_scale() -> None:
@@ -2164,12 +2273,10 @@ def test_foreignobject_paragraph_end_indent() -> None:
 def test_foreignobject_paragraph_space_before() -> None:
     """Test margin-top CSS property for space before paragraph.
 
-    The fixture has space_before=20px, font-size=32px, auto-leading with offset=0.01px.
-    With corrected auto-leading: line-height = font_size + leading = 32.01px
-    Expected margin-top = space_before + compensation
-                        = 20px + (-(32.01-32)/2)
-                        = 20px + (-0.005px)
-                        ≈ 20px (compensation is negligible)
+    The fixture has space_before=20px and font-size=32px with auto leading, so
+    the line height is 32 * 1.2 = 38.4px. The first paragraph also carries the
+    half-leading compensation, 20 - (38.4 - 32) / 2 = 16.8px, while the second
+    carries the space alone.
     """
     psdimage = PSDImage.open(get_fixture("texts/paragraph-space-before.psd"))
     doc = SVGDocument.from_psd(
@@ -2187,11 +2294,12 @@ def test_foreignobject_paragraph_space_before() -> None:
 
     assert len(paragraphs) == 2, "Fixture should have 2 paragraphs"
 
-    for p in paragraphs:
-        style_dict = _parse_style_string(p.attrib.get("style", ""))
-        assert "margin-top" in style_dict
-        # space_before (20px) + negligible compensation ≈ 20px
-        assert style_dict["margin-top"] == "20px"
+    first, second = (_parse_style_string(p.attrib.get("style", "")) for p in paragraphs)
+    # space_before (20px) + half-leading compensation (-3.2px)
+    assert first["margin-top"] == "16.8px"
+    # Later paragraphs take the space alone; repeating the compensation would
+    # pull every paragraph break 3.2px closer.
+    assert second["margin-top"] == "20px"
 
 
 def test_foreignobject_paragraph_space_after() -> None:
@@ -2989,8 +3097,8 @@ def test_text_warp_arc_attribute_optimization() -> None:
 def test_foreignobject_vertical_alignment() -> None:
     """Test vertical alignment compensation for first paragraph.
 
-    With corrected auto-leading (font_size + leading offset), line-height
-    is now 32.01px instead of 38.4px, so compensation is negligible.
+    Auto leading at font-size 32px gives a 38.4px line height, so the paragraph
+    carries a -3.2px half-leading compensation.
     """
     psdimage = PSDImage.open(
         get_fixture("texts/paragraph-shapetype1-justification0.psd")
@@ -3012,22 +3120,23 @@ def test_foreignobject_vertical_alignment() -> None:
 
     style_dict = _parse_style_string(first_p.attrib.get("style", ""))
 
-    # Verify line-height is present (corrected auto-leading)
     assert "line-height" in style_dict, "First paragraph should have line-height"
-    expected = "32.01px"
+    expected = "38.4px"
     actual = style_dict["line-height"]
     assert actual == expected, f"Expected line-height {expected}, got {actual}"
 
-    # With new auto-leading, compensation is tiny and may be omitted
-    # The compensation would be -(32.01-32)/2 = -0.005px, essentially zero
-    # So we don't assert margin-top value, just that line-height is correct
+    # Half-leading compensation: -(38.4 - 32) / 2
+    assert style_dict.get("margin-top") == "-3.2px", (
+        f"Expected margin-top -3.2px, got {style_dict.get('margin-top')}"
+    )
 
 
 def test_foreignobject_vertical_alignment_multiple_paragraphs() -> None:
     """Test vertical alignment with multiple paragraphs.
 
-    With corrected auto-leading (font_size + 0.01), line-height is now
-    32.01px instead of 38.4px, so compensation is negligible for all paragraphs.
+    Every paragraph is auto-leaded at font-size 32px, so each gets the same
+    38.4px line height, but only the first carries the half-leading
+    compensation that aligns the block to the top of its box.
     """
     psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
     doc = SVGDocument.from_psd(
@@ -3044,25 +3153,26 @@ def test_foreignobject_vertical_alignment_multiple_paragraphs() -> None:
     paragraphs = div.findall(".//{http://www.w3.org/1999/xhtml}p")
     assert len(paragraphs) == 3, f"Expected 3 paragraphs, got {len(paragraphs)}"
 
-    # All paragraphs should have corrected line-height
     for i, p in enumerate(paragraphs):
         p_style = _parse_style_string(p.attrib.get("style", ""))
 
         assert "line-height" in p_style, f"Paragraph {i} should have line-height"
-        assert p_style["line-height"] == "32.01px", (
-            f"Paragraph {i} should have line-height 32.01px (font_size + 0.01), "
+        assert p_style["line-height"] == "38.4px", (
+            f"Paragraph {i} should have line-height 38.4px (font_size * 1.2), "
             f"got {p_style['line-height']}"
         )
-
-        # With new auto-leading, compensation is tiny (-0.005px) and negligible
-        # Don't assert specific margin-top value as it may be omitted or rounded
+        expected_margin = "-3.2px" if i == 0 else None
+        assert p_style.get("margin-top") == expected_margin, (
+            f"Paragraph {i} should have margin-top {expected_margin}, "
+            f"got {p_style.get('margin-top')}"
+        )
 
 
 def test_foreignobject_vertical_alignment_vertical_text() -> None:
     """Test vertical alignment with vertical writing mode.
 
-    With corrected auto-leading, line-height is now 32.01px (font_size + 0.01)
-    instead of 38.4px, and compensation is negligible even with vertical text.
+    Auto leading applies the same way in vertical-rl, where the 38.4px line
+    height spaces the columns instead of the rows.
     """
     psdimage = PSDImage.open(
         get_fixture(
@@ -3093,14 +3203,10 @@ def test_foreignobject_vertical_alignment_vertical_text() -> None:
 
     p_style = _parse_style_string(first_p.attrib.get("style", ""))
 
-    # Verify corrected line-height
     assert "line-height" in p_style, "First paragraph should have line-height"
-    assert p_style["line-height"] == "32.01px", (
-        f"Expected line-height 32.01px (font_size + 0.01), got {p_style['line-height']}"
+    assert p_style["line-height"] == "38.4px", (
+        f"Expected line-height 38.4px (font_size * 1.2), got {p_style['line-height']}"
     )
-
-    # With new auto-leading, compensation is tiny and may be omitted
-    # Don't assert specific margin-top value
 
 
 def test_cmyk_text_fill_color() -> None:
