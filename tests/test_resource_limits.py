@@ -784,6 +784,63 @@ class TestCLIArgumentParsing:
         )
         assert output_path.exists()
 
+    def test_limit_flags_reach_convert(
+        self, run_cli: CLIRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Test every limit flag lands in the ResourceLimits convert() receives.
+
+        A successful conversion does not prove a flag was wired up: the fixture
+        satisfies the defaults too, so a dropped argument still converts.
+        """
+        captured: list[ResourceLimits] = []
+
+        def spy(*args: object, **kwargs: object) -> None:
+            limits = kwargs["resource_limits"]
+            assert isinstance(limits, ResourceLimits)
+            captured.append(limits)
+
+        monkeypatch.setattr("psd2svg.__main__.convert", spy)
+
+        run_cli(
+            get_fixture("layer-types/pixel-layer.psd"),
+            str(tmp_path / "output.svg"),
+            "--max-file-size",
+            "10000000",
+            "--timeout",
+            "30",
+            "--max-layer-depth",
+            "50",
+            "--max-image-dimension",
+            "8192",
+        )
+
+        assert len(captured) == 1
+        assert captured[0].max_file_size == 10000000
+        assert captured[0].timeout == 30
+        assert captured[0].max_layer_depth == 50
+        assert captured[0].max_image_dimension == 8192
+
+    def test_unlimited_flag_reaches_convert(
+        self, run_cli: CLIRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Test --unlimited-resources disables every limit convert() receives."""
+        captured: list[ResourceLimits] = []
+
+        def spy(*args: object, **kwargs: object) -> None:
+            limits = kwargs["resource_limits"]
+            assert isinstance(limits, ResourceLimits)
+            captured.append(limits)
+
+        monkeypatch.setattr("psd2svg.__main__.convert", spy)
+
+        run_cli(
+            get_fixture("layer-types/pixel-layer.psd"),
+            str(tmp_path / "output.svg"),
+            "--unlimited-resources",
+        )
+
+        assert captured == [ResourceLimits.unlimited()]
+
 
 class TestCLIConflictDetection:
     """Tests for conflict detection between CLI flags."""
