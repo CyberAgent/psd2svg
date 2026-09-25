@@ -213,6 +213,22 @@ def test_rasterizer_physical_units(size: str, expected: tuple[int, int]) -> None
 
 
 @requires_playwright
+def test_rasterizer_zero_sized_root_renders_nothing() -> None:
+    """Test that a root sized to zero still disables its own rendering."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"'
+        ' viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        image = rasterizer.from_string(svg)
+
+    # The canvas falls back to the viewBox, but the document draws nothing
+    assert image.size == (100, 100)
+    assert image.getchannel("A").getbbox() is None
+
+
+@requires_playwright
 @pytest.mark.parametrize(
     ("nested_size", "expected_bbox"),
     [

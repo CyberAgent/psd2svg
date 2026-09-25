@@ -202,10 +202,20 @@ class PlaywrightRasterizer(BaseRasterizer):
         )
 
         # Parse SVG to get dimensions
-        dimensions = self._svg_dimensions(svg_str)
-        if dimensions is None:
+        root = self._svg_root(svg_str)
+        dimensions = None if root is None else self._root_dimensions(root)
+        if root is None or dimensions is None:
             raise ValueError("Could not determine SVG dimensions")
         css_width, css_height = dimensions
+
+        # A root that sizes itself keeps that size, so an explicit zero still
+        # renders nothing. Only a relative or missing size is resolved here,
+        # where the page would otherwise resolve it a second time.
+        root_size_css = (
+            ""
+            if self._has_absolute_size(root)
+            else f"width: {css_width}px; height: {css_height}px;"
+        )
 
         # The viewport holds the document's CSS size, rounded up so a
         # fractional document is not clipped; DPI scaling comes from
@@ -240,10 +250,7 @@ class PlaywrightRasterizer(BaseRasterizer):
         /* Only the root: a nested <svg> is sized by the document. */
         body > svg {{
             display: block;
-            /* The resolved size, so a percentage on the root is not
-               resolved a second time against this page. */
-            width: {css_width}px;
-            height: {css_height}px;
+            {root_size_css}
         }}
     </style>
 </head>

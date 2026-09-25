@@ -189,6 +189,14 @@ class BaseRasterizer(ABC):
         return (width, height) if width > 0 and height > 0 else None
 
     @classmethod
+    def _svg_root(cls, svg_content: str) -> ET.Element | None:
+        """Root element of an SVG document, or None if it has no parsable one."""
+        return cls._parse_svg_root(
+            svg_content[offset : offset + _CHUNK_SIZE]
+            for offset in range(0, len(svg_content), _CHUNK_SIZE)
+        )
+
+    @classmethod
     def _svg_dimensions(cls, svg_content: str) -> tuple[float, float] | None:
         """CSS pixel width and height of an SVG document.
 
@@ -199,11 +207,16 @@ class BaseRasterizer(ABC):
             (width, height) in CSS pixels, or None when neither the root
             width/height nor the viewBox gives an absolute size.
         """
-        root = cls._parse_svg_root(
-            svg_content[offset : offset + _CHUNK_SIZE]
-            for offset in range(0, len(svg_content), _CHUNK_SIZE)
-        )
+        root = cls._svg_root(svg_content)
         return None if root is None else cls._root_dimensions(root)
+
+    @classmethod
+    def _has_absolute_size(cls, root: ET.Element) -> bool:
+        """Whether a root ``<svg>`` sizes both axes itself, zero included."""
+        return (
+            cls._parse_length(root.get("width", "")) is not None
+            and cls._parse_length(root.get("height", "")) is not None
+        )
 
     @classmethod
     def _svg_file_dimensions(cls, filepath: str) -> tuple[float, float] | None:
