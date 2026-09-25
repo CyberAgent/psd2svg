@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`save()` wrote `html:`-prefixed XHTML** (#437)
   - A saved file now holds the same markup `tostring()` returns, so Chromium
-    applies the `<foreignObject>` paragraph strut instead of ignoring it
+    applies `<foreignObject>` paragraph spacing instead of ignoring it
 
 - **`dpi` had no effect with the default rasterizer** (#431)
   - `ResvgRasterizer` now scales by `dpi / 96` as `PlaywrightRasterizer` does,

@@ -1750,7 +1750,8 @@ def _xhtml_tree() -> tuple[ET.Element, ET.Element]:
     return svg, paragraph
 
 
-_ADJACENT_SPANS = re.compile(r"</span>\s+<span")
+# Tolerates a namespace prefix so the check still bites if one ever returns.
+_ADJACENT_SPANS = re.compile(r"</(?:\w+:)?span>\s+<(?:\w+:)?span")
 
 
 @pytest.mark.parametrize("indent", ["  ", ""])
