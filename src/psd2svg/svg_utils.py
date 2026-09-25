@@ -1276,7 +1276,9 @@ def merge_offset_siblings(element: ET.Element) -> None:
             i += 1
 
 
-def merge_singleton_children(element: ET.Element) -> None:
+def merge_singleton_children(
+    element: ET.Element, excludes: set[str] | None = None
+) -> None:
     """Recursively merge singleton child nodes into their parent nodes.
 
     This utility removes redundant wrapper elements when a parent has exactly one child
@@ -1285,6 +1287,10 @@ def merge_singleton_children(element: ET.Element) -> None:
 
     Args:
         element: The XML element to process recursively.
+        excludes: Set of attribute names pinned to the element type that owns
+                 them. A child carrying one is merged only into a parent of the
+                 same tag, which can hold what the child holds; a parent of any
+                 other tag is left wrapping it.
 
     Example:
         Before: <text><tspan>Hello</tspan></text>
@@ -1301,14 +1307,29 @@ def merge_singleton_children(element: ET.Element) -> None:
         Before: <text><tspan><tspan>A</tspan><tspan>B</tspan></tspan></text>
         After:  <text><tspan><tspan>A</tspan><tspan>B</tspan></tspan></text>
                 (unchanged)
+
+        Not merged into another tag (with excludes={"baseline-shift"}):
+        Before: <text><tspan baseline-shift="16">Text</tspan></text>
+        After:  <text><tspan baseline-shift="16">Text</tspan></text>  (unchanged)
+
+        Still merged into the same tag (with excludes={"baseline-shift"}):
+        Before: <tspan x="10"><tspan baseline-shift="16">Text</tspan></tspan>
+        After:  <tspan x="10" baseline-shift="16">Text</tspan>
     """
     # First, recursively process all children
     for child in list(element):
-        merge_singleton_children(child)
+        merge_singleton_children(child, excludes)
 
     # Merge singleton child if present (checking AFTER recursion)
     if len(element) == 1:
         child = element[0]
+
+        if (
+            excludes
+            and element.tag != child.tag
+            and excludes.intersection(child.attrib)
+        ):
+            return  # A pinned attribute cannot move to a parent of another tag
 
         # If the child has its own children, we can still optimize by
         # "unwrapping" it: move the grandchildren up to be direct children of

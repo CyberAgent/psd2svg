@@ -1484,6 +1484,95 @@ class TestMergeSingletonChildren:
         assert text[0].text == "A"
         assert text[1].text == "B"
 
+    def test_excluded_attribute_blocks_merge_into_another_tag(self) -> None:
+        """Test that a child owning an excluded attribute is left in place."""
+        # <text><tspan baseline-shift="16" x="10">Text</tspan></text>
+        text = ET.Element("text")
+        tspan = ET.SubElement(text, "tspan", attrib={"baseline-shift": "16", "x": "10"})
+        tspan.text = "Text"
+
+        svg_utils.merge_singleton_children(text, excludes={"baseline-shift"})
+
+        assert len(text) == 1
+        assert text[0] is tspan
+        assert "baseline-shift" not in text.attrib
+        assert "x" not in text.attrib
+
+    def test_excluded_attribute_blocks_unwrap(self) -> None:
+        """Test that the unwrap branch also honors excludes."""
+        # <text><tspan baseline-shift="16"><tspan>A</tspan><tspan>B</tspan></tspan>
+        # </text>
+        text = ET.Element("text")
+        outer_tspan = ET.SubElement(text, "tspan", attrib={"baseline-shift": "16"})
+        inner1 = ET.SubElement(outer_tspan, "tspan")
+        inner1.text = "A"
+        inner2 = ET.SubElement(outer_tspan, "tspan")
+        inner2.text = "B"
+
+        svg_utils.merge_singleton_children(text, excludes={"baseline-shift"})
+
+        assert len(text) == 1
+        assert text[0] is outer_tspan
+        assert "baseline-shift" not in text.attrib
+
+    def test_excludes_do_not_block_other_attributes(self) -> None:
+        """Test that a child without an excluded attribute still merges."""
+        # <text><tspan font-size="32">Text</tspan></text>
+        text = ET.Element("text")
+        tspan = ET.SubElement(text, "tspan", attrib={"font-size": "32"})
+        tspan.text = "Text"
+
+        svg_utils.merge_singleton_children(text, excludes={"baseline-shift"})
+
+        assert len(text) == 0
+        assert text.text == "Text"
+        assert text.attrib.get("font-size") == "32"
+
+    def test_excluded_attribute_merges_into_the_same_tag(self) -> None:
+        """Test that an excluded attribute still merges into a parent of its tag.
+
+        A <tspan> holds what a <tspan> holds, so a lone run merges into the
+        <tspan> that wraps its paragraph; only a parent of another tag stops it.
+        """
+        # <text><tspan x="10"><tspan baseline-shift="16">A</tspan></tspan>
+        # <tspan x="20">B</tspan></text>
+        text = ET.Element("text")
+        paragraph = ET.SubElement(text, "tspan", attrib={"x": "10"})
+        run = ET.SubElement(paragraph, "tspan", attrib={"baseline-shift": "16"})
+        run.text = "A"
+        sibling = ET.SubElement(text, "tspan", attrib={"x": "20"})
+        sibling.text = "B"
+
+        svg_utils.merge_singleton_children(text, excludes={"baseline-shift"})
+
+        # The run merged into the paragraph <tspan>, which keeps the shift.
+        assert len(text) == 2
+        assert text[0] is paragraph
+        assert len(paragraph) == 0
+        assert paragraph.text == "A"
+        assert paragraph.attrib.get("baseline-shift") == "16"
+        assert paragraph.attrib.get("x") == "10"
+
+    def test_excluded_attribute_stops_at_the_outermost_tag(self) -> None:
+        """Test that a shift absorbed by a wrapper is not passed on to <text>.
+
+        The run merges into its paragraph <tspan>; the <tspan> then stays put
+        because it now owns the excluded attribute itself.
+        """
+        # <text><tspan x="10"><tspan baseline-shift="16">A</tspan></tspan></text>
+        text = ET.Element("text")
+        paragraph = ET.SubElement(text, "tspan", attrib={"x": "10"})
+        run = ET.SubElement(paragraph, "tspan", attrib={"baseline-shift": "16"})
+        run.text = "A"
+
+        svg_utils.merge_singleton_children(text, excludes={"baseline-shift"})
+
+        assert len(text) == 1
+        assert text[0] is paragraph
+        assert paragraph.text == "A"
+        assert paragraph.attrib.get("baseline-shift") == "16"
+        assert "baseline-shift" not in text.attrib
+
 
 class TestExtractTextCharacters:
     """Tests for extract_text_characters utility function."""

@@ -506,11 +506,13 @@ def test_text_style_subscript() -> None:
 def test_text_style_baseline_shift() -> None:
     """Test baseline shift handling."""
     svg = convert_psd_to_svg("texts/style-baseline-shift.psd")
-    # baseline-shift can be on text or tspan elements
-    element = svg.find(".//*[@baseline-shift]")
-    assert element is not None
+    # resvg ignores baseline-shift on <text>, so the shift of a lone run must
+    # stay on its <tspan> instead of being merged into the parent.
+    assert svg.find(".//text[@baseline-shift]") is None
+    tspan = svg.find(".//tspan[@baseline-shift]")
+    assert tspan is not None
     # Should have non-zero baseline shift
-    baseline_shift = float(element.attrib.get("baseline-shift", "0"))
+    baseline_shift = float(tspan.attrib.get("baseline-shift", "0"))
     assert baseline_shift != 0
 
 
@@ -523,21 +525,27 @@ def test_text_style_baseline_shift_scale() -> None:
     """
     svg = convert_psd_to_svg("texts/style-baseline-shift-scale.psd")
 
-    # Find element with baseline-shift
-    element = svg.find(".//*[@baseline-shift]")
-    assert element is not None, "Should have element with baseline-shift"
+    # The shift stays on the <tspan>, which is the only element resvg reads it
+    # from; the scaled font-size is hoisted to the <text> element.
+    assert svg.find(".//text[@baseline-shift]") is None
+    tspan = svg.find(".//tspan[@baseline-shift]")
+    assert tspan is not None, "Should have a tspan with baseline-shift"
 
-    # Get baseline-shift value
-    baseline_shift = float(element.attrib.get("baseline-shift", "0"))
-    assert baseline_shift != 0, "Should have non-zero baseline-shift"
+    # The stored 16px shift is emitted as-is, not scaled with the font
+    assert float(tspan.attrib["baseline-shift"]) == 16.0
 
     # Font should be scaled (uniform 150% scale)
-    font_size = float(element.attrib.get("font-size", "0"))
-    assert font_size > 0, "Should have positive font-size"
+    text = svg.find(".//text[@font-size]")
+    assert text is not None, "Should have a text element with font-size"
+    assert float(text.attrib["font-size"]) == 48.0, "32px scaled by 150%"
 
     # Should NOT have transform for uniform scaling
-    transform = element.attrib.get("transform")
-    assert transform is None, "Uniform scaling should not use transform"
+    assert text.attrib.get("transform") is None, (
+        "Uniform scaling should not use transform"
+    )
+    assert tspan.attrib.get("transform") is None, (
+        "Uniform scaling should not use transform"
+    )
 
 
 def test_text_style_tracking() -> None:

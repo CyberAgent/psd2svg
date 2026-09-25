@@ -661,6 +661,37 @@ def test_rasterizer_ignores_foreign_object() -> None:
     )
 
 
+def test_rasterizer_reads_baseline_shift_only_from_tspan() -> None:
+    """Test that resvg honors baseline-shift on <tspan> but not on <text>.
+
+    This is why the text optimizer leaves a run's shift on its own <tspan>.
+    See GitHub issue #445.
+    """
+    template = """<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+    <text font-size="32" x="10" y="80"{on_text}><tspan{on_tspan}>Lorem</tspan></text>
+</svg>"""
+
+    def ink_rows(on_text: str = "", on_tspan: str = "") -> tuple[int, int]:
+        """Render the template and report the first and last inked row."""
+        image = ResvgRasterizer(dpi=96).from_string(
+            template.format(on_text=on_text, on_tspan=on_tspan)
+        )
+        bbox = image.getchannel("A").getbbox()
+        assert bbox is not None, "The text should render"
+        return bbox[1], bbox[3]
+
+    unshifted = ink_rows()
+    shift = ' baseline-shift="16"'
+
+    assert ink_rows(on_text=shift) == unshifted, (
+        "resvg should ignore baseline-shift on <text>"
+    )
+    assert ink_rows(on_tspan=shift) == (unshifted[0] - 16, unshifted[1] - 16), (
+        "resvg should raise the glyphs by a baseline-shift given on a <tspan>"
+    )
+
+
 class TestFontFilePathValidation:
     """Tests for font file path validation in ResvgRasterizer."""
 

@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A lone text run lost its baseline shift** (#446)
+  - The optimizer merged the run into the `<text>` element, where resvg ignores
+    `baseline-shift`; the shift now stays on the `<tspan>` that owns it
+
 - **`save()` wrote `html:`-prefixed XHTML** (#437)
   - A saved file now holds the same markup `tostring()` returns, so Chromium
     applies `<foreignObject>` paragraph spacing instead of ignoring it
