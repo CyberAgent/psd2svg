@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Auto-leaded lines used the wrong line height** (#409)
+  - Auto leading now scales the font size by the paragraph's Auto Leading
+    percentage instead of adding the leftover `Leading` value to it
+
 - **Tracked text drifted when centered or right-aligned** (#406)
   - The final character of an anchored line is now emitted without letter
     spacing, which SVG counts in the alignment but Photoshop does not
