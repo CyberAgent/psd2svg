@@ -30,16 +30,25 @@ jobs:
             fonts-noto-cjk \
             fonts-noto-ui-core
           sudo fc-cache -fv
-          # The mscorefonts postinst downloads and extracts through an
-          # update-notifier hook that can fail while apt still exits 0,
-          # leaving the suite to render Arial and Times New Roman text in a
-          # fallback face. Retry once, then assert.
-          if ! fc-list | grep -q "Times New Roman"; then
-            sudo DEBIAN_FRONTEND=noninteractive dpkg-reconfigure ttf-mscorefonts-installer
+          # ttf-mscorefonts-installer downloads and extracts through an
+          # update-notifier hook, not its own postinst. When that hook loses
+          # its partial files the step reports "The fonts are NOT installed."
+          # and apt still exits 0, leaving the suite to render Arial and Times
+          # New Roman in a fallback face. Re-run the downloader once, then
+          # assert. Match on :family= so that Arial Black, which ships in a
+          # separate archive, cannot satisfy the check for Arial.
+          installed() { [ -n "$(fc-list ":family=$1" file)" ]; }
+          if ! installed "Times New Roman" || ! installed "Arial"; then
+            sudo rm -f /var/lib/update-notifier/package-data-downloads/ttf-mscorefonts-installer*
+            sudo /usr/lib/update-notifier/package-data-downloader
             sudo fc-cache -fv
           fi
-          fc-list | grep -q "Times New Roman"
-          fc-list | grep -q "Arial"
+          for family in "Times New Roman" "Arial"; do
+            installed "$family" || {
+              echo "::error::MS Core Fonts install failed: $family is missing"
+              exit 1
+            }
+          done
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
