@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hidden layers can be included in SVG output** (#423)
+  - Pass `include_hidden_layers=True` or use `--include-hidden-layers` to
+    convert layers that Photoshop marks as hidden
+
 - **`rasterize()` accepts `image_format`** (#403)
   - Matches `tostring()`, `save()` and `export()`; pass `"png"` for images
     beyond WebP's 16383px limit

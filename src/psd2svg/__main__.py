@@ -56,6 +56,11 @@ def parse_args() -> tuple[argparse.Namespace, argparse.ArgumentParser]:
         help="Enable insertion of class attributes on SVG elements for debugging.",
     )
     parser.add_argument(
+        "--include-hidden-layers",
+        action="store_true",
+        help="Include layers hidden in Photoshop in the SVG output.",
+    )
+    parser.add_argument(
         "--image-format",
         metavar="FORMAT",
         type=str,
@@ -193,6 +198,7 @@ def main() -> None:
         enable_live_shapes=args.enable_live_shapes,
         enable_title=args.enable_title,
         enable_class=args.enable_class,
+        include_hidden_layers=args.include_hidden_layers,
         image_format=args.image_format,
         text_letter_spacing_offset=args.text_letter_spacing_offset,
         embed_fonts=args.embed_fonts,

@@ -61,6 +61,7 @@ For simple one-step conversions, use the ``convert()`` convenience function:
    # With custom options
    convert('input.psd', 'output.svg',
            enable_title=False,
+           include_hidden_layers=True,
            text_letter_spacing_offset=-0.015)
 
 **Parameters:**
@@ -71,6 +72,7 @@ For simple one-step conversions, use the ``convert()`` convenience function:
 * ``image_prefix`` (str, optional): Prefix for external image files, relative to the output SVG file's directory
 * ``image_format`` (str): Image format - 'png', 'jpeg', or 'webp' (default: 'webp')
 * ``enable_title`` (bool): Enable insertion of <title> elements with layer names (default: False)
+* ``include_hidden_layers`` (bool): Include layers hidden in Photoshop (default: False)
 * ``text_letter_spacing_offset`` (float): Global offset (in pixels) to add to all letter-spacing values (default: 0.0)
 
 SVGDocument Class

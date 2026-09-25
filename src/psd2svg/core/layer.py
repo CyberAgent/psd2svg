@@ -27,8 +27,7 @@ class LayerConverter(ConverterProtocol):
             depth: Current nesting depth (for resource limit checking).
             attrib: Additional attributes to set on the created node.
         """
-        if not layer.is_visible():
-            # TODO: Option to include hidden layers.
+        if not self.include_hidden_layers and not layer.is_visible():
             logger.debug(f"Layer '{layer.name}' ({layer.kind}) is invisible, skipping.")
             return None
         logger.debug(f"Adding layer: '{layer.name}' ({layer.kind})")
@@ -165,10 +164,12 @@ class LayerConverter(ConverterProtocol):
                 )
 
         for layer in group:
-            if layer.clipping or not layer.is_visible():
+            if layer.clipping or (
+                not self.include_hidden_layers and not layer.is_visible()
+            ):
                 continue
 
-            if layer.has_clip_layers(visible=True):
+            if layer.has_clip_layers(visible=not self.include_hidden_layers):
                 with self.add_clipping_target(layer, depth=depth) as attrib:
                     for clip_layer in layer.clip_layers:
                         self.add_layer(clip_layer, depth=depth + 1, **attrib)

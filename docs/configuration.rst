@@ -31,6 +31,20 @@ By default, title elements are omitted to reduce file size. When enabled, each l
 
 **Keep disabled for:** Production builds, minified output, when layer names are sensitive
 
+Hidden Layers
+-------------
+
+**Option:** ``include_hidden_layers=True`` (default: ``False``)
+
+By default, layers hidden in Photoshop are omitted from the SVG. Enable this
+option to convert them like visible layers, including hidden clipping layers.
+
+**Usage:** ``SVGDocument.from_psd(psdimage, include_hidden_layers=True)`` or
+``psd2svg input.psd output.svg --include-hidden-layers``
+
+**Enable for:** Exporting every layer, inspecting PSD structure, or preparing
+SVG templates whose layer visibility will be controlled after conversion
+
 Text Letter Spacing
 -------------------
 
