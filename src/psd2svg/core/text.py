@@ -408,11 +408,10 @@ def _needs_whitespace_preservation(text: str) -> bool:
     - Multiple consecutive spaces (2 or more)
     - Tabs or other whitespace characters
 
-    When whitespace needs preservation, the xml:space="preserve" attribute is added
-    to the SVG element. While MDN recommends the CSS white-space property as the
-    modern approach (https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/xml:space),
-    we use xml:space for better compatibility with SVG renderers including resvg-py.
-    The attribute works equivalently to CSS "white-space: pre".
+    When whitespace needs preservation, the SVG <text> element gets
+    xml:space="preserve", which resvg-py honors where it ignores the CSS
+    white-space property. The XHTML <p> of the foreignObject output gets
+    "white-space: pre-wrap" instead, since XHTML layout ignores xml:space.
 
     Note: Carriage returns (\r) are ignored since they are stripped
     during text processing.
@@ -421,7 +420,7 @@ def _needs_whitespace_preservation(text: str) -> bool:
         text: Text content to check.
 
     Returns:
-        True if xml:space="preserve" is needed, False otherwise.
+        True if whitespace must be preserved, False otherwise.
     """
     if not text:
         return False
@@ -1436,16 +1435,15 @@ class TextConverter(ConverterProtocol):
             paragraph, text_setting, first_paragraph, spacing
         )
 
-        # Check if any span in this paragraph needs whitespace preservation
-        needs_preserve = any(
-            _needs_whitespace_preservation(span.text) for span in paragraph
-        )
+        # XHTML layout ignores xml:space; CSS white-space governs it. pre-wrap
+        # rather than pre, since the paragraph still has to wrap.
+        if any(_needs_whitespace_preservation(span.text) for span in paragraph):
+            p_styles["white-space"] = "pre-wrap"
 
         # Create <p> element
         p_elem = svg_utils.create_xhtml_node(
             "p",
             parent=container,
-            xml_space="preserve" if needs_preserve else None,
             style=svg_utils.styles_to_string(p_styles),
         )
 
