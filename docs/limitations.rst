@@ -421,7 +421,8 @@ The following paragraph formatting properties are supported in foreignObject mod
 
 * ✅ **First line indent** (``text-indent`` CSS)
 * ✅ **Start/end indent** (``padding-left``/``padding-right`` CSS)
-* ✅ **Space before/after** (``margin-top``/``margin-bottom`` CSS)
+* ✅ **Space before/after** (a single ``margin-block-start``, so adjacent
+  margins cannot collapse)
 * ⚠️ **Hanging punctuation** (``hanging-punctuation`` CSS - Safari only)
 
 **Hanging Punctuation Browser Support:**
@@ -451,7 +452,9 @@ PSD's ``ConsecutiveHyphens`` and ``Zone`` properties have no CSS equivalents and
 
 **Native SVG Limitation:**
 
-These paragraph formatting properties are only available in foreignObject mode. Native SVG ``<text>`` elements do not support paragraph indentation, spacing, hanging punctuation, or hyphenation.
+Paragraph indentation, hanging punctuation and hyphenation are only available
+in foreignObject mode. Space before/after is the exception: native SVG
+``<text>`` elements carry it in the paragraph advance.
 
 **Font Requirements:**
 
