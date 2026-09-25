@@ -1536,7 +1536,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.40.0" },
-    { name = "psd-tools", specifier = ">=1.12.0" },
+    { name = "psd-tools", specifier = ">=1.20.0" },
     { name = "resvg-py", specifier = ">=0.2.5" },
 ]
 provides-extras = ["browser"]
