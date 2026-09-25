@@ -34,7 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The whole gap is emitted as one `margin-block-start`, so CSS margin
     collapsing no longer renders `space_after` + `space_before` as the larger
     of the two
-- **`PlaywrightRasterizer` DPI padded the canvas without scaling the content** (#PR)
+
+- **`PlaywrightRasterizer` DPI padded the canvas without scaling the content** (#418)
   - DPI now drives Chromium's device scale factor, so the rendering itself is
     scaled instead of being drawn at 1x in a larger frame
 
