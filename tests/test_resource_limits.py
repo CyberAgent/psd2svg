@@ -8,11 +8,16 @@ This module tests resource limit enforcement including:
 - Integration scenarios with all limits
 """
 
+import logging
 import os
 import signal
 import subprocess
+import sys
+import sysconfig
 import time
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Protocol
 from unittest.mock import patch
 
 import pytest
@@ -23,6 +28,7 @@ from psd_tools.api.layers import PixelLayer
 from psd_tools.api.mask import Mask
 
 from psd2svg import ResourceLimits, SVGDocument, convert
+from psd2svg.__main__ import main
 from psd2svg.core.converter import Converter
 from psd2svg.resource_limits import WEBP_MAX_DIMENSION
 from psd2svg.timeout_utils import with_timeout
@@ -693,471 +699,430 @@ class TestBackwardCompatibility:
         assert document is not None
 
 
+class CLIRunner(Protocol):
+    """Callable returned by the ``run_cli`` fixture."""
+
+    def __call__(self, *argv: str) -> None: ...
+
+
+@pytest.fixture
+def run_cli(monkeypatch: pytest.MonkeyPatch) -> Iterator[CLIRunner]:
+    """Invoke the psd2svg CLI in-process with the given arguments.
+
+    ``main()`` calls ``logging.basicConfig()``, so any root logger handler it
+    adds is removed and the level restored afterwards.
+    """
+    root = logging.getLogger()
+    handlers = root.handlers[:]
+    level = root.level
+
+    def _run(*argv: str) -> None:
+        monkeypatch.setattr(sys, "argv", ["psd2svg", *argv])
+        main()
+
+    yield _run
+
+    for handler in root.handlers[:]:
+        if handler not in handlers:
+            root.removeHandler(handler)
+            handler.close()
+    root.setLevel(level)
+
+
 class TestCLIArgumentParsing:
     """Tests for CLI argument parsing of resource limits."""
 
-    def test_help_displays_resource_limit_flags(self) -> None:
+    def test_help_displays_resource_limit_flags(
+        self, run_cli: CLIRunner, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """Test --help shows new resource limit flags."""
-        result = subprocess.run(
-            ["uv", "run", "python", "-m", "psd2svg", "--help"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert "--max-file-size" in result.stdout
-        assert "--timeout" in result.stdout
-        assert "--max-layer-depth" in result.stdout
-        assert "--max-image-dimension" in result.stdout
-        assert "--unlimited-resources" in result.stdout
+        with pytest.raises(SystemExit) as excinfo:
+            run_cli("--help")
+        assert excinfo.value.code == 0
 
-    def test_parse_max_file_size_flag(self, tmp_path: Path) -> None:
+        out = capsys.readouterr().out
+        assert "--max-file-size" in out
+        assert "--timeout" in out
+        assert "--max-layer-depth" in out
+        assert "--max-image-dimension" in out
+        assert "--unlimited-resources" in out
+
+    def test_parse_max_file_size_flag(self, run_cli: CLIRunner, tmp_path: Path) -> None:
         """Test --max-file-size flag is parsed correctly."""
+        output_path = tmp_path / "output.svg"
 
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        # Test with valid integer
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
-                "--max-file-size",
-                "10000000",
-            ],
-            capture_output=True,
-            text=True,
+        run_cli(
+            get_fixture("layer-types/pixel-layer.psd"),
+            str(output_path),
+            "--max-file-size",
+            "10000000",
         )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
+        assert output_path.exists()
 
-    def test_parse_timeout_flag(self, tmp_path: Path) -> None:
+    def test_parse_timeout_flag(self, run_cli: CLIRunner, tmp_path: Path) -> None:
         """Test --timeout flag is parsed correctly."""
+        output_path = tmp_path / "output.svg"
 
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
-                "--timeout",
-                "30",
-            ],
-            capture_output=True,
-            text=True,
+        run_cli(
+            get_fixture("layer-types/pixel-layer.psd"),
+            str(output_path),
+            "--timeout",
+            "30",
         )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
+        assert output_path.exists()
 
-    def test_parse_unlimited_resources_flag(self, tmp_path: Path) -> None:
+    def test_parse_unlimited_resources_flag(
+        self, run_cli: CLIRunner, tmp_path: Path
+    ) -> None:
         """Test --unlimited-resources flag is parsed correctly."""
+        output_path = tmp_path / "output.svg"
 
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
-                "--unlimited-resources",
-            ],
-            capture_output=True,
-            text=True,
+        run_cli(
+            get_fixture("layer-types/pixel-layer.psd"),
+            str(output_path),
+            "--unlimited-resources",
         )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
+        assert output_path.exists()
+
+    def test_limit_flags_reach_convert(
+        self, run_cli: CLIRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Test every limit flag lands in the ResourceLimits convert() receives.
+
+        A successful conversion does not prove a flag was wired up: the fixture
+        satisfies the defaults too, so a dropped argument still converts.
+        """
+        captured: list[ResourceLimits] = []
+
+        def spy(*args: object, **kwargs: object) -> None:
+            limits = kwargs["resource_limits"]
+            assert isinstance(limits, ResourceLimits)
+            captured.append(limits)
+
+        monkeypatch.setattr("psd2svg.__main__.convert", spy)
+
+        run_cli(
+            get_fixture("layer-types/pixel-layer.psd"),
+            str(tmp_path / "output.svg"),
+            "--max-file-size",
+            "10000000",
+            "--timeout",
+            "30",
+            "--max-layer-depth",
+            "50",
+            "--max-image-dimension",
+            "8192",
+        )
+
+        assert len(captured) == 1
+        assert captured[0].max_file_size == 10000000
+        assert captured[0].timeout == 30
+        assert captured[0].max_layer_depth == 50
+        assert captured[0].max_image_dimension == 8192
+
+    def test_unlimited_flag_reaches_convert(
+        self, run_cli: CLIRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Test --unlimited-resources disables every limit convert() receives."""
+        captured: list[ResourceLimits] = []
+
+        def spy(*args: object, **kwargs: object) -> None:
+            limits = kwargs["resource_limits"]
+            assert isinstance(limits, ResourceLimits)
+            captured.append(limits)
+
+        monkeypatch.setattr("psd2svg.__main__.convert", spy)
+
+        run_cli(
+            get_fixture("layer-types/pixel-layer.psd"),
+            str(tmp_path / "output.svg"),
+            "--unlimited-resources",
+        )
+
+        assert captured == [ResourceLimits.unlimited()]
 
 
 class TestCLIConflictDetection:
     """Tests for conflict detection between CLI flags."""
 
-    def test_unlimited_conflicts_with_max_file_size(self, tmp_path: Path) -> None:
+    def test_unlimited_conflicts_with_max_file_size(
+        self, run_cli: CLIRunner, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
         """Test --unlimited-resources conflicts with --max-file-size."""
-
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
+        with pytest.raises(SystemExit) as excinfo:
+            run_cli(
+                get_fixture("layer-types/pixel-layer.psd"),
+                str(tmp_path / "output.svg"),
                 "--unlimited-resources",
                 "--max-file-size",
                 "10000000",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 2  # Argument error
-        assert "--unlimited-resources conflicts with" in result.stderr
-        assert "--max-file-size" in result.stderr
+            )
+        assert excinfo.value.code == 2  # Argument error
 
-    def test_unlimited_conflicts_with_timeout(self, tmp_path: Path) -> None:
+        # Assert the whole line: argparse prints a usage block listing every
+        # option, so a bare flag-name check would pass off that alone.
+        err = capsys.readouterr().err
+        assert "--unlimited-resources conflicts with: --max-file-size" in err
+
+    def test_unlimited_conflicts_with_timeout(
+        self, run_cli: CLIRunner, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
         """Test --unlimited-resources conflicts with --timeout."""
-
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
+        with pytest.raises(SystemExit) as excinfo:
+            run_cli(
+                get_fixture("layer-types/pixel-layer.psd"),
+                str(tmp_path / "output.svg"),
                 "--unlimited-resources",
                 "--timeout",
                 "30",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 2
-        assert "--unlimited-resources conflicts with" in result.stderr
-        assert "--timeout" in result.stderr
+            )
+        assert excinfo.value.code == 2
 
-    def test_unlimited_conflicts_with_multiple_flags(self, tmp_path: Path) -> None:
+        err = capsys.readouterr().err
+        assert "--unlimited-resources conflicts with: --timeout" in err
+
+    def test_unlimited_conflicts_with_multiple_flags(
+        self, run_cli: CLIRunner, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
         """Test --unlimited-resources conflicts with multiple limit flags."""
-
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
+        with pytest.raises(SystemExit) as excinfo:
+            run_cli(
+                get_fixture("layer-types/pixel-layer.psd"),
+                str(tmp_path / "output.svg"),
                 "--unlimited-resources",
                 "--max-file-size",
                 "10000000",
                 "--timeout",
                 "30",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 2
-        assert "--unlimited-resources conflicts with" in result.stderr
+            )
+        assert excinfo.value.code == 2
+
         # Should list both conflicting flags
-        assert "--max-file-size" in result.stderr
-        assert "--timeout" in result.stderr
+        err = capsys.readouterr().err
+        assert "--unlimited-resources conflicts with: --max-file-size, --timeout" in err
 
-    def test_limit_flags_without_unlimited_succeeds(self, tmp_path: Path) -> None:
+    def test_limit_flags_without_unlimited_succeeds(
+        self, run_cli: CLIRunner, tmp_path: Path
+    ) -> None:
         """Test limit flags without --unlimited-resources are valid."""
+        output_path = tmp_path / "output.svg"
 
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
-                "--max-file-size",
-                "10000000",
-                "--timeout",
-                "30",
-                "--max-layer-depth",
-                "50",
-            ],
-            capture_output=True,
-            text=True,
+        run_cli(
+            get_fixture("layer-types/pixel-layer.psd"),
+            str(output_path),
+            "--max-file-size",
+            "10000000",
+            "--timeout",
+            "30",
+            "--max-layer-depth",
+            "50",
         )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
+        assert output_path.exists()
 
 
 class TestCLIPrecedence:
     """Tests for CLI flag precedence over environment variables."""
 
-    def test_cli_flag_overrides_env_var_max_file_size(self, tmp_path: Path) -> None:
+    def test_cli_flag_overrides_env_var_max_file_size(
+        self, run_cli: CLIRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Test --max-file-size overrides PSD2SVG_MAX_FILE_SIZE."""
-
         input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
+        output_path = tmp_path / "output.svg"
 
         # Set env var to very low value that would fail
-        env = os.environ.copy()
-        env["PSD2SVG_MAX_FILE_SIZE"] = "100"
+        monkeypatch.setenv("PSD2SVG_MAX_FILE_SIZE", "100")
 
         # Override with CLI flag to allow conversion
         file_size = os.path.getsize(input_path)
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
-                "--max-file-size",
-                str(file_size + 1000),
-            ],
-            capture_output=True,
-            text=True,
-            env=env,
+        run_cli(
+            input_path,
+            str(output_path),
+            "--max-file-size",
+            str(file_size + 1000),
         )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
+        assert output_path.exists()
 
-    def test_cli_flag_zero_overrides_env_var(self, tmp_path: Path) -> None:
+    def test_cli_flag_zero_overrides_env_var(
+        self, run_cli: CLIRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Test CLI flag with 0 (disabled) overrides env var."""
-
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
+        output_path = tmp_path / "output.svg"
 
         # Set env var to very low value
-        env = os.environ.copy()
-        env["PSD2SVG_MAX_FILE_SIZE"] = "100"
+        monkeypatch.setenv("PSD2SVG_MAX_FILE_SIZE", "100")
 
         # Override with 0 to disable limit
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
-                "--max-file-size",
-                "0",
-            ],
-            capture_output=True,
-            text=True,
-            env=env,
+        run_cli(
+            get_fixture("layer-types/pixel-layer.psd"),
+            str(output_path),
+            "--max-file-size",
+            "0",
         )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
+        assert output_path.exists()
 
-    def test_cli_flag_negative_clamped_to_zero(self, tmp_path: Path) -> None:
+    def test_cli_flag_negative_clamped_to_zero(
+        self,
+        run_cli: CLIRunner,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         """Test CLI flag with negative value is clamped to 0."""
+        output_path = tmp_path / "output.svg"
 
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
+        # Env var alone would reject the fixture, so the run only succeeds if
+        # the negative CLI value overrides it and is clamped to 0 (disabled).
+        monkeypatch.setenv("PSD2SVG_MAX_FILE_SIZE", "100")
 
-        # Negative value should be clamped to 0 (disabled)
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
+        with caplog.at_level(logging.WARNING, logger="psd2svg.resource_limits"):
+            run_cli(
+                get_fixture("layer-types/pixel-layer.psd"),
+                str(output_path),
                 "--max-file-size",
                 "-100",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
+            )
+        assert output_path.exists()
+        # A limit of 0 and a limit of -100 are both "disabled", so the warning
+        # is the only observable proof the clamp happened.
+        assert "--max-file-size=-100" in caplog.text
+        assert "treating as 0" in caplog.text
 
-    def test_env_var_used_when_cli_flag_not_provided(self, tmp_path: Path) -> None:
+    def test_env_var_used_when_cli_flag_not_provided(
+        self, run_cli: CLIRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Test environment variable is used when CLI flag not provided."""
-
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        # Set env var to disable limit
-        env = os.environ.copy()
-        env["PSD2SVG_MAX_FILE_SIZE"] = "0"
+        # A limit below the fixture size, so the env var changes the outcome.
+        monkeypatch.setenv("PSD2SVG_MAX_FILE_SIZE", "100")
 
         # Don't provide CLI flag - env var should be used
-        result = subprocess.run(
-            ["uv", "run", "python", "-m", "psd2svg", input_path, output_path],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
+        with pytest.raises(ValueError, match="File size .* exceeds limit"):
+            run_cli(
+                get_fixture("layer-types/pixel-layer.psd"),
+                str(tmp_path / "output.svg"),
+            )
 
-    def test_unlimited_overrides_all(self, tmp_path: Path) -> None:
+    def test_unlimited_overrides_all(
+        self, run_cli: CLIRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Test --unlimited-resources overrides env vars and defaults."""
+        output_path = tmp_path / "output.svg"
 
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        # Set env vars with limits
-        env = os.environ.copy()
-        env["PSD2SVG_TIMEOUT"] = "1"  # Very short timeout
+        # Set env vars with limits that would reject the fixture
+        monkeypatch.setenv("PSD2SVG_MAX_FILE_SIZE", "100")
+        monkeypatch.setenv("PSD2SVG_TIMEOUT", "1")
 
         # Override with unlimited
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
-                "--unlimited-resources",
-            ],
-            capture_output=True,
-            text=True,
-            env=env,
+        run_cli(
+            get_fixture("layer-types/pixel-layer.psd"),
+            str(output_path),
+            "--unlimited-resources",
         )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
+        assert output_path.exists()
 
 
 class TestCLIResourceLimitIntegration:
     """Integration tests for CLI resource limits with actual conversion."""
 
-    def test_cli_conversion_with_custom_file_size_limit(self, tmp_path: Path) -> None:
-        """Test CLI conversion with custom --max-file-size."""
-
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        file_size = os.path.getsize(input_path)
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
-                "--max-file-size",
-                str(file_size + 1000),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
-
-    def test_cli_conversion_with_unlimited(self, tmp_path: Path) -> None:
-        """Test CLI conversion with --unlimited-resources."""
-
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
-                "--unlimited-resources",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
-
-    def test_cli_conversion_exceeds_file_size_limit(self, tmp_path: Path) -> None:
-        """Test CLI conversion fails when file exceeds limit."""
-
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        # Set very low limit
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
+    def test_cli_conversion_exceeds_file_size_limit(
+        self, run_cli: CLIRunner, tmp_path: Path
+    ) -> None:
+        """Test conversion fails with guidance when file exceeds limit (#236)."""
+        with pytest.raises(
+            ValueError, match="File size .* exceeds limit .* PSD2SVG_MAX_FILE_SIZE"
+        ):
+            run_cli(
+                get_fixture("layer-types/pixel-layer.psd"),
+                str(tmp_path / "output.svg"),
                 "--max-file-size",
                 "100",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode != 0
-        assert "File size" in result.stderr
-        assert "exceeds limit" in result.stderr
-
-    def test_cli_error_message_includes_guidance(self, tmp_path: Path) -> None:
-        """Test error messages include helpful guidance (issue #236)."""
-
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
-
-        # Trigger file size error
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "psd2svg",
-                input_path,
-                output_path,
-                "--max-file-size",
-                "100",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode != 0
-        # Verify enhanced error messages from commit 50dc280
-        assert (
-            "PSD2SVG_MAX_FILE_SIZE" in result.stderr
-            or "ResourceLimits" in result.stderr
-        )
+            )
 
     def test_cli_without_resource_limit_flags_uses_defaults(
-        self, tmp_path: Path
+        self, run_cli: CLIRunner, tmp_path: Path
     ) -> None:
         """Test CLI without new flags uses default limits (backward compat)."""
-
-        input_path = get_fixture("layer-types/pixel-layer.psd")
-        output_path = str(tmp_path / "output.svg")
+        output_path = tmp_path / "output.svg"
 
         # Run without any resource limit flags
+        run_cli(get_fixture("layer-types/pixel-layer.psd"), str(output_path))
+        assert output_path.exists()
+
+
+SUBPROCESS_TIMEOUT = 120
+
+
+class TestCLIEntryPoints:
+    """Tests that the installed package is invocable as a program.
+
+    These spawn a real process, which the tests above deliberately do not. Use
+    ``sys.executable``, never ``uv``: a nested ``uv run`` re-resolves the
+    lockfile and syncs the environment while the suite is running.
+    """
+
+    def test_module_entry_point_converts(self, tmp_path: Path) -> None:
+        """Test ``python -m psd2svg`` resolves __main__ and converts."""
+        output_path = tmp_path / "output.svg"
+
         result = subprocess.run(
-            ["uv", "run", "python", "-m", "psd2svg", input_path, output_path],
+            [
+                sys.executable,
+                "-m",
+                "psd2svg",
+                get_fixture("layer-types/pixel-layer.psd"),
+                str(output_path),
+            ],
             capture_output=True,
             text=True,
+            timeout=SUBPROCESS_TIMEOUT,
         )
-        assert result.returncode == 0
-        assert os.path.exists(output_path)
+        assert result.returncode == 0, result.stderr
+        assert output_path.exists()
+
+    def test_console_script_converts(self, tmp_path: Path) -> None:
+        """Test the installed ``psd2svg`` console script converts."""
+        suffix = ".exe" if os.name == "nt" else ""
+        console_script = Path(sysconfig.get_path("scripts")) / f"psd2svg{suffix}"
+        assert console_script.exists(), f"console script missing: {console_script}"
+
+        output_path = tmp_path / "output.svg"
+
+        result = subprocess.run(
+            [
+                str(console_script),
+                get_fixture("layer-types/pixel-layer.psd"),
+                str(output_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+        assert result.returncode == 0, result.stderr
+        assert output_path.exists()
+
+    def test_exceeded_limit_exits_nonzero_with_message(self, tmp_path: Path) -> None:
+        """Test a limit breach exits non-zero and explains itself on stderr.
+
+        ``convert()`` raises ValueError out of ``main()`` uncaught, so only a
+        real process shows the exit code and traceback the user sees.
+        """
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "psd2svg",
+                get_fixture("layer-types/pixel-layer.psd"),
+                str(tmp_path / "output.svg"),
+                "--max-file-size",
+                "100",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+        assert result.returncode != 0
+        assert "exceeds limit" in result.stderr
+        assert "PSD2SVG_MAX_FILE_SIZE" in result.stderr
 
 
 class TestFromCLIArgs:
