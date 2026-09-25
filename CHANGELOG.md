@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Photoshop character alignment for mixed-size text runs** (#444)
   - `StyleRunAlignment` 0, 2, 3 and 5 align runs by the em box or the Roman
-    baseline; the ideographic character face (1 and 4) is not yet supported
+    baseline; not yet applied to the ideographic character face (1 and 4), nor
+    to bounding box text outside the `<foreignObject>` text wrapping mode
 
 - **Hidden layers can be included in SVG output** (#423)
   - Pass `include_hidden_layers=True` or use `--include-hidden-layers` to

@@ -3982,25 +3982,6 @@ def test_foreignobject_character_alignment_offsets_the_span() -> None:
     assert insets == pytest.approx([-native[0]])
 
 
-def test_em_box_descent_ratio_sets_the_emitted_offsets() -> None:
-    """Test that the em box descent constant is what the offsets are built from.
-
-    Photoshop reads this fraction per font, from the ideographic baseline in the
-    font's BASE table; conversion never opens a font, so one constant stands in
-    for it. Rather than restate its value, this pins the relation the fixtures
-    were measured against: em box bottom alignment offsets a run by the descent
-    fraction of the size difference, and em box top by the rest of it.
-    """
-    difference = 64.0 - 32.0
-    bottom = _shift_for(
-        StyleRunAlignment.BOTTOM, WritingDirection.HORIZONTAL_TB, 32.0, 64.0
-    )
-    top = _shift_for(StyleRunAlignment.TOP, WritingDirection.HORIZONTAL_TB, 32.0, 64.0)
-    assert bottom == pytest.approx(-EM_BOX_DESCENT_RATIO * difference)
-    assert top == pytest.approx((1.0 - EM_BOX_DESCENT_RATIO) * difference)
-    assert top - bottom == pytest.approx(difference)
-
-
 def test_character_alignment_defaults_differ_by_writing_direction() -> None:
     """Test that each writing direction emits nothing for its own default.
 
@@ -4026,12 +4007,9 @@ def test_character_alignment_defaults_differ_by_writing_direction() -> None:
 def test_character_alignment_skips_native_box_text() -> None:
     """Test that native box text keeps the position it has today.
 
-    Box text is placed by a hanging ``dominant-baseline``, which already aligns
-    runs of different sizes by their hanging baseline. Adding an offset measured
-    from the Roman baseline on top of that moves the run further from Photoshop
-    rather than closer, so the native path leaves box text alone and the
-    <foreignObject> path, which uses no dominant baseline, carries the feature.
-    See GitHub issue #443.
+    The hanging ``dominant-baseline`` that places box text already displaces
+    mixed-size runs, so the native path leaves them alone; see the call site in
+    ``core/text.py`` and GitHub issue #443.
     """
     svg = convert_psd_to_svg("texts/style-run-alignment-3-shapetype1.psd")
     assert svg.find('.//*[@dominant-baseline="hanging"]') is not None
@@ -4065,3 +4043,105 @@ def test_character_alignment_skips_scripts() -> None:
     assert shifts[0] == pytest.approx(
         32.0 * text_setting.superscript_position, abs=0.01
     ), "Script runs carry the script offset alone"
+
+
+def test_character_alignment_ignores_icf_modes() -> None:
+    """Test that the ICF modes produce no offset through a conversion.
+
+    The ideographic character face is measured per font, which conversion cannot
+    do, so those two values parse and are retained but move nothing. This uses a
+    real size difference, so it would fail if they fell through to an em box
+    reference. See GitHub issue #440.
+    """
+    for alignment in (StyleRunAlignment.ICF_BOTTOM, StyleRunAlignment.ICF_TOP):
+        for direction in (
+            WritingDirection.HORIZONTAL_TB,
+            WritingDirection.VERTICAL_RL,
+        ):
+            assert _shift_for(alignment, direction, 32.0, 64.0) == 0.0
+
+
+def test_character_alignment_ignores_runs_without_an_em_box() -> None:
+    """Test that a run of no size is not offset.
+
+    A span whose font size is zero or negative draws nothing, so offsetting it
+    would put most of the reference size on an invisible run.
+    """
+    for font_size in (0.0, -32.0):
+        assert (
+            _shift_for(
+                StyleRunAlignment.TOP,
+                WritingDirection.HORIZONTAL_TB,
+                font_size,
+                64.0,
+            )
+            == 0.0
+        )
+
+
+def test_character_alignment_is_scoped_to_the_paragraph() -> None:
+    """Test that a run does not align to a larger run in another paragraph.
+
+    ``font-sizes-1.psd`` carries four sizes, 16 through 24, one per paragraph
+    and one run each. Each paragraph is its own reference, so nothing moves; a
+    reference taken across the layer would offset three of the four.
+    """
+    _, text_setting = _first_text_setting("texts/font-sizes-1.psd")
+    paragraphs = list(text_setting)
+    sizes = [
+        {span.style.font_size for span in para if span.text.strip("\r")}
+        for para in paragraphs
+    ]
+    assert len(paragraphs) > 1
+    assert all(len(sizes_in_paragraph) == 1 for sizes_in_paragraph in sizes)
+    assert len({next(iter(s)) for s in sizes if s}) > 1, (
+        "Fixture should carry different sizes across paragraphs"
+    )
+
+    assert _emitted_baseline_shifts("texts/font-sizes-1.psd") == []
+
+
+def test_character_alignment_leaves_equal_sized_runs_alone_end_to_end() -> None:
+    """Test that a converted layer of equally sized runs gains no offset."""
+    _, text_setting = _first_text_setting(
+        "texts/paragraph-shapetype1-multiple-spans.psd"
+    )
+    spans = [span for para in text_setting for span in para if span.text.strip("\r")]
+    assert len(spans) > 1
+    assert len({span.style.font_size for span in spans}) == 1
+
+    assert (
+        _emitted_baseline_shifts("texts/paragraph-shapetype1-multiple-spans.psd") == []
+    )
+
+
+def test_foreignobject_character_alignment_in_vertical_writing() -> None:
+    """Test that the foreignObject path offsets vertical runs the right way.
+
+    The inset points towards the start of the block axis, which is the right
+    edge in vertical-rl, so it runs against the shift exactly as it does in
+    horizontal writing. This is the combination the docs steer box-text users
+    towards, so the sign is worth pinning.
+    """
+    fixture = "texts/style-run-alignment-3-writingdirection2.psd"
+    psdimage = PSDImage.open(get_fixture(fixture))
+    layer = next(
+        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
+    )
+    text_setting = TypeSetting(layer._data)
+    assert text_setting.writing_direction == WritingDirection.VERTICAL_RL
+
+    converter = Converter(psdimage)
+    paragraph = next(iter(text_setting))
+    reference = converter._alignment_reference_size(paragraph, text_setting)
+    smaller = min(paragraph.spans, key=lambda span: span.style.font_size)
+    shift = converter._character_alignment_shift(smaller, text_setting, reference)
+    assert shift == pytest.approx(-12.16)
+
+    styles = converter._get_foreign_object_span_styles(
+        smaller, text_setting, paragraph, reference
+    )
+    assert styles["position"] == "relative"
+    assert float(styles["inset-block-start"].removesuffix("px")) == pytest.approx(
+        -shift
+    )

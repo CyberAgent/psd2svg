@@ -320,8 +320,7 @@ When ``enable_text=True`` (default), text layers are converted to native SVG ``<
   family has one, instead of shearing the specified face)
 * Character alignment against the ideographic character face, ``StyleRunAlignment``
   1 and 4 (`#440 <https://github.com/CyberAgent/psd2svg/issues/440>`_)
-* Character alignment of mixed-size runs in bounding box text, which the
-  hanging baseline that positions it aligns instead; enable the
+* Character alignment of mixed-size runs in native bounding box text; enable the
   ``<foreignObject>`` text wrapping mode for those layers
   (`#443 <https://github.com/CyberAgent/psd2svg/issues/443>`_)
 * Character alignment uses one em box descent for every face, the 88/12 box that
@@ -509,6 +508,8 @@ psd2svg therefore encodes the scaling in the ``font-size`` and in a transform on
 **Impact:**
 
 Only the last case is approximate, and only where the residual transform stays on the ``<tspan>``. Glyph advance widths, the position of the following characters and center/right alignment all match Photoshop, but renderers that ignore ``transform`` on ``<tspan>`` draw the run without the cross-axis scaling: glyphs of a horizontally scaled run are as tall as they are wide, and a vertically scaled run keeps its original height. A warning is logged during conversion.
+
+Character alignment compounds this: a run aligned by its em box is positioned for the scaled cross-axis size it should have, so where the residual transform is ignored the run is drawn at its unscaled size in the position the scaled one would occupy.
 
 The per-span fallback is also used when the ``<text>`` element cannot carry the scale: warped text (``<textPath>``, where the transform would distort the warp path), Justify All paragraphs (where the transform would stretch the ``textLength``, and where ``lengthAdjust`` squeezes the scaled glyphs back to that length anyway), and paragraphs whose inline-axis anchor points differ. Multi-paragraph vertical text can use layer-wide scaling when all spans share the same scale and the paragraphs share an inline-axis anchor; its leftward column offsets lie on the unscaled cross axis. Warped text drops the cross-axis ``transform`` altogether, since text on a path has no baseline to anchor it at. Strong arc warps additionally set ``textLength="100%"`` on the ``<textPath>`` to match Photoshop, which stretches the run to the path length and so discards the inline-axis scaling as well.
 

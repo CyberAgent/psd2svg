@@ -17,6 +17,7 @@ Key features:
 - Vertical and horizontal text direction
 - Letter spacing, tracking, and kerning
 - Font effects (superscript, subscript, small caps)
+- Character alignment of mixed-size runs on a line
 
 Note: This module re-exports TypeSetting and TextWrappingMode for backward
       compatibility. New code should import these directly from
@@ -73,16 +74,14 @@ FAUX_BOLD_STROKE_RATIO = 0.03
 # baseline sits inside that box. Photoshop reads this per font, from the
 # ideographic baseline in the font's BASE table, but conversion never opens a
 # font (see docs/technical-notes.rst), so a single constant stands in for it.
-# 0.12 is the 88/12 em box that Japanese faces are drawn to, and character
-# alignment is an East-Asian feature. Measured against Photoshop with a 152px
-# and a 20px run, it is exact for Noto Sans CJK JP, whose BASE table gives
-# -120/1000, and approximate for faces built to other proportions: Arial, which
-# has no BASE table, behaves as about 0.146. A short size gap appears to support
-# 0.125 instead, because a fixed sub-pixel raster bias is divided by that gap.
+# 0.12 is the 88/12 em box that Japanese faces are drawn to, which is what
+# character alignment exists for: it is exact for Noto Sans CJK JP, whose BASE
+# table gives -120/1000, and approximate for faces built to other proportions,
+# such as Arial, which has no BASE table and behaves as about 0.146.
 #
 # The size this is a fraction of is the em box across the writing direction,
-# vertical scale included; see :meth:`TextConverter._cross_axis_em`. See GitHub
-# issue #439.
+# vertical scale included; see :meth:`TextConverter._cross_axis_em`. GitHub
+# issue #439 records the measurements.
 EM_BOX_DESCENT_RATIO = 0.12
 
 
@@ -154,7 +153,8 @@ def _default_em_fraction(writing_direction: WritingDirection) -> float:
     on the em box instead, the central baseline that SVG and CSS both make the
     default there. A mode asking for the point SVG already uses needs nothing
     emitted, so the Roman baseline is free in horizontal writing and the em box
-    centre is free in vertical writing.
+    centre is free in vertical writing. Which stored value that is differs
+    between the two; see :class:`~psd2svg.core.typesetting.StyleRunAlignment`.
     """
     if writing_direction == WritingDirection.HORIZONTAL_TB:
         return EM_BOX_DESCENT_RATIO
@@ -1322,11 +1322,11 @@ class TextConverter(ConverterProtocol):
         another line is placed as if that run were present.
 
         A paragraph break draws nothing and carries the default size, so it must
-        not be the run that is measured.
+        not be the run that is measured. A paragraph with nothing else in it
+        aligns nothing, unlike :meth:`_line_box_span`, which still has to name a
+        font for it.
         """
         spans = [span for span in paragraph.spans if span.text.strip("\r")]
-        if not spans:
-            spans = paragraph.spans
         if not spans:
             return 0.0
         return max(self._cross_axis_em(span, text_setting) for span in spans)
@@ -1361,9 +1361,13 @@ class TextConverter(ConverterProtocol):
         )
         if fraction is None:
             return 0.0
+        # A run with no em box has nothing to align, and draws nothing either,
+        # so it must not take the whole reference size as its offset.
+        em = self._cross_axis_em(span, text_setting)
+        if em <= 0.0:
+            return 0.0
         default = _default_em_fraction(text_setting.writing_direction)
-        difference = reference_size - self._cross_axis_em(span, text_setting)
-        return (fraction - default) * difference
+        return (fraction - default) * (reference_size - em)
 
     def _get_foreign_object_container_styles(
         self, text_setting: TypeSetting, bounds: Rectangle
@@ -1428,9 +1432,15 @@ class TextConverter(ConverterProtocol):
             style=svg_utils.styles_to_string(p_styles),
         )
 
-        # Add spans
+        # Add spans. The reference size is the same for every span of the
+        # paragraph, so it is computed once here rather than per span.
+        alignment_reference_size = self._alignment_reference_size(
+            paragraph, text_setting
+        )
         for span in paragraph:
-            self._add_foreign_object_span(p_elem, span, text_setting, paragraph)
+            self._add_foreign_object_span(
+                p_elem, span, text_setting, paragraph, alignment_reference_size
+            )
 
     def _foreign_object_font_size(self, span: Span, text_setting: TypeSetting) -> float:
         """Return the font size a span renders at in the foreignObject output.
@@ -1642,6 +1652,7 @@ class TextConverter(ConverterProtocol):
         span: Span,
         text_setting: TypeSetting,
         paragraph: Paragraph,
+        alignment_reference_size: float | None = None,
     ) -> None:
         """Add a text span as XHTML <span> element.
 
@@ -1650,10 +1661,13 @@ class TextConverter(ConverterProtocol):
             span: Span object containing text and style.
             text_setting: TypeSetting object for font info lookup.
             paragraph: Parent paragraph object for accessing line-height.
+            alignment_reference_size: Largest em box in the paragraph, which
+                character alignment aligns this span to, or None to leave the
+                span where CSS puts it.
         """
         # Get span CSS styles
         span_styles = self._get_foreign_object_span_styles(
-            span, text_setting, paragraph
+            span, text_setting, paragraph, alignment_reference_size
         )
 
         # Create <span> element
@@ -1681,7 +1695,11 @@ class TextConverter(ConverterProtocol):
             )
 
     def _get_foreign_object_span_styles(
-        self, span: Span, text_setting: TypeSetting, paragraph: Paragraph
+        self,
+        span: Span,
+        text_setting: TypeSetting,
+        paragraph: Paragraph,
+        alignment_reference_size: float | None = None,
     ) -> dict[str, str]:
         """Convert span style settings to CSS styles.
 
@@ -1689,6 +1707,9 @@ class TextConverter(ConverterProtocol):
             span: Span object containing text style information.
             text_setting: TypeSetting object for font info and calculations.
             paragraph: Parent paragraph object for accessing line-height.
+            alignment_reference_size: Largest em box in the paragraph, which
+                character alignment aligns this span to, or None to leave the
+                span where CSS puts it.
 
         Returns:
             Dictionary of CSS property names to values.
@@ -1774,7 +1795,7 @@ class TextConverter(ConverterProtocol):
         # Character alignment moves the run across the writing direction too, so
         # it is summed in rather than emitted as a second offset.
         baseline_shift = self._character_alignment_shift(
-            span, text_setting, self._alignment_reference_size(paragraph, text_setting)
+            span, text_setting, alignment_reference_size
         )
         if style.font_baseline == FontBaseline.SUPERSCRIPT:
             baseline_shift += scaling.baseline_size * text_setting.superscript_position
