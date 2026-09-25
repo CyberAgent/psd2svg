@@ -329,8 +329,7 @@ class SVGDocument:
             optimize=optimize,
             svg_filepath=filepath,
         )
-        with open(filepath, "w", encoding="utf-8") as f:
-            svg_utils.write(svg, f, indent=indent)
+        svg_utils.write(svg, filepath, indent=indent)
 
     def rasterize(
         self,

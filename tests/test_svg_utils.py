@@ -3,6 +3,7 @@
 import io
 import re
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import SupportsFloat
 
 import numpy
@@ -1749,8 +1750,7 @@ def _xhtml_tree() -> tuple[ET.Element, ET.Element]:
     return svg, paragraph
 
 
-# write() keeps the html: prefix that tostring() strips, so match either.
-_ADJACENT_SPANS = re.compile(r"</(?:\w+:)?span>\s+<(?:\w+:)?span")
+_ADJACENT_SPANS = re.compile(r"</span>\s+<span")
 
 
 @pytest.mark.parametrize("indent", ["  ", ""])
@@ -1776,6 +1776,35 @@ def test_write_keeps_xhtml_spans_adjacent() -> None:
     svg_utils.write(svg, stream)
 
     assert _ADJACENT_SPANS.search(stream.getvalue()) is None, stream.getvalue()
+
+
+def test_write_matches_tostring() -> None:
+    """A written file holds exactly the markup tostring() returns.
+
+    Both go through the same XHTML prefix removal, so a <foreignObject> is
+    written unprefixed. Chromium ignores margin-block-start on an
+    html:-prefixed element, which drops the paragraph strut compensation.
+    See GitHub issue #433.
+    """
+    expected = svg_utils.tostring(_xhtml_tree()[0])
+
+    stream = io.StringIO()
+    svg_utils.write(_xhtml_tree()[0], stream)
+
+    assert stream.getvalue() == expected
+    assert "html:" not in expected, expected
+    assert f'<div xmlns="{svg_utils.XHTML_NAMESPACE}">' in expected, expected
+
+
+def test_write_accepts_a_path(tmp_path: Path) -> None:
+    """A filename is opened as UTF-8 text, as an open file object would be."""
+    svg, paragraph = _xhtml_tree()
+    paragraph[0].text = "\u00e9\u3042"
+    destination = tmp_path / "out.svg"
+
+    svg_utils.write(svg, destination)
+
+    assert destination.read_text(encoding="utf-8") == svg_utils.tostring(svg)
 
 
 @pytest.mark.parametrize("content", [" ", "   ", "\t", "\xa0\xa0"])
