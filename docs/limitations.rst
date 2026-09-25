@@ -296,6 +296,8 @@ When ``enable_text=True`` (default), text layers are converted to native SVG ``<
 * Text transformation (all-caps, small-caps)
 * Superscript and subscript with accurate positioning
 * Baseline shift for custom vertical positioning
+* Character alignment (mojisoroe) of mixed-size runs, by em box top, centre
+  or bottom and by Roman baseline
 * Letter spacing (tracking)
 * Kerning: Manual kerning adjustments (per-character pairs) and automatic metrics-based kerning (browser default)
 * Tsume (East Asian character tightening)
@@ -316,6 +318,16 @@ When ``enable_text=True`` (default), text layers are converted to native SVG ``<
   the thickening underlies it, darkening the stem interior
 * Faux italic slant (``font-style: italic`` selects a real italic face where the
   family has one, instead of shearing the specified face)
+* Character alignment against the ideographic character face, ``StyleRunAlignment``
+  1 and 4 (`#440 <https://github.com/CyberAgent/psd2svg/issues/440>`_)
+* Character alignment of mixed-size runs in bounding box text, which the
+  hanging baseline that positions it aligns instead; enable the
+  ``<foreignObject>`` text wrapping mode for those layers
+  (`#443 <https://github.com/CyberAgent/psd2svg/issues/443>`_)
+* Character alignment uses one em box descent for every face, the 88/12 box that
+  Japanese faces are drawn to, because conversion reads no font metrics; faces
+  built to other proportions are offset approximately
+  (`#439 <https://github.com/CyberAgent/psd2svg/issues/439>`_)
 
 **Text Warp Effects (Experimental):**
 

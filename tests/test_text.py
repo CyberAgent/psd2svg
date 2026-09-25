@@ -13,8 +13,11 @@ from psd_tools.api.layers import TypeLayer
 from psd2svg import SVGDocument
 from psd2svg.core.converter import Converter
 from psd2svg.core.text import (
+    EM_BOX_DESCENT_RATIO,
     TextWrappingMode,
+    _alignment_em_fraction,
     _common_span_scale,
+    _default_em_fraction,
     _isolate_trailing_letter_spacing,
 )
 from psd2svg.core.typesetting import (
@@ -22,6 +25,7 @@ from psd2svg.core.typesetting import (
     Paragraph,
     ParagraphSheet,
     Span,
+    StyleRunAlignment,
     StyleSheet,
     TypeSetting,
     WritingDirection,
@@ -3716,3 +3720,228 @@ def test_unsupported_text_color_falls_back_to_default(
         assert stroke_style.stroke_color == (0.0, 0.0, 0.0, 0.0)
         assert stroke_style.get_stroke_color() == "none"
     assert "Unsupported text color" in caplog.text
+
+
+def _emitted_baseline_shifts(psd_file: str) -> list[float]:
+    """Return every baseline-shift the conversion emits, in document order."""
+    svg = convert_psd_to_svg(psd_file)
+    return [
+        float(value)
+        for node in svg.iter()
+        if (value := node.attrib.get("baseline-shift")) is not None
+    ]
+
+
+# Photoshop's own offsets for the character-alignment fixtures, which all put a
+# 64px and a 32px run on one line. Aligning two em boxes by the same fraction of
+# their height leaves the smaller run's baseline
+# (fraction - EM_BOX_DESCENT_RATIO) * 32 from the larger one's, so em box bottom
+# gives -3.84, the centre +12.16 and the top +28.16.
+@pytest.mark.parametrize(
+    ("fixture", "expected"),
+    [
+        ("texts/style-run-alignment-0.psd", [-3.84]),
+        ("texts/style-run-alignment-2.psd", []),
+        ("texts/style-run-alignment-3.psd", [12.16]),
+        ("texts/style-run-alignment-5.psd", [28.16]),
+        ("texts/style-run-alignment-3-baseline-shift.psd", [20.16]),
+        ("texts/style-run-alignment-2-writingdirection2.psd", []),
+        ("texts/style-run-alignment-3-writingdirection2.psd", [-12.16]),
+        ("texts/style-run-alignment-vertical-scale.psd", [-3.84]),
+    ],
+)
+def test_character_alignment_offsets(fixture: str, expected: list[float]) -> None:
+    """Test that each StyleRunAlignment mode offsets the smaller run correctly.
+
+    The reference run is the largest one, which keeps its own baseline, so a
+    two-run fixture emits exactly one offset. Modes that align on the Roman
+    baseline emit none at all, because that is where SVG already puts the run.
+    See GitHub issue #439.
+    """
+    assert _emitted_baseline_shifts(fixture) == pytest.approx(expected)
+
+
+def test_character_alignment_leaves_the_roman_baseline_alone() -> None:
+    """Test that Roman-baseline alignment emits nothing in either direction.
+
+    Values 2 and 3 swap meaning between the writing directions: 2 is the Roman
+    baseline in horizontal text and 3 is in vertical text. Each is the SVG
+    default, so the conversion has nothing to emit, while its counterpart in the
+    same direction aligns em boxes and does.
+    """
+    assert _emitted_baseline_shifts("texts/style-run-alignment-2.psd") == []
+    assert _emitted_baseline_shifts("texts/style-run-alignment-3.psd") != []
+    # Vertical text is centred on the em box by default, not rested on the Roman
+    # baseline, so it is the em box centre that costs nothing there.
+    assert (
+        _emitted_baseline_shifts("texts/style-run-alignment-2-writingdirection2.psd")
+        == []
+    )
+    assert (
+        _emitted_baseline_shifts("texts/style-run-alignment-3-writingdirection2.psd")
+        != []
+    )
+
+
+def test_character_alignment_composes_with_baseline_shift() -> None:
+    """Test that an authored BaselineShift adds to the alignment offset.
+
+    Both move the run across the writing direction, so they are summed into one
+    attribute rather than emitted as two offsets that a renderer could
+    accumulate. The fixture pairs em box centre alignment (+12.16) with an
+    authored 8px shift.
+    """
+    aligned = _emitted_baseline_shifts("texts/style-run-alignment-3.psd")
+    composed = _emitted_baseline_shifts(
+        "texts/style-run-alignment-3-baseline-shift.psd"
+    )
+    assert aligned == pytest.approx([12.16])
+    assert composed == pytest.approx([20.16])
+    assert composed[0] - aligned[0] == pytest.approx(8.0)
+
+
+def test_character_alignment_reference_follows_vertical_scale() -> None:
+    """Test that the alignment reference is the em box, not the font size.
+
+    Both runs of the fixture carry FontSize 64 and differ only in
+    VerticalScale, so a reference taken from FontSize would leave them level.
+    Photoshop offsets the scaled run, because vertical scale resizes the em box
+    it is aligned by.
+    """
+    _, text_setting = _first_text_setting(
+        "texts/style-run-alignment-vertical-scale.psd"
+    )
+    sizes = {span.style.font_size for para in text_setting for span in para}
+    assert sizes == {64.0}, "Fixture must isolate VerticalScale from FontSize"
+
+    assert _emitted_baseline_shifts(
+        "texts/style-run-alignment-vertical-scale.psd"
+    ) == pytest.approx([-3.84])
+
+
+def test_character_alignment_ignores_equal_sized_runs() -> None:
+    """Test that runs of one size are untouched, whatever the alignment is.
+
+    The offset is proportional to the difference between a run's em box and the
+    largest one on the line, so a paragraph of one size has nothing to align.
+    """
+    _, text_setting = _first_text_setting(
+        "texts/paragraph-shapetype1-multiple-spans.psd"
+    )
+    spans = [span for para in text_setting for span in para if span.text.strip("\r")]
+    assert len({span.style.font_size for span in spans}) == 1
+    assert len(spans) > 1, "Fixture should have several runs of the same size"
+
+    assert (
+        _emitted_baseline_shifts("texts/paragraph-shapetype1-multiple-spans.psd") == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("alignment", "horizontal", "vertical"),
+    [
+        (StyleRunAlignment.EM_BOX_BOTTOM, 0.0, 0.0),
+        (StyleRunAlignment.ICF_BOTTOM, None, None),
+        (StyleRunAlignment.ROMAN_BASELINE, EM_BOX_DESCENT_RATIO, 0.5),
+        (StyleRunAlignment.EM_BOX_CENTER, 0.5, EM_BOX_DESCENT_RATIO),
+        (StyleRunAlignment.ICF_TOP, None, None),
+        (StyleRunAlignment.EM_BOX_TOP, 1.0, 1.0),
+    ],
+)
+def test_alignment_em_fraction(
+    alignment: StyleRunAlignment, horizontal: float | None, vertical: float | None
+) -> None:
+    """Test the point in the em box that each alignment mode aligns runs by.
+
+    ``ROMAN_BASELINE`` and ``EM_BOX_CENTER`` trade places between the two
+    writing directions. The ICF modes are None in both, because the ideographic
+    character face is measured per font, which conversion cannot do; see GitHub
+    issue #440.
+    """
+    assert (
+        _alignment_em_fraction(alignment, WritingDirection.HORIZONTAL_TB) == horizontal
+    )
+    assert _alignment_em_fraction(alignment, WritingDirection.VERTICAL_RL) == vertical
+
+
+def test_style_run_alignment_parses_every_value() -> None:
+    """Test that all six StyleRunAlignment values are parsed and retained."""
+    for value in range(6):
+        style = StyleSheet(name="", style_sheet_data={"StyleRunAlignment": value})
+        assert style.style_run_alignment == StyleRunAlignment(value)
+    default = StyleSheet(name="", style_sheet_data={})
+    assert default.style_run_alignment == StyleRunAlignment.EM_BOX_BOTTOM
+
+
+def test_foreignobject_character_alignment_offsets_the_span() -> None:
+    """Test that the foreignObject path applies the same alignment offset.
+
+    The offset is a logical inset pointing towards the start of the block axis,
+    so it runs against the shift the native <text> path emits.
+    """
+    # The foreignObject path only handles box text, so this uses the
+    # shapetype1 fixture rather than the point-text one. The native path leaves
+    # that fixture alone, so the expected offset comes from the point-text
+    # fixture carrying the same alignment mode and sizes.
+    fixture = "texts/style-run-alignment-3-shapetype1.psd"
+    native = _emitted_baseline_shifts("texts/style-run-alignment-3.psd")
+    assert native == pytest.approx([12.16])
+
+    psdimage = PSDImage.open(get_fixture(fixture))
+    wrapped = SVGDocument.from_psd(
+        psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+    ).svg
+    insets = [
+        float(style["inset-block-start"].removesuffix("px"))
+        for span in wrapped.findall(".//{http://www.w3.org/1999/xhtml}span")
+        if "inset-block-start"
+        in (style := _parse_style_string(span.attrib.get("style", "")))
+    ]
+    assert insets == pytest.approx([-native[0]])
+
+
+def test_em_box_descent_ratio_matches_the_japanese_em_box() -> None:
+    """Test that the em box descent constant is the 88/12 Japanese em box.
+
+    Photoshop reads this per font from the ideographic baseline in the font's
+    BASE table; conversion never opens a font, so this constant stands in for
+    it. Noto Sans CJK JP, which the fixtures use, carries exactly -120/1000.
+    """
+    assert EM_BOX_DESCENT_RATIO == pytest.approx(0.12)
+
+
+def test_character_alignment_defaults_differ_by_writing_direction() -> None:
+    """Test that each writing direction emits nothing for its own default.
+
+    SVG rests horizontal text on the alphabetic baseline but centres vertical
+    text on the em box, so the mode that needs no offset is the Roman baseline
+    in horizontal writing and the em box centre in vertical writing. The same
+    stored value therefore emits an offset in one direction and not the other.
+    """
+    assert _default_em_fraction(WritingDirection.HORIZONTAL_TB) == pytest.approx(
+        EM_BOX_DESCENT_RATIO
+    )
+    assert _default_em_fraction(WritingDirection.VERTICAL_RL) == pytest.approx(0.5)
+
+    # StyleRunAlignment 2 is the Roman baseline horizontally and the em box
+    # centre vertically, which is each direction's own default.
+    assert _emitted_baseline_shifts("texts/style-run-alignment-2.psd") == []
+    assert (
+        _emitted_baseline_shifts("texts/style-run-alignment-2-writingdirection2.psd")
+        == []
+    )
+
+
+def test_character_alignment_skips_native_box_text() -> None:
+    """Test that native box text keeps the position it has today.
+
+    Box text is placed by a hanging ``dominant-baseline``, which already aligns
+    runs of different sizes by their hanging baseline. Adding an offset measured
+    from the Roman baseline on top of that moves the run further from Photoshop
+    rather than closer, so the native path leaves box text alone and the
+    <foreignObject> path, which uses no dominant baseline, carries the feature.
+    See GitHub issue #443.
+    """
+    svg = convert_psd_to_svg("texts/style-run-alignment-3-shapetype1.psd")
+    assert svg.find('.//*[@dominant-baseline="hanging"]') is not None
+    assert _emitted_baseline_shifts("texts/style-run-alignment-3-shapetype1.psd") == []
