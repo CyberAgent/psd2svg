@@ -237,7 +237,8 @@ class PlaywrightRasterizer(BaseRasterizer):
             width: {css_width}px;
             height: {css_height}px;
         }}
-        svg {{
+        /* Only the root: a nested <svg> is sized by the document. */
+        body > svg {{
             display: block;
             /* The resolved size, so a percentage on the root is not
                resolved a second time against this page. */

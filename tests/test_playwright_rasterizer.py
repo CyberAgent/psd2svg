@@ -214,6 +214,31 @@ def test_rasterizer_physical_units(size: str, expected: tuple[int, int]) -> None
 
 @requires_playwright
 @pytest.mark.parametrize(
+    ("nested_size", "expected_bbox"),
+    [
+        ('width="50" height="50"', (0, 0, 50, 50)),
+        ('width="25%" height="25%"', (0, 0, 50, 50)),
+    ],
+)
+def test_rasterizer_nested_svg_keeps_its_size(
+    nested_size: str, expected_bbox: tuple[int, int, int, int]
+) -> None:
+    """Test that only the root carries the resolved size, not a nested <svg>."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"'
+        f' viewBox="0 0 200 200"><svg x="0" y="0" {nested_size}>'
+        '<rect width="100%" height="100%" fill="red"/></svg></svg>'
+    )
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        image = rasterizer.from_string(svg)
+
+    assert image.size == (200, 200)
+    assert image.getchannel("A").getbbox() == expected_bbox
+
+
+@requires_playwright
+@pytest.mark.parametrize(
     ("root_size", "expected"),
     [
         ('width="50%" height="50%"', (50, 50)),

@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`ResvgRasterizer(dpi=0)` dropped elements sized in physical units** (#431)
 
+- **`PlaywrightRasterizer` mis-sized documents in physical units** (#431)
+  - `pt`, `mm` and `in` on the root now resolve as CSS lengths instead of
+    being read as pixels or ignored
+
 - **foreignObject spans were separated by a space** (#432)
   - The serializer no longer indents the XHTML inside a `<foreignObject>`, so a
     word split across two style runs renders as one word
