@@ -1309,8 +1309,12 @@ class TextConverter(ConverterProtocol):
             # adjacent line boxes already sit exactly one line-height apart, and
             # a second negative margin would pull every paragraph break closer
             # by half the leading.
+            # Only the first line's own content sets its line box, and where
+            # the paragraph breaks is not known without laying it out, so the
+            # largest span stands in for it. That is exact for a paragraph that
+            # fits on one line, and too small by half the size difference when
+            # the largest span wraps away from the first line.
             if first_paragraph and paragraph.spans:
-                # The line box is as tall as the largest font in the paragraph
                 font_size = max(span.style.font_size for span in paragraph.spans)
                 if leading > font_size:
                     half_leading_compensation = -(leading - font_size) / 2

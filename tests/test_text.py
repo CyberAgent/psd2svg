@@ -1312,6 +1312,40 @@ def test_text_leading_takes_the_largest_span() -> None:
     assert mixed.compute_leading() == pytest.approx(50.0)
 
 
+def test_foreignobject_compensation_uses_the_largest_span() -> None:
+    """Half-leading compensation is sized by the largest span, not the first.
+
+    The line box is as tall as the largest font on the line, so a paragraph
+    that opens with a small span still needs the compensation for the big one.
+    """
+    psdimage = PSDImage.open(
+        get_fixture("texts/paragraph-shapetype1-justification0.psd")
+    )
+    converter = Converter(psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT)
+    sheet = ParagraphSheet(name="", default_style_sheet=0, properties={})
+    paragraph = Paragraph(
+        style=sheet,
+        spans=[
+            Span(0, 5, "Lorem", StyleSheet(name="", style_sheet_data={"FontSize": 16})),
+            Span(
+                5, 10, "Ipsum", StyleSheet(name="", style_sheet_data={"FontSize": 32})
+            ),
+        ],
+    )
+
+    styles = converter._get_foreign_object_paragraph_styles(
+        paragraph, first_paragraph=True
+    )
+    # Leading is 32 * 1.2 = 38.4, so the compensation is -(38.4 - 32) / 2
+    assert styles["line-height"] == "38.4px"
+    assert styles["margin-block-start"] == "-3.2px"
+
+    # Later paragraphs never carry it, whatever their spans
+    assert "margin-block-start" not in converter._get_foreign_object_paragraph_styles(
+        paragraph, first_paragraph=False
+    )
+
+
 def test_text_auto_leading_follows_each_paragraph_font_size() -> None:
     """Each paragraph advances by its own font size, not the layer's first."""
     svg = convert_psd_to_svg("texts/font-sizes-1.psd")
