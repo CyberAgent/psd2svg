@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Stroke effects whose descriptor omits the position crashed the conversion** (#PR)
+- **Stroke effects whose descriptor omits the position crashed the conversion** (#424)
   - psd-tools now reports an omitted stroke position as `None`; it falls back
     to Photoshop's Outside default
 
