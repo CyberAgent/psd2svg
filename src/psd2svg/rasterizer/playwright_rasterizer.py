@@ -85,7 +85,8 @@ class PlaywrightRasterizer(BaseRasterizer):
         Args:
             dpi: Dots per inch for rendering. Higher values produce larger,
                 higher resolution images (e.g., 300 DPI for print quality).
-                Default is 96 DPI (standard screen resolution).
+                Default is 96 DPI (standard screen resolution); 0 also means
+                96 DPI.
             browser_type: Browser engine to use. Options are:
                 - "chromium": Best SVG support (recommended)
                 - "firefox": Good compatibility
@@ -204,13 +205,9 @@ class PlaywrightRasterizer(BaseRasterizer):
         dimensions = self._get_svg_dimensions(svg_str)
 
         # The viewport holds the document's CSS size; DPI scaling comes from
-        # device_scale_factor, which multiplies the screenshot's device pixels
-        # so the content itself is rendered at the higher resolution.
-        #
-        # Both are passed to new_page() rather than applied afterwards:
-        # set_viewport_size() takes no timeout and never returns while the
-        # renderer is busy, which turns a slow render into an unrecoverable
-        # hang, and device_scale_factor is only settable at page creation.
+        # device_scale_factor, which multiplies the screenshot's device pixels.
+        # Both are passed to new_page(): set_viewport_size() takes no timeout
+        # and can hang, and device_scale_factor is creation-only.
         viewport: ViewportSize = {
             "width": int(dimensions["width"]),
             "height": int(dimensions["height"]),
@@ -219,7 +216,8 @@ class PlaywrightRasterizer(BaseRasterizer):
         # Create page and set content
         assert self._browser is not None
         page = self._browser.new_page(
-            viewport=viewport, device_scale_factor=self.dpi / 96.0
+            viewport=viewport,
+            device_scale_factor=self.dpi / 96.0 if self.dpi > 0 else 1.0,
         )
 
         try:

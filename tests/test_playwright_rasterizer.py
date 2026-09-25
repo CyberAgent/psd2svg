@@ -135,6 +135,16 @@ def test_rasterizer_dpi_scaling(simple_svg: str) -> None:
 
 
 @requires_playwright
+def test_rasterizer_zero_dpi(simple_svg: str) -> None:
+    """Test that dpi=0 renders at 96 DPI rather than collapsing the scale."""
+    with PlaywrightRasterizer(dpi=0) as rasterizer:
+        image = rasterizer.from_string(simple_svg)
+
+    assert image.size == (100, 100)
+    assert image.getchannel("A").getbbox() == (10, 10, 90, 90)
+
+
+@requires_playwright
 def test_rasterizer_vertical_text(vertical_text_svg: str) -> None:
     """Test rendering of vertical text with SVG 2.0 features.
 

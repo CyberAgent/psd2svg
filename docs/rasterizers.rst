@@ -337,12 +337,18 @@ API Reference
 .. code-block:: python
 
    class PlaywrightRasterizer(BaseRasterizer):
-       def __init__(self, dpi: int = 0) -> None:
+       def __init__(
+           self,
+           dpi: int = 96,
+           browser_type: Literal["chromium", "firefox", "webkit"] = "chromium",
+       ) -> None:
            """Initialize the Playwright rasterizer.
 
            Args:
-               dpi: Dots per inch for rendering. If 0 (default), uses 96 DPI.
-                   Higher values produce larger, higher resolution images.
+               dpi: Dots per inch for rendering. Default is 96 DPI; 0 also
+                   means 96 DPI. Higher values produce larger, higher
+                   resolution images.
+               browser_type: Browser engine to use. Default is "chromium".
            """
 
        def __enter__(self) -> PlaywrightRasterizer:
