@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **foreignObject spans were separated by a space** (#432)
+  - The serializer no longer indents the XHTML inside a `<foreignObject>`, so a
+    word split across two style runs renders as one word
+
 - **foreignObject paragraphs were taller than their leading** (#425)
   - Each `<p>` now names the font of its tallest span, so a paragraph whose
     spans share a size occupies its leading instead of drifting down the box

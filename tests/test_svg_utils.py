@@ -1,5 +1,7 @@
 """Tests for SVG utility functions."""
 
+import io
+import re
 import xml.etree.ElementTree as ET
 from typing import SupportsFloat
 
@@ -1731,6 +1733,93 @@ def test_strip_text_element_whitespace_with_xml_space() -> None:
     assert tspans[0].tail is None or tspans[0].tail.strip() == "", (
         "Whitespace-only tail should be stripped"
     )
+
+
+def _xhtml_tree() -> tuple[ET.Element, ET.Element]:
+    """Build an <svg> holding a <foreignObject> with a two-span paragraph."""
+    svg = ET.Element("svg")
+    ET.SubElement(svg, "g")
+    foreign_object = ET.SubElement(svg, "foreignObject")
+    div = svg_utils.create_xhtml_node("div", parent=foreign_object)
+    paragraph = svg_utils.create_xhtml_node("p", parent=div)
+    svg_utils.create_xhtml_node("span", parent=paragraph, text="Lo", style="color: red")
+    svg_utils.create_xhtml_node(
+        "span", parent=paragraph, text="rem", style="color: blue"
+    )
+    return svg, paragraph
+
+
+# write() keeps the html: prefix that tostring() strips, so match either.
+_ADJACENT_SPANS = re.compile(r"</(?:\w+:)?span>\s+<(?:\w+:)?span")
+
+
+@pytest.mark.parametrize("indent", ["  ", ""])
+def test_tostring_keeps_xhtml_spans_adjacent(indent: str) -> None:
+    """Indentation never lands between two spans of a <foreignObject>.
+
+    Whitespace between XHTML inline elements renders as a space, so a word
+    split across two style runs would come out as "Lo rem". An indent of ""
+    is the rasterizer's own call, and it still inserts newlines.
+    """
+    svg, _ = _xhtml_tree()
+
+    result = svg_utils.tostring(svg, indent=indent)
+
+    assert _ADJACENT_SPANS.search(result) is None, result
+
+
+def test_write_keeps_xhtml_spans_adjacent() -> None:
+    """Saving to a file goes through the same indentation."""
+    svg, _ = _xhtml_tree()
+
+    stream = io.StringIO()
+    svg_utils.write(svg, stream)
+
+    assert _ADJACENT_SPANS.search(stream.getvalue()) is None, stream.getvalue()
+
+
+@pytest.mark.parametrize("content", [" ", "   ", "\t", "\xa0\xa0"])
+def test_tostring_keeps_whitespace_only_xhtml_content(content: str) -> None:
+    """Whitespace that is content survives exactly as it was written.
+
+    An unstyled run is written into the previous sibling's tail, or into the
+    paragraph's own text when it comes first, so either can hold nothing but
+    whitespace.
+    """
+    svg, paragraph = _xhtml_tree()
+    paragraph.text = content
+    paragraph[0].tail = content
+
+    result = svg_utils.tostring(svg)
+
+    assert f"<p>{content}<span" in result, result
+    assert f"</span>{content}<span" in result, result
+
+
+def test_tostring_keeps_whitespace_after_an_svg_in_a_paragraph() -> None:
+    """A tail belongs to its parent, whatever the child's own namespace is.
+
+    An inline <svg> inside a paragraph sits in XHTML content, so the space
+    following it renders, and indentation put there would render too.
+    """
+    svg, paragraph = _xhtml_tree()
+    inline = ET.SubElement(paragraph, "svg")
+    inline.tail = "\xa0"
+    svg_utils.create_xhtml_node("span", parent=paragraph, text="ipsum")
+
+    result = svg_utils.tostring(svg)
+
+    assert "</span><svg" in result, result
+    assert "\xa0<span" in result, result
+
+
+def test_tostring_still_indents_svg_elements() -> None:
+    """Only the XHTML is exempt; the surrounding SVG is still pretty-printed."""
+    svg, _ = _xhtml_tree()
+
+    result = svg_utils.tostring(svg)
+
+    assert "\n  <g" in result, result
 
 
 class TestSafeUtf8:

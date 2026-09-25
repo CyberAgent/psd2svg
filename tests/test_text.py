@@ -2448,6 +2448,65 @@ def test_foreignobject_paragraphs_advance_by_their_leading() -> None:
         )
 
 
+def _ink_column_span(image: Image.Image) -> tuple[int, int]:
+    """Return the first and last column holding text ink in the image."""
+    rgba = np.array(image.convert("RGBA")).astype(float)
+    ink = (rgba[..., 3] > 32) & (rgba[..., :3].mean(axis=2) < 128)
+    columns = np.flatnonzero(ink.any(axis=0))
+    assert columns.size > 0, "No text rendered"
+    return int(columns[0]), int(columns[-1])
+
+
+def test_foreignobject_spans_serialize_without_separating_whitespace() -> None:
+    """Adjacent spans of a paragraph carry nothing between them.
+
+    Whitespace between two XHTML inline elements renders as a space, so the
+    serializer's indentation would split a word across style runs.
+    """
+    psdimage = PSDImage.open(
+        get_fixture("texts/paragraph-shapetype1-multiple-spans.psd")
+    )
+    svg = SVGDocument.from_psd(
+        psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+    ).tostring()
+
+    assert ">Lo</span><span " in svg, svg
+
+
+@requires_playwright
+def test_foreignobject_multi_span_word_renders_unbroken() -> None:
+    """A word split across two style runs renders as one word, on one line.
+
+    The two modes are measured against each other so the comparison survives
+    font substitution: both lay out the same five characters. The line count
+    is asserted as well, because a substitute wide enough to wrap the box
+    would show up as a second line rather than as extra width.
+    """
+    psdimage = PSDImage.open(
+        get_fixture("texts/paragraph-shapetype1-multiple-spans.psd")
+    )
+    rasterizer = PlaywrightRasterizer()
+    try:
+        images = {
+            mode: SVGDocument.from_psd(psdimage, text_wrapping_mode=mode).rasterize(
+                rasterizer=rasterizer
+            )
+            for mode in (TextWrappingMode.NONE, TextWrappingMode.FOREIGN_OBJECT)
+        }
+    finally:
+        rasterizer.close()
+
+    lines = _ink_row_tops(images[TextWrappingMode.FOREIGN_OBJECT])
+    assert len(lines) == 1, f"The fixture is a single line, but rendered as {lines}"
+
+    native = _ink_column_span(images[TextWrappingMode.NONE])
+    wrapped = _ink_column_span(images[TextWrappingMode.FOREIGN_OBJECT])
+    assert abs((wrapped[1] - wrapped[0]) - (native[1] - native[0])) <= 1, (
+        f"The foreignObject output spans {wrapped} columns, "
+        f"but the native one spans {native}"
+    )
+
+
 @pytest.mark.parametrize("baseline", [FontBaseline.SUPERSCRIPT, FontBaseline.SUBSCRIPT])
 def test_foreignobject_scripts_take_the_native_baseline_shift(
     monkeypatch: pytest.MonkeyPatch, baseline: FontBaseline

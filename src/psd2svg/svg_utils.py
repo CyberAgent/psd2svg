@@ -278,6 +278,50 @@ def styles_to_string(styles: dict[str, str]) -> str:
     return "; ".join(f"{key}: {value}" for key, value in styles.items())
 
 
+def _holds_xhtml(element: ET.Element) -> bool:
+    """Whether an element's own content is XHTML rather than SVG.
+
+    A <foreignObject> is an SVG element, but what it holds is an XHTML root,
+    so its content counts as XHTML too.
+    """
+    return is_xhtml_element(element) or any(
+        is_xhtml_element(child) for child in element
+    )
+
+
+def _indent(node: ET.Element, space: str) -> None:
+    """Pretty-print a tree, leaving XHTML content untouched.
+
+    Whitespace between two XHTML elements renders as a space, so indentation
+    inside a <foreignObject> would show up between the spans of a paragraph.
+    The XHTML values are restored rather than stripped afterwards: both text
+    and tail can hold a genuine space, and :func:`ET.indent` overwrites
+    exactly the empty and whitespace-only values that such a space occupies.
+
+    What makes whitespace content is the namespace of the element it sits in,
+    not the namespace of the element it follows: an element's tail belongs to
+    its parent. So an inline <svg> in a paragraph keeps the space after it,
+    and a <foreignObject>'s own tail, which belongs to the SVG around it,
+    stays indented with the rest of the document.
+
+    A space of "" still inserts newlines, so this runs on every output.
+    """
+    texts: list[tuple[ET.Element, str | None]] = []
+    tails: list[tuple[ET.Element, str | None]] = []
+    for parent in node.iter():
+        if not _holds_xhtml(parent):
+            continue
+        texts.append((parent, parent.text))
+        tails.extend((child, child.tail) for child in parent)
+
+    ET.indent(node, space=space)
+
+    for element, text in texts:
+        element.text = text
+    for element, tail in tails:
+        element.tail = tail
+
+
 def _strip_text_element_whitespace(node: ET.Element) -> None:
     """Strip whitespace-only text and tail from SVG text elements.
 
@@ -420,7 +464,7 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
 
 def tostring(node: ET.Element, indent: str = "  ") -> str:
     """Convert an XML node to a string."""
-    ET.indent(node, space=indent)
+    _indent(node, space=indent)
     _strip_text_element_whitespace(node)
     svg_string = ET.tostring(node, encoding="unicode", xml_declaration=False)
 
@@ -443,7 +487,7 @@ def parse(file: Any) -> ET.Element:
 def write(node: ET.Element, file: Any, indent: str = "  ") -> None:
     """Write an XML node to a file."""
     tree = ET.ElementTree(node)
-    ET.indent(tree, space=indent)
+    _indent(node, space=indent)
     _strip_text_element_whitespace(node)
     tree.write(file, encoding="unicode", xml_declaration=False)
 
