@@ -45,6 +45,16 @@ def simple_svg() -> str:
 
 
 @pytest.fixture
+def fractional_svg() -> str:
+    """SVG whose dimensions are not whole pixels, filled to its edges."""
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100.5" height="100.5"
+     viewBox="0 0 100.5 100.5">
+    <rect x="0" y="0" width="100.5" height="100.5" fill="red"/>
+</svg>"""
+
+
+@pytest.fixture
 def vertical_text_svg() -> str:
     """SVG with vertical text using SVG 2.0 features."""
     return """<?xml version="1.0" encoding="UTF-8"?>
@@ -118,7 +128,7 @@ def test_rasterizer_context_manager(simple_svg: str) -> None:
 
 @requires_playwright
 def test_rasterizer_dpi_scaling(simple_svg: str) -> None:
-    """Test DPI scaling produces different resolutions."""
+    """Test DPI scaling scales the content, not just the canvas."""
     with PlaywrightRasterizer(dpi=96) as rasterizer_96:
         image_96 = rasterizer_96.from_string(simple_svg)
 
@@ -128,6 +138,34 @@ def test_rasterizer_dpi_scaling(simple_svg: str) -> None:
     # 192 DPI should produce 2x resolution
     assert image_96.size == (100, 100)
     assert image_192.size == (200, 200)
+
+    # The rect drawn at (10, 10)-(90, 90) must scale with the canvas
+    assert image_96.getchannel("A").getbbox() == (10, 10, 90, 90)
+    assert image_192.getchannel("A").getbbox() == (20, 20, 180, 180)
+
+
+@requires_playwright
+def test_rasterizer_zero_dpi(simple_svg: str) -> None:
+    """Test that dpi=0 renders at 96 DPI rather than collapsing the scale."""
+    with PlaywrightRasterizer(dpi=0) as rasterizer:
+        image = rasterizer.from_string(simple_svg)
+
+    assert image.size == (100, 100)
+    assert image.getchannel("A").getbbox() == (10, 10, 90, 90)
+
+
+@requires_playwright
+def test_rasterizer_fractional_dimensions(fractional_svg: str) -> None:
+    """Test that a fractional document size is rounded up, not clipped."""
+    with PlaywrightRasterizer(dpi=192) as rasterizer:
+        image = rasterizer.from_string(fractional_svg)
+
+    # ceil(100.5) CSS pixels at a 2x device scale factor
+    assert image.size == (202, 202)
+
+    # All 100.5 x 2 device pixels of the rect are rendered, and the half pixel
+    # the viewport rounded up to stays empty
+    assert image.getchannel("A").getbbox() == (0, 0, 201, 201)
 
 
 @requires_playwright

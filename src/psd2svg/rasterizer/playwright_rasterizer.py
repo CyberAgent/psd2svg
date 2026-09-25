@@ -8,6 +8,7 @@ that may not be supported by other rasterizers.
 import asyncio
 import concurrent.futures
 import logging
+import math
 import xml.etree.ElementTree as ET
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Literal, Union
@@ -85,7 +86,8 @@ class PlaywrightRasterizer(BaseRasterizer):
         Args:
             dpi: Dots per inch for rendering. Higher values produce larger,
                 higher resolution images (e.g., 300 DPI for print quality).
-                Default is 96 DPI (standard screen resolution).
+                Default is 96 DPI (standard screen resolution); 0 also means
+                96 DPI.
             browser_type: Browser engine to use. Options are:
                 - "chromium": Best SVG support (recommended)
                 - "firefox": Good compatibility
@@ -203,19 +205,22 @@ class PlaywrightRasterizer(BaseRasterizer):
         # Parse SVG to get dimensions
         dimensions = self._get_svg_dimensions(svg_str)
 
-        # Calculate viewport size based on DPI. The viewport is passed to
-        # new_page() rather than applied afterwards: set_viewport_size() takes
-        # no timeout and never returns while the renderer is busy, which turns
-        # a slow render into an unrecoverable hang.
-        scale = self.dpi / 96.0
+        # The viewport holds the document's CSS size, rounded up so a
+        # fractional document is not clipped; DPI scaling comes from
+        # device_scale_factor, which multiplies the screenshot's device pixels.
+        # Both are passed to new_page(): set_viewport_size() takes no timeout
+        # and can hang, and device_scale_factor is creation-only.
         viewport: ViewportSize = {
-            "width": int(dimensions["width"] * scale),
-            "height": int(dimensions["height"] * scale),
+            "width": math.ceil(dimensions["width"]),
+            "height": math.ceil(dimensions["height"]),
         }
 
         # Create page and set content
         assert self._browser is not None
-        page = self._browser.new_page(viewport=viewport)
+        page = self._browser.new_page(
+            viewport=viewport,
+            device_scale_factor=self.dpi / 96.0 if self.dpi > 0 else 1.0,
+        )
 
         try:
             # Embed SVG in minimal HTML

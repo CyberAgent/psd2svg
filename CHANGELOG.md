@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     collapsing no longer renders `space_after` + `space_before` as the larger
     of the two
 
+- **`PlaywrightRasterizer` DPI padded the canvas without scaling the content** (#418)
+  - DPI now drives Chromium's device scale factor, so the rendering itself is
+    scaled instead of being drawn at 1x in a larger frame
+
 - **`PlaywrightRasterizer` could hang forever resizing the viewport** (#415)
   - The viewport is set when the page is created, so a slow render stays
     bounded by the screenshot timeout instead of blocking indefinitely
