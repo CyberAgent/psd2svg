@@ -647,8 +647,12 @@ class LayerConverter(ConverterProtocol):
         if "clip-path" in target.attrib:
             context["clip-path"] = target.attrib.pop("clip-path")
 
-        # Viewbox for the mask. If the mask is empty, use the full canvas.
-        viewbox = layer.bbox
+        # Viewbox for the mask. Group.bbox excludes invisible children, so include
+        # them when they are also emitted in the SVG.
+        if self.include_hidden_layers and isinstance(layer, layers.Group):
+            viewbox = layers.Group.extract_bbox(layer, include_invisible=True)
+        else:
+            viewbox = layer.bbox
         if viewbox == (0, 0, 0, 0):
             viewbox = (0, 0, self.psd.width, self.psd.height)
 

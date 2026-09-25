@@ -3,13 +3,15 @@
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from psd_tools import PSDImage
+from psd_tools.api import layers
 
 import psd2svg.__main__ as cli
 from psd2svg import SVGDocument, convert
+from psd2svg.core.converter import Converter
 from tests.conftest import get_fixture
 
 TEST_PSD = "clipping/shape-with-invisible-clip.psd"
@@ -38,6 +40,41 @@ def test_include_hidden_layers_converts_hidden_clipping_stack() -> None:
     titles = [title.text for title in document.svg.findall(".//title")]
     assert "Star 1" in titles
     assert [node.text for node in document.svg.findall(".//text")] == ["B", "B"]
+
+
+def test_include_hidden_layers_expands_inverted_group_mask() -> None:
+    """Cover hidden children with an inverted group mask's white rectangle."""
+    converter = Converter(PSDImage.new("RGB", (100, 100)), include_hidden_layers=True)
+    group = Mock(spec=layers.Group)
+    group.name = "Masked group"
+    group.kind = "group"
+    group.bbox = (10, 10, 40, 40)
+    group.has_mask.return_value = True
+    group.mask.disabled = False
+    group.mask.width = 20
+    group.mask.height = 20
+    group.mask.left = 10
+    group.mask.top = 10
+    group.mask.background_color = 255
+    group.mask.topil.return_value = None
+
+    with patch.object(
+        layers.Group,
+        "extract_bbox",
+        return_value=(10, 10, 90, 90),
+    ) as extract_bbox:
+        converter.apply_mask(group, converter.create_node("g"))
+
+    extract_bbox.assert_called_once_with(group, include_invisible=True)
+    rect = converter.svg.find(".//rect")
+    assert rect is not None
+    assert rect.attrib == {
+        "x": "10",
+        "y": "10",
+        "width": "80",
+        "height": "80",
+        "fill": "#ffffff",
+    }
 
 
 def test_convert_include_hidden_layers(tmp_path: Path) -> None:
