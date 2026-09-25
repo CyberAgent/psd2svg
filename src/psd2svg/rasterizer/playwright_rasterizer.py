@@ -213,7 +213,7 @@ class PlaywrightRasterizer(BaseRasterizer):
         # where the page would otherwise resolve it a second time.
         root_size_css = (
             ""
-            if self._has_absolute_size(root)
+            if self._root_keeps_own_size(root)
             else f"width: {css_width}px; height: {css_height}px;"
         )
 

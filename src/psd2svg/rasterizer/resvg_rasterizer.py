@@ -18,8 +18,8 @@ from .base_rasterizer import DEFAULT_DPI, BaseRasterizer
 
 logger = logging.getLogger(__name__)
 
-# Widest canvas resvg can be asked for; beyond this the scale is dropped.
-_MAX_RENDER_WIDTH = 2**31 - 1
+# Largest canvas resvg can be asked for; beyond this the scale is dropped.
+_MAX_RENDER_SIZE = 2**31 - 1
 
 
 class ResvgRasterizer(BaseRasterizer):
@@ -80,15 +80,18 @@ class ResvgRasterizer(BaseRasterizer):
                 f"DPI instead of {self.dpi}"
             )
             return None
-        target = dimensions[0] * scale
-        if not math.isfinite(target) or target > _MAX_RENDER_WIDTH:
+        # resvg derives the height from the width, so both axes have to fit.
+        scaled = [length * scale for length in dimensions]
+        if any(not math.isfinite(axis) or axis > _MAX_RENDER_SIZE for axis in scaled):
             # Leave resvg to reject a canvas it could never allocate, so it
             # fails the same way it does at 96 DPI.
             logger.warning(
-                f"Rendering {dimensions[0]:g} CSS pixels at {self.dpi} DPI would "
-                f"exceed {_MAX_RENDER_WIDTH} pixels; rendering at {DEFAULT_DPI} DPI"
+                f"Rendering {dimensions[0]:g}x{dimensions[1]:g} CSS pixels at "
+                f"{self.dpi} DPI would exceed {_MAX_RENDER_SIZE} pixels; "
+                f"rendering at {DEFAULT_DPI} DPI"
             )
             return None
+        target = scaled[0]
         # Round half up, as a browser scales a viewport, so that both
         # backends give the same size for the same document.
         return max(1, math.floor(target + 0.5))

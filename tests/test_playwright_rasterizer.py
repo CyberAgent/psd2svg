@@ -213,10 +213,13 @@ def test_rasterizer_physical_units(size: str, expected: tuple[int, int]) -> None
 
 
 @requires_playwright
-def test_rasterizer_zero_sized_root_renders_nothing() -> None:
+@pytest.mark.parametrize(
+    "root_size", ['width="0" height="0"', 'width="0%" height="0%"']
+)
+def test_rasterizer_zero_sized_root_renders_nothing(root_size: str) -> None:
     """Test that a root sized to zero still disables its own rendering."""
     svg = (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"'
+        f'<svg xmlns="http://www.w3.org/2000/svg" {root_size}'
         ' viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>'
     )
 

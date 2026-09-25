@@ -211,11 +211,26 @@ class BaseRasterizer(ABC):
         return None if root is None else cls._root_dimensions(root)
 
     @classmethod
-    def _has_absolute_size(cls, root: ET.Element) -> bool:
-        """Whether a root ``<svg>`` sizes both axes itself, zero included."""
-        return (
+    def _root_keeps_own_size(cls, root: ET.Element) -> bool:
+        """Whether a root ``<svg>`` must be left at the size it asks for.
+
+        True when it sizes both axes with an absolute length, or sizes either
+        to zero and so draws nothing. A relative size that resolves to
+        something is the one case a viewport has to resolve for it.
+        """
+        if (
             cls._parse_length(root.get("width", "")) is not None
             and cls._parse_length(root.get("height", "")) is not None
+        ):
+            return True
+
+        viewbox = cls._parse_viewbox(root.get("viewBox", ""))
+        return any(
+            cls._parse_length(root.get(axis, ""), percent_of=reference) == 0
+            for axis, reference in (
+                ("width", viewbox[0] if viewbox else None),
+                ("height", viewbox[1] if viewbox else None),
+            )
         )
 
     @classmethod

@@ -246,6 +246,20 @@ def test_rasterizer_dpi_non_finite_dimensions() -> None:
     assert ResvgRasterizer(dpi=192).from_string(svg).size == (10, 10)
 
 
+def test_rasterizer_dpi_tall_document(caplog: pytest.LogCaptureFixture) -> None:
+    """Test that the height is checked against the limit, not just the width."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="1e300">'
+        '<rect width="10" height="10" fill="red"/></svg>'
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError, match="Failed to rasterize SVG content"):
+            ResvgRasterizer(dpi=192).from_string(svg)
+
+    assert "exceed" in caplog.text
+
+
 def test_rasterizer_dpi_overflows_when_scaled(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
