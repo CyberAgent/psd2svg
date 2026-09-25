@@ -485,11 +485,18 @@ def parse(file: Any) -> ET.Element:
 
 
 def write(node: ET.Element, file: Any, indent: str = "  ") -> None:
-    """Write an XML node to a file."""
-    tree = ET.ElementTree(node)
-    _indent(node, space=indent)
-    _strip_text_element_whitespace(node)
-    tree.write(file, encoding="unicode", xml_declaration=False)
+    """Write an XML node to an open text file or a path.
+
+    The node is serialized through :func:`tostring`, so a written file and a
+    returned string hold the same markup - including the unprefixed XHTML of a
+    ``<foreignObject>``.
+    """
+    svg_string = tostring(node, indent=indent)
+    if hasattr(file, "write"):
+        file.write(svg_string)
+    else:
+        with open(file, "w", encoding="utf-8") as stream:
+            stream.write(svg_string)
 
 
 def add_style(node: ET.Element, key: str, value: Any) -> None:

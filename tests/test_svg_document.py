@@ -835,6 +835,34 @@ class TestSVGDocumentEmbedFonts:
             assert "font-weight" not in element.get("style", "")
 
 
+class TestSVGDocumentSaveOutput:
+    """Tests that save() writes the same markup tostring() returns."""
+
+    def test_save_matches_tostring_for_foreignobject(self, tmp_path: Path) -> None:
+        """A saved file holds the same XHTML the string form does.
+
+        Chromium ignores margin-block-start on an html:-prefixed element, so a
+        saved document would lose the paragraph strut compensation. See GitHub
+        issue #433.
+        """
+        psdimage = PSDImage.open(
+            get_fixture("texts/paragraph-shapetype1-justification0.psd")
+        )
+        doc = SVGDocument.from_psd(
+            psdimage,
+            text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT,
+        )
+        destination = tmp_path / "out.svg"
+
+        doc.save(str(destination))
+
+        saved = destination.read_text(encoding="utf-8")
+        assert saved == doc.tostring()
+        assert "html:" not in saved, saved
+        assert 'xmlns="http://www.w3.org/1999/xhtml"' in saved, saved
+        assert "margin-block-start" in saved, saved
+
+
 class TestSVGDocumentRasterizeWithFonts:
     """Tests for font embedding in rasterize() method."""
 
