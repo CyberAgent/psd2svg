@@ -3,6 +3,7 @@
 import asyncio
 import os
 import tempfile
+from typing import Any, NoReturn
 
 import pytest
 from PIL import Image
@@ -268,3 +269,51 @@ def test_rasterizer_in_async_context(simple_svg: str) -> None:
 
     # Run inside asyncio event loop (simulates Jupyter environment)
     asyncio.run(test_async())
+
+
+@requires_playwright
+def test_rasterizer_does_not_resize_viewport(
+    simple_svg: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that rasterization never calls the unbounded set_viewport_size()."""
+    from playwright.sync_api import Page  # noqa: PLC0415
+
+    def fail(*args: object, **kwargs: object) -> NoReturn:
+        raise AssertionError("set_viewport_size() must not be called")
+
+    monkeypatch.setattr(Page, "set_viewport_size", fail)
+
+    with PlaywrightRasterizer(dpi=192) as rasterizer:
+        image = rasterizer.from_string(simple_svg)
+
+    assert image.size == (200, 200)
+
+
+@requires_playwright
+def test_rasterizer_closes_page_when_rendering_fails(
+    simple_svg: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that a failed render propagates and still closes the page."""
+    from playwright.sync_api import Page  # noqa: PLC0415
+    from playwright.sync_api import (  # noqa: PLC0415
+        TimeoutError as PlaywrightTimeoutError,
+    )
+
+    closed: list[Page] = []
+    real_close = Page.close
+
+    def fail(*args: object, **kwargs: object) -> NoReturn:
+        raise PlaywrightTimeoutError("Page.screenshot: Timeout 30000ms exceeded.")
+
+    def spy_close(self: Page, **kwargs: Any) -> None:
+        closed.append(self)
+        real_close(self, **kwargs)
+
+    monkeypatch.setattr(Page, "screenshot", fail)
+    monkeypatch.setattr(Page, "close", spy_close)
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        with pytest.raises(PlaywrightTimeoutError):
+            rasterizer.from_string(simple_svg)
+
+    assert closed, "page.close() was not called on the failure path"
