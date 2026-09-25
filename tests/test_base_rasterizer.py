@@ -12,7 +12,8 @@ from psd2svg.rasterizer.base_rasterizer import BaseRasterizer
     [
         ("100", 100.0),
         ("100px", 100.0),
-        (" 100 px ", 100.0),
+        ("  100px  ", 100.0),
+        ("100 px", None),
         ("100PX", 100.0),
         ("100.5", 100.5),
         ("-1e2", -100.0),
@@ -22,6 +23,7 @@ from psd2svg.rasterizer.base_rasterizer import BaseRasterizer
         ("25.4mm", 96.0),
         ("2.54cm", 96.0),
         ("50%", None),
+        ("1e400", None),
         ("2em", None),
         ("", None),
         ("auto", None),
@@ -44,10 +46,19 @@ def test_parse_length(value: str, expected: float | None) -> None:
         ('width="1in" height="0.5in"', (96.0, 48.0)),
         ('viewBox="0 0 200 150"', (200.0, 150.0)),
         ('viewBox="0, 0, 200, 150"', (200.0, 150.0)),
-        # A relative width falls back to the viewBox.
+        # Percentages resolve against the viewBox, as resvg does.
         ('width="100%" height="100%" viewBox="0 0 200 150"', (200.0, 150.0)),
+        ('width="50%" height="50%" viewBox="0 0 100 100"', (50.0, 50.0)),
+        ('width="200%" height="200%" viewBox="0 0 100 100"', (200.0, 200.0)),
+        # Each axis is resolved on its own, so sizing one keeps the other.
+        ('width="200" viewBox="0 0 100 100"', (200.0, 100.0)),
+        ('height="200" viewBox="0 0 100 100"', (100.0, 200.0)),
+        ('width="200" height="50%" viewBox="0 0 100 100"', (200.0, 50.0)),
         ('width="100%" height="100%"', None),
+        ('width="200"', None),
         ('width="0" height="0"', None),
+        ('width="1e400" height="1e400"', None),
+        ('viewBox="0 0 1e400 1e400"', None),
         ("", None),
     ],
 )
@@ -85,6 +96,15 @@ def test_svg_dimensions_large_document() -> None:
         + "<rect/>" * 50000
         + "</svg"  # truncated on purpose
     )
+    assert BaseRasterizer._svg_dimensions(svg) == (100.0, 50.0)
+
+
+def test_svg_dimensions_root_across_chunk_boundary() -> None:
+    """Test a root start tag split across reads with nothing following it."""
+    # The attribute list straddles the read boundary, so the parser only
+    # reports the root once the feed is closed.
+    padding = " " * (8192 - len('<svg width="100" '))
+    svg = f'<svg{padding} width="100" height="50"/>'
     assert BaseRasterizer._svg_dimensions(svg) == (100.0, 50.0)
 
 

@@ -196,6 +196,56 @@ def test_rasterizer_dpi_scales_without_viewbox() -> None:
     assert image.getchannel("A").getbbox() == (0, 0, 100, 100)
 
 
+@pytest.mark.parametrize(
+    ("root_size", "expected_96", "expected_192"),
+    [
+        ('width="200"', (200, 100), (400, 200)),
+        ('height="200"', (100, 200), (200, 400)),
+        ('width="50%" height="50%"', (50, 50), (100, 100)),
+        ('width="200" height="50%"', (200, 50), (400, 100)),
+    ],
+)
+def test_rasterizer_dpi_scales_partially_sized_root(
+    root_size: str, expected_96: tuple[int, int], expected_192: tuple[int, int]
+) -> None:
+    """Test that DPI scales a root that sizes only one axis, or sizes it relatively.
+
+    Each axis resolves on its own, so the scale stays dpi / 96 rather than
+    being skewed by the viewBox of the axis that is left out.
+    """
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" {root_size}'
+        ' viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    assert ResvgRasterizer(dpi=96).from_string(svg).size == expected_96
+    assert ResvgRasterizer(dpi=192).from_string(svg).size == expected_192
+
+
+def test_rasterizer_dpi_oversized_document(caplog: pytest.LogCaptureFixture) -> None:
+    """Test that an unrenderable canvas still fails as a ValueError."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1e30" height="1e30">'
+        '<rect width="10" height="10" fill="red"/></svg>'
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError, match="Failed to rasterize SVG content"):
+            ResvgRasterizer(dpi=192).from_string(svg)
+
+    assert "exceed" in caplog.text
+
+
+def test_rasterizer_dpi_non_finite_dimensions() -> None:
+    """Test that a non-finite root size renders unscaled instead of overflowing."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1e400" height="1e400">'
+        '<rect width="10" height="10" fill="red"/></svg>'
+    )
+
+    assert ResvgRasterizer(dpi=192).from_string(svg).size == (10, 10)
+
+
 def test_rasterizer_dpi_scales_viewbox_only() -> None:
     """Test that DPI scales a document sized by its viewBox alone."""
     svg = (

@@ -1,4 +1,5 @@
 import logging
+import math
 import re
 import tempfile
 import xml.etree.ElementTree as ET
@@ -26,7 +27,7 @@ _UNIT_TO_PX = {
 }
 
 _LENGTH_RE = re.compile(
-    r"\A\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*([a-zA-Z]*)\s*\Z"
+    r"\A\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)([a-zA-Z]*|%)\s*\Z"
 )
 
 # Enough to hold a root <svg> start tag; the rest of the document is never read.
@@ -85,23 +86,33 @@ class BaseRasterizer(ABC):
         return dpi / DEFAULT_DPI if dpi > 0 else 1.0
 
     @staticmethod
-    def _parse_length(value: str) -> float | None:
-        """Convert an absolute CSS length to pixels, where ``1in`` is 96px.
+    def _parse_length(value: str, percent_of: float | None = None) -> float | None:
+        """Convert a CSS length to pixels, where ``1in`` is 96px.
 
         Args:
-            value: Attribute value such as "100", "100px", "1in" or "10mm".
+            value: Attribute value such as "100", "100px", "1in" or "50%".
+            percent_of: Length a percentage is relative to. Percentages are
+                rejected when this is None.
 
         Returns:
             The length in CSS pixels, or None when the value is empty,
-            malformed, or relative to something else ("50%", "2em").
+            malformed, not finite, or relative to something else ("2em").
         """
         match = _LENGTH_RE.match(value)
         if match is None:
             return None
-        factor = _UNIT_TO_PX.get(match.group(2).lower())
-        if factor is None:
-            return None
-        return float(match.group(1)) * factor
+        unit = match.group(2).lower()
+        if unit == "%":
+            if percent_of is None:
+                return None
+            factor = percent_of / 100.0
+        else:
+            unit_px = _UNIT_TO_PX.get(unit)
+            if unit_px is None:
+                return None
+            factor = unit_px
+        length = float(match.group(1)) * factor
+        return length if math.isfinite(length) else None
 
     @staticmethod
     def _parse_svg_root(chunks: Iterable[Union[str, bytes]]) -> ET.Element | None:
@@ -142,20 +153,38 @@ class BaseRasterizer(ABC):
 
     @classmethod
     def _root_dimensions(cls, root: ET.Element) -> tuple[float, float] | None:
-        """Read the CSS pixel size of a root ``<svg>`` element."""
-        width = cls._parse_length(root.get("width", ""))
-        height = cls._parse_length(root.get("height", ""))
-        if width is not None and height is not None and width > 0 and height > 0:
-            return width, height
+        """Read the CSS pixel size of a root ``<svg>`` element.
 
-        # A missing or relative width/height falls back to the viewBox, which
-        # is what a viewport sized to the document would resolve them against.
-        viewbox = root.get("viewBox", "").replace(",", " ").split()
-        if len(viewbox) != 4:
+        Each axis is resolved on its own, and an axis that has no absolute
+        length of its own falls back to the viewBox, so a document that sizes
+        only one of them keeps the other.
+        """
+        viewbox = cls._parse_viewbox(root.get("viewBox", ""))
+        width = cls._axis_length(root.get("width", ""), viewbox[0] if viewbox else None)
+        height = cls._axis_length(
+            root.get("height", ""), viewbox[1] if viewbox else None
+        )
+        return None if width is None or height is None else (width, height)
+
+    @classmethod
+    def _axis_length(cls, value: str, viewbox_length: float | None) -> float | None:
+        """Resolve one axis of a root ``<svg>`` size against its viewBox."""
+        length = cls._parse_length(value, percent_of=viewbox_length)
+        if length is not None and length > 0:
+            return length
+        return viewbox_length
+
+    @staticmethod
+    def _parse_viewbox(value: str) -> tuple[float, float] | None:
+        """Read the width and height of a viewBox, or None if it has neither."""
+        parts = value.replace(",", " ").split()
+        if len(parts) != 4:
             return None
         try:
-            width, height = float(viewbox[2]), float(viewbox[3])
+            width, height = float(parts[2]), float(parts[3])
         except ValueError:
+            return None
+        if not (math.isfinite(width) and math.isfinite(height)):
             return None
         return (width, height) if width > 0 and height > 0 else None
 

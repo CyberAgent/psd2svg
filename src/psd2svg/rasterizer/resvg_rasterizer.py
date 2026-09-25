@@ -18,6 +18,9 @@ from .base_rasterizer import DEFAULT_DPI, BaseRasterizer
 
 logger = logging.getLogger(__name__)
 
+# Widest canvas resvg can be asked for; beyond this the scale is dropped.
+_MAX_RENDER_WIDTH = 2**31 - 1
+
 
 class ResvgRasterizer(BaseRasterizer):
     """High-performance SVG rasterizer using resvg.
@@ -79,7 +82,16 @@ class ResvgRasterizer(BaseRasterizer):
             return None
         # Round half up, as a browser scales a viewport, so that both
         # backends give the same size for the same document.
-        return max(1, math.floor(dimensions[0] * scale + 0.5))
+        width = max(1, math.floor(dimensions[0] * scale + 0.5))
+        if width > _MAX_RENDER_WIDTH:
+            # Leave resvg to reject a canvas it could never allocate, so it
+            # fails the same way it does at 96 DPI.
+            logger.warning(
+                f"Rendering {dimensions[0]:g} CSS pixels at {self.dpi} DPI would "
+                f"exceed {_MAX_RENDER_WIDTH} pixels; rendering at {DEFAULT_DPI} DPI"
+            )
+            return None
+        return width
 
     @staticmethod
     def _extract_font_file_paths(svg_content: str) -> list[str]:
