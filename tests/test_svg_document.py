@@ -725,6 +725,36 @@ class TestSVGDocumentEmbedFonts:
             assert "font-weight" not in span.attrib
             assert "font-style" not in span.attrib
 
+    def test_foreignobject_paragraph_takes_the_family_alone(self) -> None:
+        """The strut on a <p> names a family and stops there.
+
+        A <p> inside a <foreignObject> names a font only to size its line
+        boxes (issue #421); the text is in its spans. Weight and style inherit,
+        so a bold strut would reach every span that resolved to another face.
+        """
+        svg = svg_utils.fromstring(
+            '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject>'
+            '<div xmlns="http://www.w3.org/1999/xhtml">'
+            "<p style=\"line-height: 38.4px; font-family: 'Times-BoldItalic'\">"
+            "<span style=\"font-family: 'Times-BoldItalic'\">Bold</span>"
+            "<span style=\"font-family: 'Times-Roman'\">Regular</span>"
+            "</p></div></foreignObject></svg>"
+        )
+        SVGDocument(svg, {})._resolve_postscript_names_static(svg)
+
+        paragraph = svg.find(".//{http://www.w3.org/1999/xhtml}p")
+        assert paragraph is not None
+        style = paragraph.get("style", "")
+        assert "font-family: 'Times'" in style, f"Unexpected styles: {style}"
+        assert "font-weight" not in style, f"Unexpected styles: {style}"
+        assert "font-style" not in style, f"Unexpected styles: {style}"
+
+        bold, regular = svg.findall(".//{http://www.w3.org/1999/xhtml}span")
+        assert "font-weight: 700" in bold.get("style", "")
+        assert "font-style: italic" in bold.get("style", "")
+        assert "font-weight" not in regular.get("style", "")
+        assert "font-style" not in regular.get("style", "")
+
     @patch("psd2svg.core.font_utils.encode_font_data_uri")
     @patch("psd2svg.core.font_utils.FontInfo.resolve")
     def test_foreignobject_weight_and_style_land_in_css_when_embedding(

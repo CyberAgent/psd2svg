@@ -1312,14 +1312,15 @@ def test_text_leading_takes_the_largest_span() -> None:
     assert mixed.compute_leading() == pytest.approx(50.0)
 
 
-def test_foreignobject_compensation_uses_the_largest_span() -> None:
-    """Half-leading compensation is sized by the largest span, not the first.
+def test_foreignobject_strut_follows_the_largest_span() -> None:
+    """The strut and the half-leading compensation follow the largest span.
 
     The line box is as tall as the largest font on the line, so a paragraph
-    that opens with a small span still needs the compensation for the big one.
+    that opens with a small span still needs the strut and the compensation of
+    the big one.
     """
-    psdimage = PSDImage.open(
-        get_fixture("texts/paragraph-shapetype1-justification0.psd")
+    psdimage, text_setting = _first_text_setting(
+        "texts/paragraph-shapetype1-justification0.psd"
     )
     converter = Converter(psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT)
     sheet = ParagraphSheet(name="", default_style_sheet=0, properties={})
@@ -1334,16 +1335,43 @@ def test_foreignobject_compensation_uses_the_largest_span() -> None:
     )
 
     styles = converter._get_foreign_object_paragraph_styles(
-        paragraph, first_paragraph=True
+        paragraph, text_setting, first_paragraph=True
     )
     # Leading is 32 * 1.2 = 38.4, so the compensation is -(38.4 - 32) / 2
+    assert styles["font-size"] == "32px"
     assert styles["line-height"] == "38.4px"
     assert styles["margin-block-start"] == "-3.2px"
 
-    # Later paragraphs never carry it, whatever their spans
-    assert "margin-block-start" not in converter._get_foreign_object_paragraph_styles(
-        paragraph, first_paragraph=False
+    # Later paragraphs keep the strut, but never the compensation
+    later = converter._get_foreign_object_paragraph_styles(
+        paragraph, text_setting, first_paragraph=False
     )
+    assert later["font-size"] == "32px"
+    assert "margin-block-start" not in later
+
+
+def test_foreignobject_strut_ignores_the_paragraph_break() -> None:
+    """A paragraph break draws nothing, so it must not be what sizes the strut.
+
+    It is a run of its own carrying the default size, which can be larger than
+    anything the paragraph actually draws.
+    """
+    psdimage, text_setting = _first_text_setting(
+        "texts/paragraph-shapetype1-justification0.psd"
+    )
+    converter = Converter(psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT)
+    sheet = ParagraphSheet(name="", default_style_sheet=0, properties={})
+    paragraph = Paragraph(
+        style=sheet,
+        spans=[
+            Span(0, 5, "Lorem", StyleSheet(name="", style_sheet_data={"FontSize": 12})),
+            Span(5, 6, "\r", StyleSheet(name="", style_sheet_data={"FontSize": 32})),
+        ],
+    )
+
+    styles = converter._get_foreign_object_paragraph_styles(paragraph, text_setting)
+
+    assert styles["font-size"] == "12px"
 
 
 def test_text_auto_leading_follows_each_paragraph_font_size() -> None:
@@ -2362,6 +2390,162 @@ def test_paragraph_spacing_advances_vertical_columns(
     for tspan in tspans[1:]:
         assert float(tspan.attrib["dx"]) == pytest.approx(-78.4)
         assert tspan.attrib.get("dy") is None
+
+
+def _ink_row_tops(image: Image.Image) -> list[int]:
+    """Return the first row of every horizontal band of text ink in the image.
+
+    Text is the only dark ink in the text fixtures, so a run of rows holding a
+    dark opaque pixel is one rendered line.
+    """
+    rgba = np.array(image.convert("RGBA")).astype(float)
+    ink = (rgba[..., 3] > 32) & (rgba[..., :3].mean(axis=2) < 128)
+    rows = np.flatnonzero(ink.any(axis=1))
+    assert rows.size > 0, "No text rendered"
+    breaks = np.flatnonzero(np.diff(rows) > 1) + 1
+    return [int(rows[0])] + [int(rows[index]) for index in breaks]
+
+
+@requires_playwright
+def test_foreignobject_paragraphs_advance_by_their_leading() -> None:
+    """A <p> occupies its leading, exactly as the native <text> output does.
+
+    The <p>'s strut is what settles this. Left to inherit the renderer's
+    default font, its ascent falls short of the spans' while its descent runs
+    past theirs, so every line box grows past line-height and the paragraphs
+    drift further apart with each break (issue #421).
+
+    The two modes are measured against each other rather than against the
+    leading, so the comparison holds under font substitution as well: both
+    carry the same leading, which comes from the PSD and not from the face.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    rasterizer = PlaywrightRasterizer()
+    try:
+        tops = {
+            mode: _ink_row_tops(
+                SVGDocument.from_psd(psdimage, text_wrapping_mode=mode).rasterize(
+                    rasterizer=rasterizer
+                )
+            )
+            for mode in (TextWrappingMode.NONE, TextWrappingMode.FOREIGN_OBJECT)
+        }
+    finally:
+        rasterizer.close()
+
+    native, wrapped = tops[TextWrappingMode.NONE], tops[TextWrappingMode.FOREIGN_OBJECT]
+    assert len(native) == 3, f"Fixture should render 3 paragraphs, got {native}"
+    assert len(wrapped) == len(native), f"Expected 3 paragraphs, got {wrapped}"
+
+    # Where the block starts is a separate question (issue #275); only the
+    # distance between the paragraphs is measured here.
+    for index in range(1, len(native)):
+        native_pitch = native[index] - native[index - 1]
+        wrapped_pitch = wrapped[index] - wrapped[index - 1]
+        assert abs(wrapped_pitch - native_pitch) <= 1, (
+            f"Paragraph {index} sits {wrapped_pitch}px after its predecessor "
+            f"in the foreignObject output, but {native_pitch}px in the native one"
+        )
+
+
+@pytest.mark.parametrize("baseline", [FontBaseline.SUPERSCRIPT, FontBaseline.SUBSCRIPT])
+def test_foreignobject_scripts_take_the_native_baseline_shift(
+    monkeypatch: pytest.MonkeyPatch, baseline: FontBaseline
+) -> None:
+    """A raised or lowered span is offset from where it sits, not aligned away.
+
+    ``vertical-align`` grows the line box around the moved glyphs, which makes
+    the paragraph taller than its leading (issue #421), and its ``super`` and
+    ``sub`` keywords do not stand for Photoshop's offsets anyway. The span is
+    therefore offset by the same length the native <text> path shifts the
+    baseline by, against the block axis.
+    """
+    monkeypatch.setattr(StyleSheet, "font_baseline", property(lambda self: baseline))
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+
+    native = SVGDocument.from_psd(psdimage).svg
+    shifts = {
+        float(node.attrib["baseline-shift"])
+        for node in native.iter()
+        if "baseline-shift" in node.attrib
+    }
+    assert len(shifts) == 1, f"Fixture should shift every span alike, got {shifts}"
+    shift = shifts.pop()
+    assert shift != 0.0
+
+    wrapped = SVGDocument.from_psd(
+        psdimage,
+        text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT,
+    ).svg
+    spans = wrapped.findall(".//{http://www.w3.org/1999/xhtml}span")
+    assert spans
+    for span in spans:
+        style = _parse_style_string(span.attrib.get("style", ""))
+        assert style["position"] == "relative"
+        # The inset points towards the start of the block axis, so it runs
+        # against the shift.
+        assert float(style["inset-block-start"].removesuffix("px")) == pytest.approx(
+            -shift
+        )
+        assert "vertical-align" not in style
+
+
+@pytest.mark.parametrize(
+    "baseline",
+    [FontBaseline.ROMAN, FontBaseline.SUPERSCRIPT, FontBaseline.SUBSCRIPT],
+)
+def test_foreignobject_zero_font_size_is_stated(baseline: FontBaseline) -> None:
+    """A span sized zero says so rather than leaving font-size out.
+
+    The <p> carries a font size of its own (issue #421), so a span that omits
+    one renders at the paragraph's size instead of drawing nothing.
+    """
+    psdimage, text_setting = _first_text_setting(
+        "texts/paragraph-shapetype1-justification0.psd"
+    )
+    converter = Converter(psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT)
+    paragraph = next(iter(text_setting))
+    span = Span(
+        0,
+        1,
+        "A",
+        StyleSheet(
+            name="", style_sheet_data={"FontSize": 0.0, "FontBaseline": int(baseline)}
+        ),
+    )
+
+    styles = converter._get_foreign_object_span_styles(span, text_setting, paragraph)
+
+    assert styles["font-size"] == "0px"
+
+
+def test_foreignobject_paragraph_strut_matches_its_spans() -> None:
+    """The <p> names the font its line boxes are sized from.
+
+    A line box is at least as tall as the paragraph's strut, and the strut is
+    the <p>'s own font. Inherited, that is the renderer's default at its
+    default size, which sizes the line box for a font nothing in the paragraph
+    uses (issue #421).
+    """
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    doc = SVGDocument.from_psd(
+        psdimage,
+        text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT,
+    )
+
+    div = doc.svg.find(".//{http://www.w3.org/1999/xhtml}div")
+    assert div is not None
+    paragraphs = div.findall(".//{http://www.w3.org/1999/xhtml}p")
+    assert len(paragraphs) == 3
+
+    for paragraph in paragraphs:
+        style = _parse_style_string(paragraph.attrib.get("style", ""))
+        spans = paragraph.findall("{http://www.w3.org/1999/xhtml}span")
+        assert spans
+        for span in spans:
+            span_style = _parse_style_string(span.attrib.get("style", ""))
+            assert style["font-family"] == span_style["font-family"]
+            assert style["font-size"] == span_style["font-size"]
 
 
 def test_foreignobject_paragraph_spacing_defeats_margin_collapsing() -> None:
