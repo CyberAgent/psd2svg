@@ -5,6 +5,7 @@ offering fast and accurate rendering with no external dependencies.
 """
 
 import logging
+import math
 import os
 import re
 from io import BytesIO
@@ -13,7 +14,7 @@ from typing import Union
 import resvg_py
 from PIL import Image
 
-from .base_rasterizer import BaseRasterizer
+from .base_rasterizer import DEFAULT_DPI, BaseRasterizer
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +47,39 @@ class ResvgRasterizer(BaseRasterizer):
         """Initialize the resvg rasterizer.
 
         Args:
-            dpi: Dots per inch for rendering. If 0 (default), uses resvg's
-                default of 96 DPI. Higher values produce larger, higher
-                resolution images (e.g., 300 DPI for print quality).
+            dpi: Dots per inch for rendering. Default is 96 DPI (standard
+                screen resolution); 0 also means 96 DPI. Higher values produce
+                larger, higher resolution images (e.g., 300 DPI for print
+                quality).
         """
         self.dpi = dpi
+
+    def _render_width(self, dimensions: tuple[float, float] | None) -> int | None:
+        """Pixel width that renders a document of this size at ``self.dpi``.
+
+        resvg scales the rendering to the requested width and derives the
+        height from the document's aspect ratio. Its own ``dpi`` option only
+        converts physical units, so it cannot scale a document sized in pixels.
+
+        Args:
+            dimensions: CSS pixel size of the document, or None if unknown.
+
+        Returns:
+            The target width in pixels, or None to render at the document's
+            own CSS size.
+        """
+        scale = self._dpi_scale(self.dpi)
+        if scale == 1.0:
+            return None
+        if dimensions is None:
+            logger.warning(
+                f"Could not determine SVG dimensions; rendering at {DEFAULT_DPI} "
+                f"DPI instead of {self.dpi}"
+            )
+            return None
+        # Round half up, as a browser scales a viewport, so that both
+        # backends give the same size for the same document.
+        return max(1, math.floor(dimensions[0] * scale + 0.5))
 
     @staticmethod
     def _extract_font_file_paths(svg_content: str) -> list[str]:
@@ -117,7 +146,10 @@ class ResvgRasterizer(BaseRasterizer):
         """
         try:
             png_bytes = resvg_py.svg_to_bytes(
-                svg_path=filepath, dpi=int(self.dpi), font_files=font_files
+                svg_path=filepath,
+                dpi=DEFAULT_DPI,
+                width=self._render_width(self._svg_file_dimensions(filepath)),
+                font_files=font_files,
             )
             image = Image.open(BytesIO(png_bytes))
             return self._composite_background(image)
@@ -162,7 +194,10 @@ class ResvgRasterizer(BaseRasterizer):
 
         try:
             png_bytes = resvg_py.svg_to_bytes(
-                svg_string=svg_string, dpi=int(self.dpi), font_files=font_files
+                svg_string=svg_string,
+                dpi=DEFAULT_DPI,
+                width=self._render_width(self._svg_dimensions(svg_string)),
+                font_files=font_files,
             )
             image = Image.open(BytesIO(png_bytes))
             return self._composite_background(image)

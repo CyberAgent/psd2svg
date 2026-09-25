@@ -348,6 +348,19 @@ class TestSVGDocumentImageHandling:
         svg_arg = mock_from_string.call_args[0][0]
         assert f"data:{mime_type};base64," in svg_arg
 
+    @pytest.mark.parametrize(
+        ("dpi", "expected"),
+        [(0, (32, 16)), (96, (32, 16)), (192, (64, 32)), (300, (100, 50))],
+    )
+    def test_rasterize_dpi(self, dpi: int, expected: tuple[int, int]) -> None:
+        """Test rasterize() scales the output with the default rasterizer."""
+        svg_elem = ET.Element("svg", width="32", height="16", viewBox="0 0 32 16")
+        ET.SubElement(svg_elem, "rect", width="32", height="16", fill="red")
+
+        document = SVGDocument(svg=svg_elem)
+
+        assert document.rasterize(dpi=dpi).size == expected
+
     def test_handle_images_empty_document(self) -> None:
         """Test _handle_images() returns early when no images present."""
         svg_elem = ET.Element("svg")
