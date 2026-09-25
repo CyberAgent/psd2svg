@@ -669,7 +669,9 @@ def test_rasterizer_reads_baseline_shift_only_from_tspan() -> None:
     """
     template = """<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <text font-size="32" x="10" y="80"{on_text}><tspan{on_tspan}>Lorem</tspan></text>
+    <text font-family="sans-serif" font-size="32" x="10" y="80"{on_text}>
+        <tspan{on_tspan}>Lorem</tspan>
+    </text>
 </svg>"""
 
     def ink_rows(on_text: str = "", on_tspan: str = "") -> tuple[int, int]:

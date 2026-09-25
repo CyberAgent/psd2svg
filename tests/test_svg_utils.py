@@ -1491,7 +1491,7 @@ class TestMergeSingletonChildren:
         tspan = ET.SubElement(text, "tspan", attrib={"baseline-shift": "16", "x": "10"})
         tspan.text = "Text"
 
-        svg_utils.merge_singleton_children(text, excludes={"baseline-shift"})
+        svg_utils.merge_singleton_children(text, pinned_attributes={"baseline-shift"})
 
         assert len(text) == 1
         assert text[0] is tspan
@@ -1509,7 +1509,7 @@ class TestMergeSingletonChildren:
         inner2 = ET.SubElement(outer_tspan, "tspan")
         inner2.text = "B"
 
-        svg_utils.merge_singleton_children(text, excludes={"baseline-shift"})
+        svg_utils.merge_singleton_children(text, pinned_attributes={"baseline-shift"})
 
         assert len(text) == 1
         assert text[0] is outer_tspan
@@ -1522,7 +1522,7 @@ class TestMergeSingletonChildren:
         tspan = ET.SubElement(text, "tspan", attrib={"font-size": "32"})
         tspan.text = "Text"
 
-        svg_utils.merge_singleton_children(text, excludes={"baseline-shift"})
+        svg_utils.merge_singleton_children(text, pinned_attributes={"baseline-shift"})
 
         assert len(text) == 0
         assert text.text == "Text"
@@ -1543,7 +1543,7 @@ class TestMergeSingletonChildren:
         sibling = ET.SubElement(text, "tspan", attrib={"x": "20"})
         sibling.text = "B"
 
-        svg_utils.merge_singleton_children(text, excludes={"baseline-shift"})
+        svg_utils.merge_singleton_children(text, pinned_attributes={"baseline-shift"})
 
         # The run merged into the paragraph <tspan>, which keeps the shift.
         assert len(text) == 2
@@ -1565,7 +1565,7 @@ class TestMergeSingletonChildren:
         run = ET.SubElement(paragraph, "tspan", attrib={"baseline-shift": "16"})
         run.text = "A"
 
-        svg_utils.merge_singleton_children(text, excludes={"baseline-shift"})
+        svg_utils.merge_singleton_children(text, pinned_attributes={"baseline-shift"})
 
         assert len(text) == 1
         assert text[0] is paragraph

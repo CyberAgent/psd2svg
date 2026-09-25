@@ -84,12 +84,14 @@ FAUX_BOLD_STROKE_RATIO = 0.03
 # issue #439 records the measurements.
 EM_BOX_DESCENT_RATIO = 0.12
 
-# Attributes only a <tspan> can carry: resvg honors baseline-shift on a <tspan>
-# but ignores it on <text>, so a shift that reaches the <text> element is
-# dropped from the render. Two optimization passes can put it there - hoisting a
-# value that every run shares, and merging a lone run into its parent - so both
-# are told to leave it alone. See GitHub issue #445.
-_TSPAN_ONLY_ATTRIBUTES = {"baseline-shift"}
+# Attributes resvg only honors on a <tspan>: it ignores baseline-shift on
+# <text>, so a shift that reaches the <text> element is dropped from the
+# render. Two optimization passes can put it there. Hoisting reaches it when
+# every run shares a value, which character alignment makes possible: a run
+# offset by alignment and a run carrying the same authored BaselineShift end up
+# with equal totals. Merging reaches it when a lone run is folded into its
+# parent. See GitHub issue #445.
+_TSPAN_PINNED_ATTRIBUTES = {"baseline-shift"}
 
 # Attributes that must stay on the <tspan> that owns them. Positions are
 # per-run by definition.
@@ -99,7 +101,7 @@ _UNHOISTABLE_TEXT_ATTRIBUTES = {
     "dx",
     "dy",
     "transform",
-} | _TSPAN_ONLY_ATTRIBUTES
+} | _TSPAN_PINNED_ATTRIBUTES
 
 
 class EmittedSpan(NamedTuple):
@@ -637,9 +639,7 @@ class TextConverter(ConverterProtocol):
                 )
                 svg_utils.merge_consecutive_siblings(child)
                 svg_utils.merge_offset_siblings(child)
-                svg_utils.merge_singleton_children(
-                    child, excludes=_TSPAN_ONLY_ATTRIBUTES
-                )
+                svg_utils.merge_singleton_children(child)
                 svg_utils.merge_attribute_less_children(child)
         else:
             svg_utils.merge_common_child_attributes(
@@ -649,7 +649,7 @@ class TextConverter(ConverterProtocol):
             svg_utils.merge_consecutive_siblings(text_node)
             svg_utils.merge_offset_siblings(text_node)
             svg_utils.merge_singleton_children(
-                text_node, excludes=_TSPAN_ONLY_ATTRIBUTES
+                text_node, pinned_attributes=_TSPAN_PINNED_ATTRIBUTES
             )
             svg_utils.merge_attribute_less_children(text_node)
         return text_node
