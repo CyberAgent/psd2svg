@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`save()` wrote `html:`-prefixed XHTML** (#PR)
+- **`save()` wrote `html:`-prefixed XHTML** (#437)
   - A saved file now holds the same markup `tostring()` returns, so Chromium
     applies the `<foreignObject>` paragraph strut instead of ignoring it
 
