@@ -3936,10 +3936,9 @@ def test_alignment_em_fraction(
 ) -> None:
     """Test the point in the em box that each alignment mode aligns runs by.
 
-    ``ROMAN_BASELINE`` and ``EM_BOX_CENTER`` trade places between the two
-    writing directions. The ICF modes are None in both, because the ideographic
-    character face is measured per font, which conversion cannot do; see GitHub
-    issue #440.
+    ``ROMAN`` and ``CENTER`` trade places between the two writing directions.
+    The ICF modes are None in both, because the ideographic character face is
+    measured per font, which conversion cannot do; see GitHub issue #440.
     """
     assert (
         _alignment_em_fraction(alignment, WritingDirection.HORIZONTAL_TB) == horizontal
