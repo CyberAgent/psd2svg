@@ -4036,3 +4036,32 @@ def test_character_alignment_skips_native_box_text() -> None:
     svg = convert_psd_to_svg("texts/style-run-alignment-3-shapetype1.psd")
     assert svg.find('.//*[@dominant-baseline="hanging"]') is not None
     assert _emitted_baseline_shifts("texts/style-run-alignment-3-shapetype1.psd") == []
+
+
+def test_character_alignment_skips_scripts() -> None:
+    """Test that a superscript or subscript run is not aligned.
+
+    Photoshop offsets neither, whatever their size. Measured on the fixture,
+    a 32px superscript beside a 64px run lands in the same place under em box
+    bottom alignment as under Roman baseline alignment, while a plain 32px run
+    moves 3.94px between the two. So the script offset is emitted alone.
+    """
+    _, text_setting = _first_text_setting("texts/style-run-alignment-0-superscript.psd")
+    spans = [span for para in text_setting for span in para if span.text.strip("\r")]
+    assert [span.style.font_baseline for span in spans] == [
+        FontBaseline.ROMAN,
+        FontBaseline.SUPERSCRIPT,
+    ]
+    assert {span.style.style_run_alignment for span in spans} == {
+        StyleRunAlignment.BOTTOM
+    }
+    assert {span.style.font_size for span in spans} == {64.0, 32.0}
+
+    # The superscript offset is positive and carries no alignment term, which
+    # would have subtracted EM_BOX_DESCENT_RATIO * 32 from it.
+    shifts = _emitted_baseline_shifts("texts/style-run-alignment-0-superscript.psd")
+    assert len(shifts) == 1
+    # The emitted attribute is rounded, so compare within a hundredth.
+    assert shifts[0] == pytest.approx(
+        32.0 * text_setting.superscript_position, abs=0.01
+    ), "Script runs carry the script offset alone"

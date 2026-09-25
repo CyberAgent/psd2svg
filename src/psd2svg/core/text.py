@@ -1297,8 +1297,9 @@ class TextConverter(ConverterProtocol):
         """Return the size of a span's em box across the writing direction.
 
         Character alignment measures the em box, so this follows the cross-axis
-        scale and leaves out the superscript and subscript size reductions,
-        which Photoshop applies to a run after aligning it.
+        scale. The superscript and subscript reductions are left out because
+        Photoshop does not align those runs at all; see
+        :meth:`_character_alignment_shift`.
         """
         style = span.style
         return self._calculate_text_scaling(
@@ -1348,6 +1349,12 @@ class TextConverter(ConverterProtocol):
         # it would put an attribute on an invisible <tspan> and keep the
         # optimizer from merging it away.
         if reference_size is None or not span.text.strip("\r"):
+            return 0.0
+        # Photoshop does not align a superscript or subscript run, whatever its
+        # size: measured against a run of the same size that is not one, em box
+        # bottom alignment moves it by 3.94px and leaves the script where the
+        # Roman baseline mode puts it.
+        if span.style.font_baseline != FontBaseline.ROMAN:
             return 0.0
         fraction = _alignment_em_fraction(
             span.style.style_run_alignment, text_setting.writing_direction
