@@ -74,9 +74,15 @@ FAUX_BOLD_STROKE_RATIO = 0.03
 # ideographic baseline in the font's BASE table, but conversion never opens a
 # font (see docs/technical-notes.rst), so a single constant stands in for it.
 # 0.12 is the 88/12 em box that Japanese faces are drawn to, and character
-# alignment is an East-Asian feature: measured against Photoshop it is exact for
-# Noto Sans CJK JP and approximate for faces built to other proportions. See
-# GitHub issue #439.
+# alignment is an East-Asian feature. Measured against Photoshop with a 152px
+# and a 20px run, it is exact for Noto Sans CJK JP, whose BASE table gives
+# -120/1000, and approximate for faces built to other proportions: Arial, which
+# has no BASE table, behaves as about 0.146. A short size gap appears to support
+# 0.125 instead, because a fixed sub-pixel raster bias is divided by that gap.
+#
+# The size this is a fraction of is the em box across the writing direction,
+# vertical scale included; see :meth:`TextConverter._cross_axis_em`. See GitHub
+# issue #439.
 EM_BOX_DESCENT_RATIO = 0.12
 
 
@@ -123,18 +129,19 @@ def _alignment_em_fraction(
     The fraction runs from 0 at the em box bottom to 1 at its top, and from 0 at
     the left edge to 1 at the right one in vertical writing.
 
-    ``ROMAN_BASELINE`` and ``EM_BOX_CENTER`` trade places between the two writing
-    directions. The ICF modes return None because the ideographic character face
-    is measured per font, which conversion cannot do; see GitHub issue #440.
+    ``ROMAN`` and ``CENTER`` trade places between the two writing directions, so
+    the fraction each maps to is not the one its name suggests in both. The ICF
+    modes return None because the ideographic character face is measured per
+    font, which conversion cannot do; see GitHub issue #440.
     """
     horizontal = writing_direction == WritingDirection.HORIZONTAL_TB
-    if alignment == StyleRunAlignment.EM_BOX_BOTTOM:
+    if alignment == StyleRunAlignment.BOTTOM:
         return 0.0
-    if alignment == StyleRunAlignment.EM_BOX_TOP:
+    if alignment == StyleRunAlignment.TOP:
         return 1.0
-    if alignment == StyleRunAlignment.ROMAN_BASELINE:
+    if alignment == StyleRunAlignment.ROMAN:
         return EM_BOX_DESCENT_RATIO if horizontal else 0.5
-    if alignment == StyleRunAlignment.EM_BOX_CENTER:
+    if alignment == StyleRunAlignment.CENTER:
         return 0.5 if horizontal else EM_BOX_DESCENT_RATIO
     return None
 
@@ -1063,7 +1070,9 @@ class TextConverter(ConverterProtocol):
                 stroke_width=stroke_width,
                 stroke_linejoin=stroke_linejoin,
                 paint_order=paint_order,
-                baseline_shift=baseline_shift if baseline_shift != 0.0 else None,
+                baseline_shift=baseline_shift
+                if abs(baseline_shift) >= NEGLIGIBLE_MARGIN_THRESHOLD
+                else None,
             )
         if style.font_caps == FontCaps.ALL_CAPS:
             svg_utils.add_style(tspan, "text-transform", "uppercase")
@@ -1334,7 +1343,11 @@ class TextConverter(ConverterProtocol):
         smaller run by that fraction of the size difference, less whatever SVG
         already aligns it by.
         """
-        if reference_size is None:
+        # A paragraph break is a run of its own carrying the default size, and
+        # it draws nothing. It is left out of the reference size, so offsetting
+        # it would put an attribute on an invisible <tspan> and keep the
+        # optimizer from merging it away.
+        if reference_size is None or not span.text.strip("\r"):
             return 0.0
         fraction = _alignment_em_fraction(
             span.style.style_run_alignment, text_setting.writing_direction
@@ -1770,7 +1783,7 @@ class TextConverter(ConverterProtocol):
         # The offset runs along the block axis, so it is emitted as a logical
         # inset, which points towards the start of that axis and therefore
         # against the shift.
-        if baseline_shift != 0.0:
+        if abs(baseline_shift) >= NEGLIGIBLE_MARGIN_THRESHOLD:
             styles["position"] = "relative"
             styles["inset-block-start"] = svg_utils.num2str_with_unit(-baseline_shift)
 

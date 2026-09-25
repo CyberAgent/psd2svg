@@ -3819,33 +3819,116 @@ def test_character_alignment_reference_follows_vertical_scale() -> None:
     ) == pytest.approx([-3.84])
 
 
-def test_character_alignment_ignores_equal_sized_runs() -> None:
+_ALIGNMENT_DIRECTION_FIXTURES = {
+    WritingDirection.HORIZONTAL_TB: "texts/style-run-alignment-2.psd",
+    WritingDirection.VERTICAL_RL: "texts/style-run-alignment-2-writingdirection2.psd",
+}
+
+
+def _shift_for(
+    alignment: StyleRunAlignment,
+    writing_direction: WritingDirection,
+    font_size: float,
+    reference_size: float,
+    text: str = "X",
+) -> float:
+    """Return the offset the converter gives one synthesised run.
+
+    The writing direction comes from a real fixture, so the span is the only
+    thing synthesised.
+    """
+    psdimage = PSDImage.open(
+        get_fixture(_ALIGNMENT_DIRECTION_FIXTURES[writing_direction])
+    )
+    converter = Converter(psdimage)
+    layer = next(
+        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
+    )
+    text_setting = TypeSetting(layer._data)
+    assert text_setting.writing_direction == writing_direction
+    span = Span(
+        start=0,
+        end=len(text),
+        text=text,
+        style=StyleSheet(
+            name="",
+            style_sheet_data={
+                "FontSize": font_size,
+                "StyleRunAlignment": int(alignment),
+            },
+        ),
+    )
+    return converter._character_alignment_shift(span, text_setting, reference_size)
+
+
+@pytest.mark.parametrize("alignment", list(StyleRunAlignment))
+@pytest.mark.parametrize(
+    "writing_direction", [WritingDirection.HORIZONTAL_TB, WritingDirection.VERTICAL_RL]
+)
+def test_character_alignment_ignores_equal_sized_runs(
+    alignment: StyleRunAlignment, writing_direction: WritingDirection
+) -> None:
     """Test that runs of one size are untouched, whatever the alignment is.
 
     The offset is proportional to the difference between a run's em box and the
-    largest one on the line, so a paragraph of one size has nothing to align.
+    largest one on the line, so a paragraph of one size has nothing to align, in
+    every mode and both writing directions.
     """
-    _, text_setting = _first_text_setting(
-        "texts/paragraph-shapetype1-multiple-spans.psd"
-    )
-    spans = [span for para in text_setting for span in para if span.text.strip("\r")]
-    assert len({span.style.font_size for span in spans}) == 1
-    assert len(spans) > 1, "Fixture should have several runs of the same size"
+    assert _shift_for(alignment, writing_direction, 32.0, 32.0) == 0.0
 
+
+def test_character_alignment_skips_runs_that_draw_nothing() -> None:
+    """Test that a paragraph break is not offset.
+
+    A break is a run of its own carrying the default size, which the reference
+    size leaves out. Offsetting it would put an attribute on an invisible
+    <tspan> and stop the optimizer merging it away.
+    """
     assert (
-        _emitted_baseline_shifts("texts/paragraph-shapetype1-multiple-spans.psd") == []
+        _shift_for(
+            StyleRunAlignment.BOTTOM, WritingDirection.HORIZONTAL_TB, 32.0, 64.0, "\r"
+        )
+        == 0.0
     )
+    # The same run with text in it is offset.
+    assert _shift_for(
+        StyleRunAlignment.BOTTOM, WritingDirection.HORIZONTAL_TB, 32.0, 64.0
+    ) == pytest.approx(-3.84)
+
+
+@pytest.mark.parametrize(
+    ("alignment", "expected"),
+    [
+        (StyleRunAlignment.BOTTOM, -16.0),
+        (StyleRunAlignment.ROMAN, 0.0),
+        (StyleRunAlignment.CENTER, -12.16),
+        (StyleRunAlignment.TOP, 16.0),
+    ],
+)
+def test_character_alignment_vertical_offsets(
+    alignment: StyleRunAlignment, expected: float
+) -> None:
+    """Test the vertical offsets, including the two modes with no fixture.
+
+    Vertical text is centred on the em box by default, so the em box edges sit a
+    symmetric half of the size difference away and the Roman baseline
+    ``0.5 - EM_BOX_DESCENT_RATIO`` of it. The fixtures cover ROMAN and CENTER;
+    BOTTOM and TOP are asserted here.
+    """
+    assert _shift_for(
+        alignment, WritingDirection.VERTICAL_RL, 32.0, 64.0
+    ) == pytest.approx(expected)
 
 
 @pytest.mark.parametrize(
     ("alignment", "horizontal", "vertical"),
     [
-        (StyleRunAlignment.EM_BOX_BOTTOM, 0.0, 0.0),
+        (StyleRunAlignment.BOTTOM, 0.0, 0.0),
         (StyleRunAlignment.ICF_BOTTOM, None, None),
-        (StyleRunAlignment.ROMAN_BASELINE, EM_BOX_DESCENT_RATIO, 0.5),
-        (StyleRunAlignment.EM_BOX_CENTER, 0.5, EM_BOX_DESCENT_RATIO),
+        (StyleRunAlignment.ROMAN, EM_BOX_DESCENT_RATIO, 0.5),
+        (StyleRunAlignment.CENTER, 0.5, EM_BOX_DESCENT_RATIO),
         (StyleRunAlignment.ICF_TOP, None, None),
-        (StyleRunAlignment.EM_BOX_TOP, 1.0, 1.0),
+        (StyleRunAlignment.TOP, 1.0, 1.0),
     ],
 )
 def test_alignment_em_fraction(
@@ -3870,7 +3953,7 @@ def test_style_run_alignment_parses_every_value() -> None:
         style = StyleSheet(name="", style_sheet_data={"StyleRunAlignment": value})
         assert style.style_run_alignment == StyleRunAlignment(value)
     default = StyleSheet(name="", style_sheet_data={})
-    assert default.style_run_alignment == StyleRunAlignment.EM_BOX_BOTTOM
+    assert default.style_run_alignment == StyleRunAlignment.BOTTOM
 
 
 def test_foreignobject_character_alignment_offsets_the_span() -> None:
@@ -3900,14 +3983,23 @@ def test_foreignobject_character_alignment_offsets_the_span() -> None:
     assert insets == pytest.approx([-native[0]])
 
 
-def test_em_box_descent_ratio_matches_the_japanese_em_box() -> None:
-    """Test that the em box descent constant is the 88/12 Japanese em box.
+def test_em_box_descent_ratio_sets_the_emitted_offsets() -> None:
+    """Test that the em box descent constant is what the offsets are built from.
 
-    Photoshop reads this per font from the ideographic baseline in the font's
-    BASE table; conversion never opens a font, so this constant stands in for
-    it. Noto Sans CJK JP, which the fixtures use, carries exactly -120/1000.
+    Photoshop reads this fraction per font, from the ideographic baseline in the
+    font's BASE table; conversion never opens a font, so one constant stands in
+    for it. Rather than restate its value, this pins the relation the fixtures
+    were measured against: em box bottom alignment offsets a run by the descent
+    fraction of the size difference, and em box top by the rest of it.
     """
-    assert EM_BOX_DESCENT_RATIO == pytest.approx(0.12)
+    difference = 64.0 - 32.0
+    bottom = _shift_for(
+        StyleRunAlignment.BOTTOM, WritingDirection.HORIZONTAL_TB, 32.0, 64.0
+    )
+    top = _shift_for(StyleRunAlignment.TOP, WritingDirection.HORIZONTAL_TB, 32.0, 64.0)
+    assert bottom == pytest.approx(-EM_BOX_DESCENT_RATIO * difference)
+    assert top == pytest.approx((1.0 - EM_BOX_DESCENT_RATIO) * difference)
+    assert top - bottom == pytest.approx(difference)
 
 
 def test_character_alignment_defaults_differ_by_writing_direction() -> None:
