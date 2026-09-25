@@ -64,6 +64,7 @@ class SVGDocument:
         text_wrapping_mode: int = 0,
         font_mapping: dict[str, dict[str, float | str]] | None = None,
         resource_limits: ResourceLimits | None = None,
+        include_hidden_layers: bool = False,
     ) -> "SVGDocument":
         """Create a new SVGDocument from a PSDImage.
 
@@ -84,6 +85,9 @@ class SVGDocument:
                 attributes, producing cleaner SVG output. Set to True to add class
                 attributes for layer types, effects, and semantic roles (e.g.,
                 "shape-layer", "drop-shadow-effect", "fill") for debugging or styling.
+            include_hidden_layers: Include layers hidden in Photoshop. When False
+                (default), hidden layers are omitted from the SVG. When True, they are
+                converted like visible layers.
             text_letter_spacing_offset: Global offset (in pixels) to add to all
                 letter-spacing values. This can be used to compensate for differences
                 between Photoshop's text rendering and SVG's text rendering. Typical
@@ -125,6 +129,7 @@ class SVGDocument:
             enable_text=enable_text,
             enable_title=enable_title,
             enable_class=enable_class,
+            include_hidden_layers=include_hidden_layers,
             text_letter_spacing_offset=text_letter_spacing_offset,
             text_wrapping_mode=text_wrapping_mode,
             font_mapping=font_mapping,
@@ -1004,6 +1009,7 @@ def convert(
     embed_fonts: bool = False,
     font_format: str = "woff2",
     resource_limits: ResourceLimits | None = None,
+    include_hidden_layers: bool = False,
 ) -> None:
     """Convenience method to convert a PSD file to an SVG file.
 
@@ -1027,6 +1033,9 @@ def convert(
             attributes, producing cleaner SVG output. Set to True to add class
             attributes for layer types, effects, and semantic roles (e.g.,
             "shape-layer", "drop-shadow-effect", "fill") for debugging or styling.
+        include_hidden_layers: Include layers hidden in Photoshop. When False
+            (default), hidden layers are omitted from the SVG. When True, they are
+            converted like visible layers.
         image_format: Image format to use when embedding or saving images.
             Supported formats: 'webp', 'png', 'jpeg'. Default is 'webp'.
         text_letter_spacing_offset: Global offset (in pixels) to add to all
@@ -1081,6 +1090,7 @@ def convert(
         enable_live_shapes=enable_live_shapes,
         enable_title=enable_title,
         enable_class=enable_class,
+        include_hidden_layers=include_hidden_layers,
         text_letter_spacing_offset=text_letter_spacing_offset,
         text_wrapping_mode=text_wrapping_mode,
         font_mapping=font_mapping,

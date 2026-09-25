@@ -26,6 +26,7 @@ class ConverterProtocol(Protocol):
     enable_text: bool
     enable_title: bool
     enable_class: bool
+    include_hidden_layers: bool
 
     # Text conversion configuration
     text_letter_spacing_offset: float

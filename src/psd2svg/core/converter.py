@@ -59,6 +59,8 @@ class Converter(
             producing cleaner SVG output. Set to True to add class attributes for layer
             types, effects, and semantic roles (e.g., "shape-layer",
             "drop-shadow-effect", "fill") for debugging or styling.
+        include_hidden_layers: Include layers hidden in Photoshop. When False
+            (default), hidden layers are omitted from the SVG.
         text_letter_spacing_offset: Global offset (in pixels) to add to all
             letter-spacing values. This can be used to compensate for differences
             between Photoshop's text rendering and SVG's text rendering. Typical values
@@ -89,6 +91,7 @@ class Converter(
         text_wrapping_mode: int = 0,
         font_mapping: dict[str, dict[str, float | str]] | None = None,
         resource_limits: ResourceLimits | None = None,
+        include_hidden_layers: bool = False,
     ) -> None:
         """Initialize the converter internal state."""
         # Source PSD image.
@@ -99,6 +102,7 @@ class Converter(
         self.enable_text = enable_text
         self.enable_title = enable_title
         self.enable_class = enable_class
+        self.include_hidden_layers = include_hidden_layers
         self.text_letter_spacing_offset = text_letter_spacing_offset
         self.text_wrapping_mode = text_wrapping_mode
         self.font_mapping = font_mapping
