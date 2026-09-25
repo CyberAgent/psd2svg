@@ -118,7 +118,7 @@ def test_rasterizer_context_manager(simple_svg: str) -> None:
 
 @requires_playwright
 def test_rasterizer_dpi_scaling(simple_svg: str) -> None:
-    """Test DPI scaling produces different resolutions."""
+    """Test DPI scaling scales the content, not just the canvas."""
     with PlaywrightRasterizer(dpi=96) as rasterizer_96:
         image_96 = rasterizer_96.from_string(simple_svg)
 
@@ -128,6 +128,10 @@ def test_rasterizer_dpi_scaling(simple_svg: str) -> None:
     # 192 DPI should produce 2x resolution
     assert image_96.size == (100, 100)
     assert image_192.size == (200, 200)
+
+    # The rect drawn at (10, 10)-(90, 90) must scale with the canvas
+    assert image_96.getchannel("A").getbbox() == (10, 10, 90, 90)
+    assert image_192.getchannel("A").getbbox() == (20, 20, 180, 180)
 
 
 @requires_playwright

@@ -203,19 +203,24 @@ class PlaywrightRasterizer(BaseRasterizer):
         # Parse SVG to get dimensions
         dimensions = self._get_svg_dimensions(svg_str)
 
-        # Calculate viewport size based on DPI. The viewport is passed to
-        # new_page() rather than applied afterwards: set_viewport_size() takes
-        # no timeout and never returns while the renderer is busy, which turns
-        # a slow render into an unrecoverable hang.
-        scale = self.dpi / 96.0
+        # The viewport holds the document's CSS size; DPI scaling comes from
+        # device_scale_factor, which multiplies the screenshot's device pixels
+        # so the content itself is rendered at the higher resolution.
+        #
+        # Both are passed to new_page() rather than applied afterwards:
+        # set_viewport_size() takes no timeout and never returns while the
+        # renderer is busy, which turns a slow render into an unrecoverable
+        # hang, and device_scale_factor is only settable at page creation.
         viewport: ViewportSize = {
-            "width": int(dimensions["width"] * scale),
-            "height": int(dimensions["height"] * scale),
+            "width": int(dimensions["width"]),
+            "height": int(dimensions["height"]),
         }
 
         # Create page and set content
         assert self._browser is not None
-        page = self._browser.new_page(viewport=viewport)
+        page = self._browser.new_page(
+            viewport=viewport, device_scale_factor=self.dpi / 96.0
+        )
 
         try:
             # Embed SVG in minimal HTML
