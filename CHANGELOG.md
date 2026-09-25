@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`PlaywrightRasterizer` could hang forever on a slow document** (#PR)
+  - A document Chromium cannot render now raises `TimeoutError` instead of
+    blocking indefinitely
+
 - **Auto-leaded lines used the wrong line height** (#409)
   - Auto leading now scales the font size by the paragraph's Auto Leading
     percentage instead of adding the leftover `Leading` value to it

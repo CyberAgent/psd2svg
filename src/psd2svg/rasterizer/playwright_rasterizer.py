@@ -17,7 +17,7 @@ from PIL import Image
 from .base_rasterizer import BaseRasterizer
 
 if TYPE_CHECKING:
-    from playwright.sync_api import Browser, Playwright
+    from playwright.sync_api import Browser, Playwright, ViewportSize
 
 logger = logging.getLogger(__name__)
 
@@ -203,9 +203,19 @@ class PlaywrightRasterizer(BaseRasterizer):
         # Parse SVG to get dimensions
         dimensions = self._get_svg_dimensions(svg_str)
 
+        # Calculate viewport size based on DPI. The viewport is passed to
+        # new_page() rather than applied afterwards: set_viewport_size() takes
+        # no timeout and never returns while the renderer is busy, which turns
+        # a slow render into an unrecoverable hang.
+        scale = self.dpi / 96.0
+        viewport: ViewportSize = {
+            "width": int(dimensions["width"] * scale),
+            "height": int(dimensions["height"] * scale),
+        }
+
         # Create page and set content
         assert self._browser is not None
-        page = self._browser.new_page()
+        page = self._browser.new_page(viewport=viewport)
 
         try:
             # Embed SVG in minimal HTML
@@ -231,13 +241,6 @@ class PlaywrightRasterizer(BaseRasterizer):
 </html>"""
 
             page.set_content(html, wait_until="networkidle")
-
-            # Calculate viewport size based on DPI
-            scale = self.dpi / 96.0
-            viewport_width = int(dimensions["width"] * scale)
-            viewport_height = int(dimensions["height"] * scale)
-
-            page.set_viewport_size({"width": viewport_width, "height": viewport_height})
 
             # Take screenshot with transparency
             screenshot_bytes = page.screenshot(type="png", omit_background=True)

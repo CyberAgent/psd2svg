@@ -3,6 +3,7 @@
 import asyncio
 import os
 import tempfile
+from typing import NoReturn
 
 import pytest
 from PIL import Image
@@ -268,3 +269,21 @@ def test_rasterizer_in_async_context(simple_svg: str) -> None:
 
     # Run inside asyncio event loop (simulates Jupyter environment)
     asyncio.run(test_async())
+
+
+@requires_playwright
+def test_rasterizer_does_not_resize_viewport(
+    simple_svg: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that rasterization never calls the unbounded set_viewport_size()."""
+    from playwright.sync_api import Page  # noqa: PLC0415
+
+    def fail(*args: object, **kwargs: object) -> NoReturn:
+        raise AssertionError("set_viewport_size() must not be called")
+
+    monkeypatch.setattr(Page, "set_viewport_size", fail)
+
+    with PlaywrightRasterizer(dpi=192) as rasterizer:
+        image = rasterizer.from_string(simple_svg)
+
+    assert image.size == (200, 200)
