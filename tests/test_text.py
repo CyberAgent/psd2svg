@@ -24,6 +24,7 @@ from psd2svg.core.typesetting import (
     FontBaseline,
     Paragraph,
     ParagraphSheet,
+    ShapeType,
     Span,
     StyleRunAlignment,
     StyleSheet,
@@ -4102,17 +4103,28 @@ def test_character_alignment_is_scoped_to_the_paragraph() -> None:
 
 
 def test_character_alignment_leaves_equal_sized_runs_alone_end_to_end() -> None:
-    """Test that a converted layer of equally sized runs gains no offset."""
-    _, text_setting = _first_text_setting(
-        "texts/paragraph-shapetype1-multiple-spans.psd"
+    """Test that a converted layer of equally sized runs gains no offset.
+
+    The fixture has to be point text carrying a mode that does emit an offset
+    when sizes differ, or the empty result proves nothing: box text skips
+    alignment in the native path, and the Roman baseline mode emits nothing
+    whatever the sizes are.
+    """
+    fixture = "texts/style-tracking-tsume.psd"
+    _, text_setting = _first_text_setting(fixture)
+    assert text_setting.shape_type == ShapeType.POINT, (
+        "Box text bypasses native alignment, so it cannot witness this"
     )
     spans = [span for para in text_setting for span in para if span.text.strip("\r")]
     assert len(spans) > 1
-    assert len({span.style.font_size for span in spans}) == 1
-
     assert (
-        _emitted_baseline_shifts("texts/paragraph-shapetype1-multiple-spans.psd") == []
+        len({span.style.font_size * span.style.vertical_scale for span in spans}) == 1
     )
+    assert {span.style.style_run_alignment for span in spans} == {
+        StyleRunAlignment.BOTTOM
+    }, "A mode that offsets nothing by itself would make this vacuous"
+
+    assert _emitted_baseline_shifts(fixture) == []
 
 
 def test_foreignobject_character_alignment_in_vertical_writing() -> None:
@@ -4196,3 +4208,36 @@ def test_alignment_reference_is_the_drawn_em_box_of_a_script() -> None:
         roman, text_setting, reference
     ) == pytest.approx(-EM_BOX_DESCENT_RATIO * (reference - 20.0))
     assert converter._character_alignment_shift(script, text_setting, reference) == 0.0
+
+
+def test_character_alignment_offsets_stay_on_their_own_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that a shift shared by every run is not hoisted onto <text>.
+
+    resvg honors ``baseline-shift`` on a ``<tspan>`` but ignores it on
+    ``<text>``, so hoisting one that all runs happen to share drops it from the
+    render entirely. Character alignment makes that collision reachable: here
+    the 64px run's authored BaselineShift equals what alignment gives the 32px
+    run, so both totals are 12.16. See GitHub issue #445.
+    """
+    monkeypatch.setattr(
+        StyleSheet,
+        "baseline_shift",
+        property(
+            lambda self: (
+                12.16
+                if self.font_size == 64.0
+                else float(self.style_sheet_data.get("BaselineShift", 0.0))
+            )
+        ),
+    )
+
+    svg = convert_psd_to_svg("texts/style-run-alignment-3.psd")
+    text = svg.find(".//text")
+    assert text is not None
+    assert "baseline-shift" not in text.attrib, (
+        "A shift on <text> is silently dropped by resvg"
+    )
+    shifts = [tspan.attrib.get("baseline-shift") for tspan in text.findall("tspan")]
+    assert shifts == ["12.16", "12.16"]
