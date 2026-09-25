@@ -410,6 +410,10 @@ To enable text wrapping:
   to one letter spacing off their Photoshop position, because CSS counts the
   spacing that follows the last character of each line
   (`#404 <https://github.com/CyberAgent/psd2svg/issues/404>`_)
+* A paragraph that mixes font sizes renders taller than its leading: CSS grows
+  each line box to cover the smallest span on it, and the ascent and descent it
+  would take to prevent that are not known when the markup is written
+  (`#427 <https://github.com/CyberAgent/psd2svg/issues/427>`_)
 * Point text (ShapeType=0) always uses native SVG ``<text>`` elements, regardless of this setting
 * Default behavior (``text_wrapping_mode=0``) maintains backward compatibility with native SVG text
 * For web-only SVG display or browser-based rendering, foreignObject provides better text wrapping
