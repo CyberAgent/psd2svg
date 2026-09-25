@@ -84,15 +84,24 @@ FAUX_BOLD_STROKE_RATIO = 0.03
 # issue #439 records the measurements.
 EM_BOX_DESCENT_RATIO = 0.12
 
-# Attributes that must stay on the <tspan> that owns them.
-#
-# Positions are per-run by definition. baseline-shift is here because resvg
-# honors it on a <tspan> but ignores it on <text>, so hoisting a shift that
-# every run happens to share silently drops it from the render. Character
-# alignment makes that collision reachable: a run offset by alignment and a
-# run carrying the same authored BaselineShift end up with equal totals. See
-# GitHub issue #445.
-_UNHOISTABLE_TEXT_ATTRIBUTES = {"x", "y", "dx", "dy", "transform", "baseline-shift"}
+# Attributes resvg only honors on a <tspan>: it ignores baseline-shift on
+# <text>, so a shift that reaches the <text> element is dropped from the
+# render. Two optimization passes can put it there. Hoisting reaches it when
+# every run shares a value, which character alignment makes possible: a run
+# offset by alignment and a run carrying the same authored BaselineShift end up
+# with equal totals. Merging reaches it when a lone run is folded into its
+# parent. See GitHub issue #445.
+_TSPAN_PINNED_ATTRIBUTES = {"baseline-shift"}
+
+# Attributes that must stay on the <tspan> that owns them. Positions are
+# per-run by definition.
+_UNHOISTABLE_TEXT_ATTRIBUTES = {
+    "x",
+    "y",
+    "dx",
+    "dy",
+    "transform",
+} | _TSPAN_PINNED_ATTRIBUTES
 
 
 class EmittedSpan(NamedTuple):
@@ -638,7 +647,9 @@ class TextConverter(ConverterProtocol):
             )
             svg_utils.merge_consecutive_siblings(text_node)
             svg_utils.merge_offset_siblings(text_node)
-            svg_utils.merge_singleton_children(text_node)
+            svg_utils.merge_singleton_children(
+                text_node, pinned_attributes=_TSPAN_PINNED_ATTRIBUTES
+            )
             svg_utils.merge_attribute_less_children(text_node)
         return text_node
 
