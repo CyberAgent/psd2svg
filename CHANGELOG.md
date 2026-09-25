@@ -30,11 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`dpi` had no effect with the default rasterizer** (#PR)
+- **`dpi` had no effect with the default rasterizer** (#431)
   - `ResvgRasterizer` now scales by `dpi / 96` as `PlaywrightRasterizer` does,
     so `rasterize(dpi=300)` returns 9.8x the pixels it used to
 
-- **`ResvgRasterizer(dpi=0)` dropped elements sized in physical units** (#PR)
+- **`ResvgRasterizer(dpi=0)` dropped elements sized in physical units** (#431)
 
 - **foreignObject spans were separated by a space** (#432)
   - The serializer no longer indents the XHTML inside a `<foreignObject>`, so a
