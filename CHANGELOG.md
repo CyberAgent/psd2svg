@@ -26,11 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Paragraph space before/after was dropped in native SVG output** (#PR)
+- **Paragraph space before/after was dropped in native SVG output** (#420)
   - Both properties now widen the paragraph advance, summed across a break and
     suppressed before the first paragraph, as Photoshop draws them
 
-- **foreignObject collapsed the gap between paragraphs** (#PR)
+- **foreignObject collapsed the gap between paragraphs** (#420)
   - The whole gap is emitted as one `margin-block-start`, so CSS margin
     collapsing no longer renders `space_after` + `space_before` as the larger
     of the two
