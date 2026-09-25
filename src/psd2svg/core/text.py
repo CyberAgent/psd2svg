@@ -1294,27 +1294,34 @@ class TextConverter(ConverterProtocol):
         return TextScaling(font_size * inline_scale, baseline_size, transform_scale)
 
     def _cross_axis_em(self, span: Span, text_setting: TypeSetting) -> float:
-        """Return the size of a span's em box across the writing direction.
+        """Return the size of a span's drawn em box across the writing direction.
 
-        Character alignment measures the em box, so this follows the cross-axis
-        scale. The superscript and subscript reductions are left out because
-        Photoshop does not align those runs at all; see
-        :meth:`_character_alignment_shift`.
+        Character alignment measures the em box a run is actually drawn at, so
+        this follows the cross-axis scale and the superscript and subscript
+        reductions alike. A script run is never itself aligned
+        (:meth:`_character_alignment_shift`), but its smaller em box can still
+        be the largest on the line and so become what the others align to.
         """
         style = span.style
-        return self._calculate_text_scaling(
+        em = self._calculate_text_scaling(
             style.font_size,
             style.horizontal_scale,
             style.vertical_scale,
             text_setting.writing_direction,
         ).baseline_size
+        if style.font_baseline == FontBaseline.SUPERSCRIPT:
+            em *= text_setting.superscript_size
+        elif style.font_baseline == FontBaseline.SUBSCRIPT:
+            em *= text_setting.subscript_size
+        return em
 
     def _alignment_reference_size(
         self, paragraph: Paragraph, text_setting: TypeSetting
     ) -> float:
         """Return the em box size that character alignment aligns a paragraph to.
 
-        Photoshop aligns every run on a line to the largest em box on it. Which
+        Photoshop aligns every run on a line to the largest em box drawn on it,
+        a superscript's reduced one included. Which
         runs share a line is not known without laying the paragraph out, so the
         largest in the whole paragraph stands in for it, the same approximation
         :meth:`_line_box_span` makes. Relative offsets between runs of one line

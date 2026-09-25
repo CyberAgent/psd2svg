@@ -4145,3 +4145,54 @@ def test_foreignobject_character_alignment_in_vertical_writing() -> None:
     assert float(styles["inset-block-start"].removesuffix("px")) == pytest.approx(
         -shift
     )
+
+
+def test_alignment_reference_is_the_drawn_em_box_of_a_script() -> None:
+    """Test that a script run sets the reference by its reduced em box.
+
+    A superscript is never itself aligned, but its em box is still drawn on the
+    line and can be the largest one there. Photoshop measures the box the run
+    is drawn at, not its FontSize: a 20px Roman run beside a 152px superscript
+    moves 8.0px between Roman baseline and em box bottom alignment, where the
+    unreduced FontSize would move it 15.8px and excluding the script entirely
+    would leave it still.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/style-run-alignment-2.psd"))
+    converter = Converter(psdimage)
+    layer = next(
+        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
+    )
+    text_setting = TypeSetting(layer._data)
+
+    def span_at(font_size: float, baseline: FontBaseline) -> Span:
+        return Span(
+            start=0,
+            end=1,
+            text="X",
+            style=StyleSheet(
+                name="",
+                style_sheet_data={
+                    "FontSize": font_size,
+                    "FontBaseline": int(baseline),
+                    "StyleRunAlignment": int(StyleRunAlignment.BOTTOM),
+                },
+            ),
+        )
+
+    roman = span_at(20.0, FontBaseline.ROMAN)
+    script = span_at(152.0, FontBaseline.SUPERSCRIPT)
+    paragraph = Paragraph(
+        style=ParagraphSheet(name="", default_style_sheet=0, properties={}),
+        spans=[roman, script],
+    )
+
+    reference = converter._alignment_reference_size(paragraph, text_setting)
+    assert reference == pytest.approx(152.0 * text_setting.superscript_size)
+    assert reference < 152.0, "The unreduced FontSize must not be the reference"
+
+    # The Roman run is offset by the descent fraction of the difference, and the
+    # script itself is not offset at all.
+    assert converter._character_alignment_shift(
+        roman, text_setting, reference
+    ) == pytest.approx(-EM_BOX_DESCENT_RATIO * (reference - 20.0))
+    assert converter._character_alignment_shift(script, text_setting, reference) == 0.0
