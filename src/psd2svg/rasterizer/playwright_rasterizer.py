@@ -8,6 +8,7 @@ that may not be supported by other rasterizers.
 import asyncio
 import concurrent.futures
 import logging
+import math
 import xml.etree.ElementTree as ET
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Literal, Union
@@ -204,13 +205,14 @@ class PlaywrightRasterizer(BaseRasterizer):
         # Parse SVG to get dimensions
         dimensions = self._get_svg_dimensions(svg_str)
 
-        # The viewport holds the document's CSS size; DPI scaling comes from
+        # The viewport holds the document's CSS size, rounded up so a
+        # fractional document is not clipped; DPI scaling comes from
         # device_scale_factor, which multiplies the screenshot's device pixels.
         # Both are passed to new_page(): set_viewport_size() takes no timeout
         # and can hang, and device_scale_factor is creation-only.
         viewport: ViewportSize = {
-            "width": int(dimensions["width"]),
-            "height": int(dimensions["height"]),
+            "width": math.ceil(dimensions["width"]),
+            "height": math.ceil(dimensions["height"]),
         }
 
         # Create page and set content
