@@ -3,7 +3,7 @@
 import asyncio
 import os
 import tempfile
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import pytest
 from PIL import Image
@@ -287,3 +287,33 @@ def test_rasterizer_does_not_resize_viewport(
         image = rasterizer.from_string(simple_svg)
 
     assert image.size == (200, 200)
+
+
+@requires_playwright
+def test_rasterizer_closes_page_when_rendering_fails(
+    simple_svg: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that a failed render propagates and still closes the page."""
+    from playwright.sync_api import Page  # noqa: PLC0415
+    from playwright.sync_api import (  # noqa: PLC0415
+        TimeoutError as PlaywrightTimeoutError,
+    )
+
+    closed: list[Page] = []
+    real_close = Page.close
+
+    def fail(*args: object, **kwargs: object) -> NoReturn:
+        raise PlaywrightTimeoutError("Page.screenshot: Timeout 30000ms exceeded.")
+
+    def spy_close(self: Page, **kwargs: Any) -> None:
+        closed.append(self)
+        real_close(self, **kwargs)
+
+    monkeypatch.setattr(Page, "screenshot", fail)
+    monkeypatch.setattr(Page, "close", spy_close)
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        with pytest.raises(PlaywrightTimeoutError):
+            rasterizer.from_string(simple_svg)
+
+    assert closed, "page.close() was not called on the failure path"
