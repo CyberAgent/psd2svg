@@ -159,8 +159,19 @@ def _scale_about(scale: tuple[float, float], origin: tuple[float, float]) -> str
     return f"{translate_str} {scale_str}"
 
 
+def _paragraph_spacing(previous: Paragraph, paragraph: Paragraph) -> float:
+    """Return the extra block-axis gap Photoshop draws between two paragraphs.
+
+    Photoshop adds the two properties rather than collapsing them the way CSS
+    collapses adjacent margins. The gap belongs to the break before a
+    paragraph, and Photoshop draws no gap before the first one, so this is only
+    ever called for a paragraph that has a predecessor.
+    """
+    return previous.style.space_after + paragraph.style.space_before
+
+
 def _paragraph_advance(
-    writing_direction: WritingDirection, leading: float
+    writing_direction: WritingDirection, block_advance: float
 ) -> tuple[float | None, float | None]:
     """Return the relative block-axis advance for a paragraph break.
 
@@ -169,8 +180,8 @@ def _paragraph_advance(
     paragraph origin instead of moved relatively.
     """
     if writing_direction == WritingDirection.VERTICAL_RL:
-        return -leading, None
-    return None, leading
+        return -block_advance, None
+    return None, block_advance
 
 
 # Characters that render as part of the character before them instead of on
@@ -472,10 +483,23 @@ class TextConverter(ConverterProtocol):
 
         with self.set_current(container_node):
             for i, paragraph in enumerate(paragraphs):
+                # The break before this paragraph advances by its own leading plus
+                # the spacing the two paragraphs ask for. The first paragraph sits
+                # at the origin and has no break before it.
+                if i > 0:
+                    block_advance = paragraph.compute_leading() + _paragraph_spacing(
+                        paragraphs[i - 1], paragraph
+                    )
+                    advance = _paragraph_advance(
+                        text_setting.writing_direction, block_advance
+                    )
+                else:
+                    advance = (None, None)
                 paragraph_node = self._add_paragraph(
                     text_setting,
                     paragraph,
                     first_paragraph=(i == 0),
+                    advance=advance,
                     uses_native_positioning=uses_native_positioning,
                 )
                 origin_x, origin_y, _ = self._compute_paragraph_position(
@@ -484,12 +508,8 @@ class TextConverter(ConverterProtocol):
                 if uses_native_positioning:
                     origin_x += transform.tx
                     origin_y += transform.ty
-                if i > 0:
-                    advance_x, advance_y = _paragraph_advance(
-                        text_setting.writing_direction, paragraph.compute_leading()
-                    )
-                    paragraph_offset_x += advance_x or 0.0
-                    paragraph_offset_y += advance_y or 0.0
+                paragraph_offset_x += advance[0] or 0.0
+                paragraph_offset_y += advance[1] or 0.0
                 origin_x += paragraph_offset_x
                 origin_y += paragraph_offset_y
                 previous_font_size: float | None = None
@@ -674,10 +694,18 @@ class TextConverter(ConverterProtocol):
             lang="en" if has_hyphenation else None,
         )
 
-        # Add paragraphs
+        # Add paragraphs. The gap belongs to the break before a paragraph, so each
+        # one needs its predecessor to know how far it sits from it.
         for index, paragraph in enumerate(paragraphs):
+            spacing = (
+                _paragraph_spacing(paragraphs[index - 1], paragraph) if index else 0.0
+            )
             self._add_foreign_object_paragraph(
-                div, paragraph, text_setting, first_paragraph=index == 0
+                div,
+                paragraph,
+                text_setting,
+                first_paragraph=index == 0,
+                spacing=spacing,
             )
 
         return foreign_obj
@@ -686,11 +714,15 @@ class TextConverter(ConverterProtocol):
         self,
         text_setting: TypeSetting,
         paragraph: Paragraph,
-        first_paragraph: bool = False,
+        first_paragraph: bool,
+        advance: tuple[float | None, float | None],
         uses_native_positioning: bool = False,
     ) -> ET.Element:
-        """Add a paragraph to the text node."""
-        line_height = paragraph.compute_leading()
+        """Add a paragraph to the text node.
+
+        ``advance`` is the block-axis move from the previous paragraph, as
+        ``_paragraph_advance`` returns it, and is ``(None, None)`` for the first.
+        """
         text_anchor = paragraph.get_text_anchor()
 
         # Calculate positioning based on shape type and writing direction
@@ -703,7 +735,7 @@ class TextConverter(ConverterProtocol):
             text_setting,
             x,
             y,
-            line_height,
+            advance,
             text_anchor,
             dominant_baseline,
             first_paragraph,
@@ -764,7 +796,7 @@ class TextConverter(ConverterProtocol):
         text_setting: TypeSetting,
         x: float,
         y: float,
-        line_height: float,
+        advance: tuple[float | None, float | None],
         text_anchor: str | None,
         dominant_baseline: str | None,
         first_paragraph: bool,
@@ -781,7 +813,7 @@ class TextConverter(ConverterProtocol):
             text_node: Parent text element.
             x: Base x position.
             y: Base y position.
-            line_height: Line height used for the paragraph advance.
+            advance: Block-axis (dx, dy) move from the previous paragraph.
             text_anchor: SVG text-anchor value.
             dominant_baseline: SVG dominant-baseline value.
             first_paragraph: Whether this is the first paragraph.
@@ -810,9 +842,7 @@ class TextConverter(ConverterProtocol):
             should_set_x = x != 0.0 or not first_paragraph
             should_set_y = y != 0.0 and first_paragraph
 
-        advance_x, advance_y = _paragraph_advance(
-            text_setting.writing_direction, line_height
-        )
+        advance_x, advance_y = advance
 
         # Create paragraph node with positioning and baseline attributes.
         # The dominant-baseline="hanging" provides the closest match to Photoshop's
@@ -823,8 +853,8 @@ class TextConverter(ConverterProtocol):
             text_anchor=text_anchor,
             x=x if should_set_x else None,
             y=y if should_set_y else None,
-            dx=advance_x if not first_paragraph else None,
-            dy=advance_y if not first_paragraph else None,
+            dx=advance_x,
+            dy=advance_y,
             dominant_baseline=dominant_baseline,
         )
 
@@ -1218,7 +1248,8 @@ class TextConverter(ConverterProtocol):
         container: ET.Element,
         paragraph: Paragraph,
         text_setting: TypeSetting,
-        first_paragraph: bool = False,
+        first_paragraph: bool,
+        spacing: float,
     ) -> None:
         """Add a paragraph as XHTML <p> element.
 
@@ -1227,9 +1258,12 @@ class TextConverter(ConverterProtocol):
             paragraph: Paragraph object containing style and spans.
             text_setting: TypeSetting object for font info lookup.
             first_paragraph: Whether this is the first paragraph of the layer.
+            spacing: Block-axis gap from the previous paragraph.
         """
         # Get paragraph CSS styles
-        p_styles = self._get_foreign_object_paragraph_styles(paragraph, first_paragraph)
+        p_styles = self._get_foreign_object_paragraph_styles(
+            paragraph, first_paragraph, spacing
+        )
 
         # Check if any span in this paragraph needs whitespace preservation
         needs_preserve = any(
@@ -1249,7 +1283,10 @@ class TextConverter(ConverterProtocol):
             self._add_foreign_object_span(p_elem, span, text_setting, paragraph)
 
     def _get_foreign_object_paragraph_styles(
-        self, paragraph: Paragraph, first_paragraph: bool = False
+        self,
+        paragraph: Paragraph,
+        first_paragraph: bool = False,
+        spacing: float = 0.0,
     ) -> dict[str, str]:
         """Convert paragraph settings to CSS styles.
 
@@ -1258,13 +1295,14 @@ class TextConverter(ConverterProtocol):
         - Line height (leading)
         - First line indent
         - Start/end indent (left/right padding)
-        - Space before/after (top/bottom margins)
+        - Space before/after (a single block-axis start margin)
         - Hanging punctuation (limited browser support)
 
         Args:
             paragraph: Paragraph object containing style and formatting.
             first_paragraph: Whether this is the first paragraph of the layer,
                 which alone carries the half-leading compensation.
+            spacing: Block-axis gap from the previous paragraph.
 
         Returns:
             Dictionary of CSS property names to values.
@@ -1337,20 +1375,22 @@ class TextConverter(ConverterProtocol):
                 paragraph.style.end_indent
             )
 
-        # Space before paragraph - combine with line-height compensation.
-        # Both belong to the block axis, which runs right to left in
-        # vertical-rl, so they are emitted as logical margins rather than
-        # physical ones.
-        total_margin_before = paragraph.style.space_before + half_leading_compensation
+        # The whole paragraph gap, plus the line-height compensation. Both belong
+        # to the block axis, which runs right to left in vertical-rl, so they are
+        # emitted as logical margins rather than physical ones.
+        #
+        # The gap goes entirely into the start margin and no end margin is ever
+        # emitted: adjacent block siblings collapse their touching margins to the
+        # larger of the two, so space_after and space_before on either side of a
+        # break would render as max() where Photoshop renders their sum. Leaving
+        # one side unset makes the collapse a no-op. The consequence is that a
+        # paragraph's own space_after shows up in the *next* paragraph's style,
+        # and that the last paragraph's space_after is dropped - inert, since the
+        # div has a fixed height and clips.
+        total_margin_before = spacing + half_leading_compensation
         if abs(total_margin_before) > NEGLIGIBLE_MARGIN_THRESHOLD:
             styles["margin-block-start"] = svg_utils.num2str_with_unit(
                 total_margin_before
-            )
-
-        # Space after paragraph - overrides margin: 0
-        if paragraph.style.space_after != 0:
-            styles["margin-block-end"] = svg_utils.num2str_with_unit(
-                paragraph.style.space_after
             )
 
         # Hanging punctuation (limited browser support - Safari only as of 2025)

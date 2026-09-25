@@ -116,8 +116,8 @@ When ``text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT``, paragraph formattin
 * **First line indent** → ``text-indent``
 * **Start indent** → ``padding-left``
 * **End indent** → ``padding-right``
-* **Space before** → ``margin-top``
-* **Space after** → ``margin-bottom``
+* **Space before/after** → ``margin-block-start`` (the gap across a paragraph
+  break is the sum of the two, emitted on one side only)
 * **Hanging punctuation** → ``hanging-punctuation`` (Safari only)
 * **Auto hyphenation** → ``hyphens: auto`` + ``hyphenate-limit-chars`` (requires lang attribute)
 
@@ -125,8 +125,8 @@ Example output:
 
 .. code-block:: xml
 
-   <p style="margin: 0; padding: 0; text-indent: 26.67px; padding-left: 13.33px; margin-bottom: 20px;">
-     Paragraph with first-line indent, left padding, and bottom spacing.
+   <p style="margin: 0; padding: 0; text-indent: 26.67px; padding-left: 13.33px; margin-block-start: 20px;">
+     Paragraph with first-line indent, left padding, and the gap before it.
    </p>
 
 **Browser Support Notes:**

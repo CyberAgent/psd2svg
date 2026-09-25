@@ -2304,13 +2304,136 @@ def test_foreignobject_paragraph_end_indent() -> None:
     assert style_dict["padding-right"] == "40px"
 
 
+def test_paragraph_spacing_advances_native_baselines() -> None:
+    """space_before and space_after both widen the native paragraph advance.
+
+    The two fixtures differ only in which property carries the 20px, and
+    Photoshop renders them identically: the gap before the first paragraph is
+    never drawn, so only the single break between the two paragraphs moves.
+    Leading is 32 * 1.2 = 38.4, so the break advances 38.4 + 20.
+    """
+    positions = {}
+    for fixture in ("paragraph-space-before", "paragraph-space-after"):
+        svg = convert_psd_to_svg(f"texts/{fixture}.psd")
+        tspans = svg.findall(".//text/tspan")
+        assert len(tspans) == 2
+        # The first paragraph sits at the origin, with no advance before it.
+        assert tspans[0].attrib.get("dy") is None
+        assert tspans[0].attrib.get("dx") is None
+        assert float(tspans[1].attrib["dy"]) == pytest.approx(58.4)
+        positions[fixture] = [
+            {k: v for k, v in t.attrib.items() if k in ("x", "y", "dx", "dy")}
+            for t in tspans
+        ]
+
+    assert positions["paragraph-space-before"] == positions["paragraph-space-after"]
+
+
+def test_paragraph_spacing_sums_space_after_and_space_before() -> None:
+    """Photoshop adds the two properties across a break instead of collapsing.
+
+    The fixture carries space_before=20 and space_after=20 on all three
+    paragraphs, so each break advances 38.4 + 20 + 20. Collapsing them the way
+    CSS collapses adjacent margins would give 58.4.
+    """
+    svg = convert_psd_to_svg("texts/paragraph-space-before-after.psd")
+    tspans = svg.findall(".//text/tspan")
+    assert len(tspans) == 3
+
+    assert tspans[0].attrib.get("dy") is None
+    for tspan in tspans[1:]:
+        assert float(tspan.attrib["dy"]) == pytest.approx(78.4)
+
+
+def test_paragraph_spacing_advances_vertical_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The block axis of vertical-rl text runs right to left, so the gap is negative."""
+    monkeypatch.setattr(
+        TypeSetting,
+        "writing_direction",
+        property(lambda self: WritingDirection.VERTICAL_RL),
+    )
+    svg = convert_psd_to_svg("texts/paragraph-space-before-after.psd")
+    tspans = svg.findall(".//text/tspan")
+    assert len(tspans) == 3
+
+    assert tspans[0].attrib.get("dx") is None
+    for tspan in tspans[1:]:
+        assert float(tspan.attrib["dx"]) == pytest.approx(-78.4)
+        assert tspan.attrib.get("dy") is None
+
+
+def test_foreignobject_paragraph_spacing_defeats_margin_collapsing() -> None:
+    """The whole gap goes on one margin so CSS cannot collapse it to max().
+
+    Adjacent block siblings collapse touching margins to the larger of the two,
+    which would render the fixture's 20 + 20 as 20px instead of 40px.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-space-before-after.psd"))
+    doc = SVGDocument.from_psd(
+        psdimage,
+        text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT,
+    )
+
+    div = doc.svg.find(".//{http://www.w3.org/1999/xhtml}div")
+    assert div is not None
+    paragraphs = div.findall(".//{http://www.w3.org/1999/xhtml}p")
+    assert len(paragraphs) == 3
+
+    styles = [_parse_style_string(p.attrib.get("style", "")) for p in paragraphs]
+    # The first paragraph carries the half-leading compensation alone.
+    assert styles[0]["margin-block-start"] == "-3.2px"
+    assert styles[1]["margin-block-start"] == "40px"
+    assert styles[2]["margin-block-start"] == "40px"
+    for style_dict in styles:
+        assert "margin-block-end" not in style_dict
+
+
+def test_foreignobject_paragraph_spacing_is_a_logical_margin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gap follows the block axis, which runs right to left in vertical-rl.
+
+    ``margin-block-start`` resolves to ``margin-right`` there, so a physical
+    margin would push the columns the wrong way.
+    """
+    monkeypatch.setattr(
+        TypeSetting,
+        "writing_direction",
+        property(lambda self: WritingDirection.VERTICAL_RL),
+    )
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-space-before-after.psd"))
+    doc = SVGDocument.from_psd(
+        psdimage,
+        text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT,
+    )
+
+    div = doc.svg.find(".//{http://www.w3.org/1999/xhtml}div")
+    assert div is not None
+    assert _parse_style_string(div.attrib.get("style", ""))["writing-mode"] == (
+        "vertical-rl"
+    )
+
+    paragraphs = div.findall(".//{http://www.w3.org/1999/xhtml}p")
+    styles = [_parse_style_string(p.attrib.get("style", "")) for p in paragraphs]
+    assert [s.get("margin-block-start") for s in styles] == [
+        "-3.2px",
+        "40px",
+        "40px",
+    ]
+    for style_dict in styles:
+        assert "margin-top" not in style_dict
+        assert "margin-right" not in style_dict
+
+
 def test_foreignobject_paragraph_space_before() -> None:
     """Test margin-block-start CSS property for space before paragraph.
 
     The fixture has space_before=20px and font-size=32px with auto leading, so
-    the line height is 32 * 1.2 = 38.4px. The first paragraph also carries the
-    half-leading compensation, 20 - (38.4 - 32) / 2 = 16.8px, while the second
-    carries the space alone.
+    the line height is 32 * 1.2 = 38.4px. Photoshop draws no gap before the
+    first paragraph, which therefore carries the half-leading compensation
+    alone, while the second carries the space.
     """
     psdimage = PSDImage.open(get_fixture("texts/paragraph-space-before.psd"))
     doc = SVGDocument.from_psd(
@@ -2329,15 +2452,21 @@ def test_foreignobject_paragraph_space_before() -> None:
     assert len(paragraphs) == 2, "Fixture should have 2 paragraphs"
 
     first, second = (_parse_style_string(p.attrib.get("style", "")) for p in paragraphs)
-    # space_before (20px) + half-leading compensation (-3.2px)
-    assert first["margin-block-start"] == "16.8px"
+    # Half-leading compensation only: space_before is suppressed here.
+    assert first["margin-block-start"] == "-3.2px"
     # Later paragraphs take the space alone; repeating the compensation would
     # pull every paragraph break 3.2px closer.
     assert second["margin-block-start"] == "20px"
+    for style_dict in (first, second):
+        assert "margin-block-end" not in style_dict
 
 
 def test_foreignobject_paragraph_space_after() -> None:
-    """Test margin-block-end CSS property for space after paragraph."""
+    """Space after a paragraph lands on the start margin of the next one.
+
+    CSS collapses touching sibling margins to the larger of the two, so the gap
+    is emitted on one side only and ``margin-block-end`` never appears.
+    """
     psdimage = PSDImage.open(get_fixture("texts/paragraph-space-after.psd"))
     doc = SVGDocument.from_psd(
         psdimage,
@@ -2354,10 +2483,11 @@ def test_foreignobject_paragraph_space_after() -> None:
 
     assert len(paragraphs) == 2
 
-    for p in paragraphs:
-        style_dict = _parse_style_string(p.attrib.get("style", ""))
-        assert "margin-block-end" in style_dict
-        assert style_dict["margin-block-end"] == "20px"
+    first, second = (_parse_style_string(p.attrib.get("style", "")) for p in paragraphs)
+    assert first["margin-block-start"] == "-3.2px"
+    assert second["margin-block-start"] == "20px"
+    for style_dict in (first, second):
+        assert "margin-block-end" not in style_dict
 
 
 def test_foreignobject_paragraph_combined_formatting() -> None:
@@ -2383,7 +2513,8 @@ def test_foreignobject_paragraph_combined_formatting() -> None:
     assert "text-indent" in style_dict
     assert "padding-left" in style_dict
     assert "padding-right" in style_dict
-    assert "margin-block-end" in style_dict
+    # space_after is carried by the following paragraph's start margin.
+    assert "margin-block-end" not in style_dict
 
     # Verify values (allow minor floating point differences)
     indent = float(style_dict["text-indent"].rstrip("px"))
@@ -2395,7 +2526,11 @@ def test_foreignobject_paragraph_combined_formatting() -> None:
     padding_right = float(style_dict["padding-right"].rstrip("px"))
     assert abs(padding_right - 13.33) < 0.01
 
-    assert style_dict["margin-block-end"] == "20px"
+    second = div.findall(".//{http://www.w3.org/1999/xhtml}p")[1]
+    assert (
+        _parse_style_string(second.attrib.get("style", ""))["margin-block-start"]
+        == "20px"
+    )
 
 
 def test_foreignobject_paragraph_hanging_punctuation() -> None:
