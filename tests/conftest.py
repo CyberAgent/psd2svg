@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 
 import pytest
 
@@ -80,6 +81,25 @@ requires_arial = pytest.mark.skipif(
     not has_font("Arial"),
     reason="Arial font not installed",
 )
+
+
+# Fonts the Linux workflow installs explicitly, from ttf-mscorefonts-installer.
+# That package downloads and extracts through an update-notifier hook that can
+# fail while apt still exits 0, so a missing font there means a broken runner,
+# not an inapplicable test.
+_CI_REQUIRED_FONTS = ("Arial", "Times New Roman")
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Fail the run when CI is missing a font it is supposed to provide."""
+    if os.environ.get("CI") != "true" or sys.platform != "linux":
+        return
+    missing = [family for family in _CI_REQUIRED_FONTS if not has_font(family)]
+    if missing:
+        raise pytest.UsageError(
+            "the font install step failed silently; fontconfig cannot resolve: "
+            + ", ".join(missing)
+        )
 
 
 # Check if playwright is available

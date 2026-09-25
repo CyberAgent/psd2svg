@@ -30,6 +30,16 @@ jobs:
             fonts-noto-cjk \
             fonts-noto-ui-core
           sudo fc-cache -fv
+          # The mscorefonts postinst downloads and extracts through an
+          # update-notifier hook that can fail while apt still exits 0,
+          # leaving the suite to render Arial and Times New Roman text in a
+          # fallback face. Retry once, then assert.
+          if ! fc-list | grep -q "Times New Roman"; then
+            sudo DEBIAN_FRONTEND=noninteractive dpkg-reconfigure ttf-mscorefonts-installer
+            sudo fc-cache -fv
+          fi
+          fc-list | grep -q "Times New Roman"
+          fc-list | grep -q "Arial"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
