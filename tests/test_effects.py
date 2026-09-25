@@ -1,9 +1,12 @@
 """Tests for layer effect conversion."""
 
 from psd_tools import PSDImage
+from psd_tools.api.effects import Stroke
 from psd_tools.api.layers import ShapeLayer
+from psd_tools.terminology import Enum, Key
 
 from psd2svg.core.converter import Converter
+from psd2svg.core.effects import stroke_position
 from tests.conftest import get_fixture
 
 
@@ -63,3 +66,32 @@ def test_full_opacity_stroke_effect_emits_no_opacity() -> None:
     strokes = [node for node in converter.svg.iter() if "stroke" in node.attrib]
     assert len(strokes) == 1
     assert "stroke-opacity" not in strokes[0].attrib
+
+
+def test_stroke_without_a_style_key_defaults_to_outside() -> None:
+    """``Stroke.position`` is ``None`` when the descriptor omits the key.
+
+    psd-tools stopped fabricating a position for such a descriptor, so the
+    converter supplies Photoshop's Outside default rather than passing ``None``
+    to ``Enum()``.
+    """
+    psdimage, converter = _build("effects/stroke-1-vector-color.psd")
+    layer = next(
+        layer
+        for layer in psdimage.descendants()
+        if isinstance(layer, ShapeLayer) and layer.effects
+    )
+    effect = next(iter(layer.effects.find("stroke")))
+    assert isinstance(effect, Stroke)
+    del effect.descriptor[Key.Style]
+
+    assert effect.position is None
+    assert stroke_position(effect) == Enum.OutsetFrame
+
+    # Both branches must convert the layer instead of raising on the ``None``.
+    vector = converter.create_node("path", id=converter.auto_id("vector"))
+    converter.apply_stroke_effect(layer, vector)
+    raster = converter.create_node(
+        "path", id=converter.auto_id("raster"), stroke="#f00"
+    )
+    converter.apply_stroke_effect(layer, raster)

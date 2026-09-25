@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **psd-tools 1.20.0 is now the minimum** (#424)
+  - Earlier releases fabricate a stroke effect's position rather than
+    reporting that the descriptor omits it
+
 - **Unsupported adjustment layers now say so precisely** (#371)
   - Black & White, Selective Color, Vibrance and Color Lookup are documented as
     unrepresentable in SVG filters rather than pending, and every unsupported
@@ -25,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     XHTML elements
 
 ### Fixed
+
+- **Stroke effects whose descriptor omits the position crashed the conversion** (#424)
+  - psd-tools now reports an omitted stroke position as `None`; it falls back
+    to Photoshop's Outside default
 
 - **Paragraph space before/after was dropped in native SVG output** (#420)
   - Both properties now widen the paragraph advance, summed across a break and
