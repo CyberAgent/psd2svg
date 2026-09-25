@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **foreignObject paragraphs were taller than their leading** (#425)
+  - Each `<p>` now names the font of its tallest span, so a paragraph whose
+    spans share a size occupies its leading instead of drifting down the box
+
+- **foreignObject superscripts and subscripts sat at the CSS offsets** (#425)
+  - They now carry Photoshop's own shift, as the native output does, without
+    stretching the line they sit on
+
 - **Stroke effects whose descriptor omits the position crashed the conversion** (#424)
   - psd-tools now reports an omitted stroke position as `None`; it falls back
     to Photoshop's Outside default

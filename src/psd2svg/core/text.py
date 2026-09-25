@@ -1262,7 +1262,7 @@ class TextConverter(ConverterProtocol):
         """
         # Get paragraph CSS styles
         p_styles = self._get_foreign_object_paragraph_styles(
-            paragraph, first_paragraph, spacing
+            paragraph, text_setting, first_paragraph, spacing
         )
 
         # Check if any span in this paragraph needs whitespace preservation
@@ -1282,9 +1282,56 @@ class TextConverter(ConverterProtocol):
         for span in paragraph:
             self._add_foreign_object_span(p_elem, span, text_setting, paragraph)
 
+    def _foreign_object_font_size(self, span: Span, text_setting: TypeSetting) -> float:
+        """Return the font size a span renders at in the foreignObject output.
+
+        This is the size that reaches CSS: the scale of the inline axis is in it
+        already, and a superscript or subscript carries its own reduction.
+        """
+        style = span.style
+        scaling = self._calculate_text_scaling(
+            style.font_size,
+            style.horizontal_scale,
+            style.vertical_scale,
+            text_setting.writing_direction,
+        )
+        if style.font_baseline == FontBaseline.SUPERSCRIPT:
+            return scaling.font_size * text_setting.superscript_size
+        if style.font_baseline == FontBaseline.SUBSCRIPT:
+            return scaling.font_size * text_setting.subscript_size
+        return scaling.font_size
+
+    def _line_box_span(
+        self, paragraph: Paragraph, text_setting: TypeSetting
+    ) -> Span | None:
+        """Return the span whose inline box sets the paragraph's line boxes.
+
+        The tallest span is the one a line box has to make room for. Which one
+        that is on any given line is not known without laying the paragraph out,
+        so the tallest in the whole paragraph stands in for it: every line of a
+        paragraph whose spans share a size, and too tall for the lines a larger
+        span wraps away from, which then carry a strut taller than their own
+        content.
+
+        A paragraph break is a run of its own carrying the default size, and it
+        draws nothing, so it must not be the one that is measured. A paragraph
+        that is nothing but its break has no other run to measure and still has
+        to name a font.
+        """
+        spans = [span for span in paragraph.spans if span.text.strip("\r")]
+        if not spans:
+            spans = paragraph.spans
+        if not spans:
+            return None
+        return max(
+            spans,
+            key=lambda span: self._foreign_object_font_size(span, text_setting),
+        )
+
     def _get_foreign_object_paragraph_styles(
         self,
         paragraph: Paragraph,
+        text_setting: TypeSetting,
         first_paragraph: bool = False,
         spacing: float = 0.0,
     ) -> dict[str, str]:
@@ -1300,6 +1347,7 @@ class TextConverter(ConverterProtocol):
 
         Args:
             paragraph: Paragraph object containing style and formatting.
+            text_setting: TypeSetting object for font info lookup.
             first_paragraph: Whether this is the first paragraph of the layer,
                 which alone carries the half-leading compensation.
             spacing: Block-axis gap from the previous paragraph.
@@ -1332,6 +1380,25 @@ class TextConverter(ConverterProtocol):
         text_align = justification_map.get(paragraph.justification, "left")
         if text_align != "left":  # Skip default
             styles["text-align"] = text_align
+
+        # The strut - the <p>'s own font - is the box every line in it is at
+        # least as tall as. Left to inherit, it is the renderer's default family
+        # at its default size: its ascent falls short of the spans' while its
+        # descent runs past theirs, and the line box grows to cover both, so
+        # each paragraph takes more than its line-height and they drift apart
+        # (issue #421). Matched to the span that sets the line box, the strut
+        # covers that span's inline box and the line box comes out at the
+        # leading. A paragraph with no text is held open by the empty
+        # inline-block its span becomes, not by the strut: a <p> with no line
+        # box in it has no height, whatever font it names.
+        strut = self._line_box_span(paragraph, text_setting)
+        if strut is not None:
+            postscript_name = text_setting.get_postscript_name(strut.style.font)
+            if postscript_name:
+                styles["font-family"] = f"'{postscript_name}'"
+            strut_font_size = self._foreign_object_font_size(strut, text_setting)
+            if strut_font_size > 0:
+                styles["font-size"] = svg_utils.num2str_with_unit(strut_font_size)
 
         # Line height, and the half-leading compensation that goes with it
         leading = paragraph.compute_leading()
@@ -1504,9 +1571,12 @@ class TextConverter(ConverterProtocol):
         if postscript_name:
             styles["font-family"] = f"'{postscript_name}'"
 
-        # Font size
-        if style.font_size:
-            styles["font-size"] = svg_utils.num2str_with_unit(scaling.font_size)
+        # Font size, superscript and subscript reduction included. A size of
+        # zero is stated rather than left out: the span draws nothing in
+        # Photoshop, and an absent font-size would inherit the paragraph's.
+        styles["font-size"] = svg_utils.num2str_with_unit(
+            self._foreign_object_font_size(span, text_setting)
+        )
 
         # Font weight is left to the face: the PostScript name encodes it, and
         # faux bold is emitted as an outline thickening below rather than as a
@@ -1546,20 +1616,27 @@ class TextConverter(ConverterProtocol):
         if letter_spacing != 0:
             styles["letter-spacing"] = svg_utils.num2str_with_unit(letter_spacing)
 
-        # Vertical alignment (superscript/subscript)
+        # Superscripts and subscripts sit at Photoshop's own offsets, which are
+        # not the ones the "super" and "sub" keywords stand for, so they take
+        # the length the native <text> path shifts the baseline by. It is
+        # perpendicular to the writing direction, so it follows the cross-axis
+        # size rather than the emitted font-size.
+        baseline_shift = style.baseline_shift
         if style.font_baseline == FontBaseline.SUPERSCRIPT:
-            styles["vertical-align"] = "super"
-            styles["font-size"] = svg_utils.num2str_with_unit(
-                scaling.font_size * text_setting.superscript_size
-            )
+            baseline_shift = scaling.baseline_size * text_setting.superscript_position
         elif style.font_baseline == FontBaseline.SUBSCRIPT:
-            styles["vertical-align"] = "sub"
-            styles["font-size"] = svg_utils.num2str_with_unit(
-                scaling.font_size * text_setting.subscript_size
-            )
-        elif style.baseline_shift != 0.0:
-            # Custom baseline shift
-            styles["vertical-align"] = svg_utils.num2str_with_unit(style.baseline_shift)
+            baseline_shift = -scaling.baseline_size * text_setting.subscript_position
+
+        # A shifted span is offset from where it sits rather than aligned
+        # somewhere else: vertical-align grows the line box around the moved
+        # glyphs, which makes the paragraph taller than its leading (issue
+        # #421), while Photoshop keeps the leading and moves the glyphs alone.
+        # The offset runs along the block axis, so it is emitted as a logical
+        # inset, which points towards the start of that axis and therefore
+        # against the shift.
+        if baseline_shift != 0.0:
+            styles["position"] = "relative"
+            styles["inset-block-start"] = svg_utils.num2str_with_unit(-baseline_shift)
 
         # Horizontal/vertical scale: the inline axis is already in the font size,
         # only the cross axis is left for the (layout-neutral) CSS transform.
@@ -1586,13 +1663,7 @@ class TextConverter(ConverterProtocol):
                     "character stroke; the stroke is emitted alone."
                 )
             elif fill_color != "none":
-                # The em the span actually renders at, after any sub/superscript
-                # reduction applied above.
-                em = scaling.font_size
-                if style.font_baseline == FontBaseline.SUPERSCRIPT:
-                    em *= text_setting.superscript_size
-                elif style.font_baseline == FontBaseline.SUBSCRIPT:
-                    em *= text_setting.subscript_size
+                em = self._foreign_object_font_size(span, text_setting)
                 width = svg_utils.num2str_with_unit(FAUX_BOLD_STROKE_RATIO * em)
                 # Thicken the glyph in its own colour, whether the span sets it
                 # ("color" above) or inherits it.

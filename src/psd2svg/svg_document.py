@@ -668,6 +668,15 @@ class SVGDocument:
             inside a <foreignObject> the values go into the style declaration
             instead, where they actually apply (issue #376).
         """
+        # A <p> inside a <foreignObject> names a font only as the strut that
+        # sizes its line boxes (issue #421); its spans carry the text. Weight and
+        # style inherit, so declaring them on the paragraph would restyle every
+        # span that resolved to a different face. The strut therefore gets the
+        # family alone, and with it the Regular member of that family, which
+        # costs the line box whatever the faces differ by in ascent and descent.
+        if element.tag == f"{{{svg_utils.XHTML_NAMESPACE}}}p":
+            return
+
         # The face's own weight always wins: faux bold is an outline thickening
         # emitted as a stroke in core/text.py, not a font-weight (issue #337).
         # A Regular face needs no declaration, but any weight already on the
