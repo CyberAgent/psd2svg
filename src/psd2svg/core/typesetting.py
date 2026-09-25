@@ -93,6 +93,34 @@ class FontBaseline(IntEnum):
     SUBSCRIPT = 2
 
 
+class StyleRunAlignment(IntEnum):
+    """Character alignment values from Photoshop.
+
+    East-Asian character alignment (mojisoroe) picks the cross-axis reference
+    that runs of different sizes on one line are aligned by. The names are
+    Photoshop's own, from the ``gridAlignment`` descriptor, because what two of
+    them mean geometrically depends on the writing direction:
+
+    ============ ======================= =======================
+    Value        Horizontal              Vertical
+    ============ ======================= =======================
+    BOTTOM       em box bottom           em box left
+    ICF_BOTTOM   ICF bottom              ICF left
+    ROMAN        Roman baseline          em box centre
+    CENTER       em box centre           Roman baseline
+    ICF_TOP      ICF top                 ICF right
+    TOP          em box top              em box right
+    ============ ======================= =======================
+    """
+
+    BOTTOM = 0
+    ICF_BOTTOM = 1
+    ROMAN = 2
+    CENTER = 3
+    ICF_TOP = 4
+    TOP = 5
+
+
 @dataclasses.dataclass
 class Paragraph:
     """Paragraph of text with associated style."""
@@ -426,6 +454,11 @@ class StyleSheet:
     def font_baseline(self) -> FontBaseline:
         """Font baseline."""
         return FontBaseline(self.style_sheet_data.get("FontBaseline", 0))
+
+    @property
+    def style_run_alignment(self) -> StyleRunAlignment:
+        """Character alignment reference for mixed-size runs on a line."""
+        return StyleRunAlignment(self.style_sheet_data.get("StyleRunAlignment", 0))
 
     @property
     def underline(self) -> bool:
