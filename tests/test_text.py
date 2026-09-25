@@ -2271,7 +2271,7 @@ def test_foreignobject_paragraph_end_indent() -> None:
 
 
 def test_foreignobject_paragraph_space_before() -> None:
-    """Test margin-top CSS property for space before paragraph.
+    """Test margin-block-start CSS property for space before paragraph.
 
     The fixture has space_before=20px and font-size=32px with auto leading, so
     the line height is 32 * 1.2 = 38.4px. The first paragraph also carries the
@@ -2296,14 +2296,14 @@ def test_foreignobject_paragraph_space_before() -> None:
 
     first, second = (_parse_style_string(p.attrib.get("style", "")) for p in paragraphs)
     # space_before (20px) + half-leading compensation (-3.2px)
-    assert first["margin-top"] == "16.8px"
+    assert first["margin-block-start"] == "16.8px"
     # Later paragraphs take the space alone; repeating the compensation would
     # pull every paragraph break 3.2px closer.
-    assert second["margin-top"] == "20px"
+    assert second["margin-block-start"] == "20px"
 
 
 def test_foreignobject_paragraph_space_after() -> None:
-    """Test margin-bottom CSS property for space after paragraph."""
+    """Test margin-block-end CSS property for space after paragraph."""
     psdimage = PSDImage.open(get_fixture("texts/paragraph-space-after.psd"))
     doc = SVGDocument.from_psd(
         psdimage,
@@ -2322,8 +2322,8 @@ def test_foreignobject_paragraph_space_after() -> None:
 
     for p in paragraphs:
         style_dict = _parse_style_string(p.attrib.get("style", ""))
-        assert "margin-bottom" in style_dict
-        assert style_dict["margin-bottom"] == "20px"
+        assert "margin-block-end" in style_dict
+        assert style_dict["margin-block-end"] == "20px"
 
 
 def test_foreignobject_paragraph_combined_formatting() -> None:
@@ -2349,7 +2349,7 @@ def test_foreignobject_paragraph_combined_formatting() -> None:
     assert "text-indent" in style_dict
     assert "padding-left" in style_dict
     assert "padding-right" in style_dict
-    assert "margin-bottom" in style_dict
+    assert "margin-block-end" in style_dict
 
     # Verify values (allow minor floating point differences)
     indent = float(style_dict["text-indent"].rstrip("px"))
@@ -2361,7 +2361,7 @@ def test_foreignobject_paragraph_combined_formatting() -> None:
     padding_right = float(style_dict["padding-right"].rstrip("px"))
     assert abs(padding_right - 13.33) < 0.01
 
-    assert style_dict["margin-bottom"] == "20px"
+    assert style_dict["margin-block-end"] == "20px"
 
 
 def test_foreignobject_paragraph_hanging_punctuation() -> None:
@@ -2439,8 +2439,8 @@ def test_foreignobject_paragraph_hyphenation() -> None:
 def test_foreignobject_paragraph_default_values_skipped() -> None:
     """Test that zero/false paragraph properties are not included in CSS.
 
-    Note: margin-top may be present for vertical alignment compensation on the
-    first paragraph (Issue #271), which is not related to space_before.
+    The first paragraph still carries a margin-block-start for the half-leading
+    compensation, which is unrelated to space_before.
     """
     psdimage = PSDImage.open(
         get_fixture("texts/paragraph-shapetype1-justification0.psd")
@@ -2469,9 +2469,8 @@ def test_foreignobject_paragraph_default_values_skipped() -> None:
     assert "text-indent" not in style_dict
     assert "padding-left" not in style_dict
     assert "padding-right" not in style_dict
-    # margin-top is present for vertical alignment compensation (not space_before)
-    # This is expected behavior after Issue #271 fix
-    assert "margin-bottom" not in style_dict
+    # margin-block-start holds the half-leading compensation, not space_before
+    assert "margin-block-end" not in style_dict
     assert "hanging-punctuation" not in style_dict
 
 
@@ -3126,8 +3125,8 @@ def test_foreignobject_vertical_alignment() -> None:
     assert actual == expected, f"Expected line-height {expected}, got {actual}"
 
     # Half-leading compensation: -(38.4 - 32) / 2
-    assert style_dict.get("margin-top") == "-3.2px", (
-        f"Expected margin-top -3.2px, got {style_dict.get('margin-top')}"
+    assert style_dict.get("margin-block-start") == "-3.2px", (
+        f"Expected -3.2px, got {style_dict.get('margin-block-start')}"
     )
 
 
@@ -3162,9 +3161,9 @@ def test_foreignobject_vertical_alignment_multiple_paragraphs() -> None:
             f"got {p_style['line-height']}"
         )
         expected_margin = "-3.2px" if i == 0 else None
-        assert p_style.get("margin-top") == expected_margin, (
-            f"Paragraph {i} should have margin-top {expected_margin}, "
-            f"got {p_style.get('margin-top')}"
+        assert p_style.get("margin-block-start") == expected_margin, (
+            f"Paragraph {i} should have margin-block-start {expected_margin}, "
+            f"got {p_style.get('margin-block-start')}"
         )
 
 
@@ -3197,7 +3196,6 @@ def test_foreignobject_vertical_alignment_vertical_text() -> None:
         f"Expected writing-mode vertical-rl, got {div_style['writing-mode']}"
     )
 
-    # Check first paragraph has corrected line-height
     first_p = div.find(".//{http://www.w3.org/1999/xhtml}p")
     assert first_p is not None, "Should have XHTML p element"
 
@@ -3206,6 +3204,16 @@ def test_foreignobject_vertical_alignment_vertical_text() -> None:
     assert "line-height" in p_style, "First paragraph should have line-height"
     assert p_style["line-height"] == "38.4px", (
         f"Expected line-height 38.4px (font_size * 1.2), got {p_style['line-height']}"
+    )
+
+    # The compensation has to stay on the block axis, which runs right to left
+    # here. A physical margin-top would shift the column along the inline axis
+    # instead and leave the block axis uncompensated.
+    assert p_style.get("margin-block-start") == "-3.2px", (
+        f"Expected margin-block-start -3.2px, got {p_style.get('margin-block-start')}"
+    )
+    assert "margin-top" not in p_style, (
+        "Compensation must not be emitted as a physical margin"
     )
 
 

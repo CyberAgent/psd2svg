@@ -1295,24 +1295,25 @@ class TextConverter(ConverterProtocol):
         if text_align != "left":  # Skip default
             styles["text-align"] = text_align
 
-        # Line height and margin-top compensation calculation
+        # Line height, and the half-leading compensation that goes with it
         leading = paragraph.compute_leading()
-        margin_top_compensation = 0.0  # Track compensation for later use
+        half_leading_compensation = 0.0
 
         if leading > 0:
             styles["line-height"] = svg_utils.num2str_with_unit(leading)
 
             # Half-leading compensation, first paragraph only. CSS centers the
-            # text within the line box, so half the leading sits above the first
-            # line and pushes the block down; a negative margin takes it back.
-            # Later paragraphs must not repeat it: adjacent line boxes already
-            # sit exactly one line-height apart, and a second negative margin
-            # would pull every paragraph break closer by half the leading.
+            # text within the line box, so half the leading sits before the
+            # first line and pushes the block off the top of its box; a negative
+            # margin takes it back. Later paragraphs must not repeat it:
+            # adjacent line boxes already sit exactly one line-height apart, and
+            # a second negative margin would pull every paragraph break closer
+            # by half the leading.
             if first_paragraph and paragraph.spans:
-                # The tallest span is the one that set the leading above
+                # The line box is as tall as the largest font in the paragraph
                 font_size = max(span.style.font_size for span in paragraph.spans)
                 if leading > font_size:
-                    margin_top_compensation = -(leading - font_size) / 2
+                    half_leading_compensation = -(leading - font_size) / 2
 
         # First line indent
         if paragraph.style.first_line_indent != 0:
@@ -1332,16 +1333,19 @@ class TextConverter(ConverterProtocol):
                 paragraph.style.end_indent
             )
 
-        # Space before paragraph - combine with line-height compensation
-        # If we have both space_before and compensation, add them together
-        total_margin_top = paragraph.style.space_before + margin_top_compensation
-        # Only add margin-top if it exceeds the negligible threshold
-        if abs(total_margin_top) > NEGLIGIBLE_MARGIN_THRESHOLD:
-            styles["margin-top"] = svg_utils.num2str_with_unit(total_margin_top)
+        # Space before paragraph - combine with line-height compensation.
+        # Both belong to the block axis, which runs right to left in
+        # vertical-rl, so they are emitted as logical margins rather than
+        # physical ones.
+        total_margin_before = paragraph.style.space_before + half_leading_compensation
+        if abs(total_margin_before) > NEGLIGIBLE_MARGIN_THRESHOLD:
+            styles["margin-block-start"] = svg_utils.num2str_with_unit(
+                total_margin_before
+            )
 
         # Space after paragraph - overrides margin: 0
         if paragraph.style.space_after != 0:
-            styles["margin-bottom"] = svg_utils.num2str_with_unit(
+            styles["margin-block-end"] = svg_utils.num2str_with_unit(
                 paragraph.style.space_after
             )
 
