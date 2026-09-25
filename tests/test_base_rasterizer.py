@@ -68,10 +68,30 @@ def test_svg_dimensions(root_attrs: str, expected: tuple[float, float] | None) -
     assert BaseRasterizer._svg_dimensions(svg) == expected
 
 
-def test_svg_dimensions_ignores_malformed_body() -> None:
-    """Test that only the root start tag has to parse."""
-    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect>'
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<rect>",  # unclosed
+        "<rect></bad>",  # mismatched end tag
+        "<rect a=b/>",  # unquoted attribute
+        "</svg>&&&<<<",  # junk after the root
+    ],
+)
+def test_svg_dimensions_ignores_malformed_body(body: str) -> None:
+    """Test that only the root start tag has to parse.
+
+    The parser queues a later error behind the root start event, so the root
+    is still reported.
+    """
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">{body}'
     assert BaseRasterizer._svg_dimensions(svg) == (100.0, 50.0)
+
+
+def test_svg_dimensions_malformed_before_root() -> None:
+    """Test that an error ahead of the root leaves nothing to report."""
+    assert (
+        BaseRasterizer._svg_dimensions('<!bad><svg width="100" height="50"/>') is None
+    )
 
 
 def test_svg_dimensions_root_after_long_preamble() -> None:

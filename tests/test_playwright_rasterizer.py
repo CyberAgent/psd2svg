@@ -213,6 +213,30 @@ def test_rasterizer_physical_units(size: str, expected: tuple[int, int]) -> None
 
 
 @requires_playwright
+@pytest.mark.parametrize(
+    ("root_size", "expected"),
+    [
+        ('width="50%" height="50%"', (50, 50)),
+        ('width="100%" height="100%"', (100, 100)),
+        ('width="200%" height="200%"', (200, 200)),
+    ],
+)
+def test_rasterizer_percentage_size(root_size: str, expected: tuple[int, int]) -> None:
+    """Test that a percentage root size is resolved once, not twice."""
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" {root_size}'
+        ' viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        image = rasterizer.from_string(svg)
+
+    # The document fills the canvas it was measured for
+    assert image.size == expected
+    assert image.getchannel("A").getbbox() == (0, 0, *expected)
+
+
+@requires_playwright
 def test_rasterizer_viewbox_only(svg_with_viewbox_only: str) -> None:
     """Test SVG with only viewBox (no width/height attributes)."""
     with PlaywrightRasterizer(dpi=96) as rasterizer:

@@ -246,6 +246,22 @@ def test_rasterizer_dpi_non_finite_dimensions() -> None:
     assert ResvgRasterizer(dpi=192).from_string(svg).size == (10, 10)
 
 
+def test_rasterizer_dpi_overflows_when_scaled(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test a finite root size that only overflows once the scale is applied."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1e308" height="1e308">'
+        '<rect width="10" height="10" fill="red"/></svg>'
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError, match="Failed to rasterize SVG content"):
+            ResvgRasterizer(dpi=300).from_string(svg)
+
+    assert "exceed" in caplog.text
+
+
 def test_rasterizer_dpi_scales_viewbox_only() -> None:
     """Test that DPI scales a document sized by its viewBox alone."""
     svg = (

@@ -239,6 +239,10 @@ class PlaywrightRasterizer(BaseRasterizer):
         }}
         svg {{
             display: block;
+            /* The resolved size, so a percentage on the root is not
+               resolved a second time against this page. */
+            width: {css_width}px;
+            height: {css_height}px;
         }}
     </style>
 </head>
