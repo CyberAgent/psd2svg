@@ -126,9 +126,12 @@ class Paragraph:
         """Compute leading value for the paragraph.
 
         Returns the maximum leading value among all spans in the paragraph.
-        Each span determines its own leading based on its auto_leading flag.
+        Each span determines its own leading based on its auto_leading flag,
+        scaled by this paragraph's auto leading percentage where it applies.
         """
-        return max(span.style.compute_leading() for span in self.spans)
+        return max(
+            span.style.compute_leading(self.style.auto_leading) for span in self.spans
+        )
 
 
 @dataclasses.dataclass
@@ -501,27 +504,25 @@ class StyleSheet:
             return None
         return _get_hex_color_from_argb(self.stroke_color)
 
-    def compute_leading(self) -> float:
+    def compute_leading(self, auto_leading_scale: float) -> float:
         """Compute leading value for line height.
+
+        Args:
+            auto_leading_scale: The containing paragraph's auto leading
+                percentage, applied only when this span uses auto leading.
 
         Returns:
             Leading value in pixels (line height for CSS).
 
         Note:
-            When auto_leading=True (span-level boolean), Photoshop uses
-            font_size + leading offset (typically 0.01), which effectively
-            gives font_size as the line-height (no extra leading space).
+            Auto leading derives the line height from the font size, ignoring
+            the stored ``Leading``. Photoshop leaves whatever value the span
+            last had in that field, so it carries no meaning here.
 
-            When auto_leading=False, uses the explicit leading value set by user.
-
-            The paragraph-level auto_leading property (typically 1.2) is NOT
-            used for line-height calculation. It may be for inter-paragraph
-            spacing or other paragraph-level layout, but that's not yet clear.
+            Manual leading uses the stored value as-is, unscaled.
         """
         if self.auto_leading:
-            # Auto leading: use font_size + small offset (typically 0.01)
-            # This gives effective line-height = font_size (no extra leading)
-            return self.font_size + self.leading
+            return self.font_size * auto_leading_scale
         return self.leading
 
 

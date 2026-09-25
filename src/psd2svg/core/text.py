@@ -675,8 +675,10 @@ class TextConverter(ConverterProtocol):
         )
 
         # Add paragraphs
-        for paragraph in paragraphs:
-            self._add_foreign_object_paragraph(div, paragraph, text_setting)
+        for index, paragraph in enumerate(paragraphs):
+            self._add_foreign_object_paragraph(
+                div, paragraph, text_setting, first_paragraph=index == 0
+            )
 
         return foreign_obj
 
@@ -1216,6 +1218,7 @@ class TextConverter(ConverterProtocol):
         container: ET.Element,
         paragraph: Paragraph,
         text_setting: TypeSetting,
+        first_paragraph: bool = False,
     ) -> None:
         """Add a paragraph as XHTML <p> element.
 
@@ -1223,9 +1226,10 @@ class TextConverter(ConverterProtocol):
             container: Parent XHTML div element.
             paragraph: Paragraph object containing style and spans.
             text_setting: TypeSetting object for font info lookup.
+            first_paragraph: Whether this is the first paragraph of the layer.
         """
         # Get paragraph CSS styles
-        p_styles = self._get_foreign_object_paragraph_styles(paragraph)
+        p_styles = self._get_foreign_object_paragraph_styles(paragraph, first_paragraph)
 
         # Check if any span in this paragraph needs whitespace preservation
         needs_preserve = any(
@@ -1245,7 +1249,7 @@ class TextConverter(ConverterProtocol):
             self._add_foreign_object_span(p_elem, span, text_setting, paragraph)
 
     def _get_foreign_object_paragraph_styles(
-        self, paragraph: Paragraph
+        self, paragraph: Paragraph, first_paragraph: bool = False
     ) -> dict[str, str]:
         """Convert paragraph settings to CSS styles.
 
@@ -1259,6 +1263,8 @@ class TextConverter(ConverterProtocol):
 
         Args:
             paragraph: Paragraph object containing style and formatting.
+            first_paragraph: Whether this is the first paragraph of the layer,
+                which alone carries the half-leading compensation.
 
         Returns:
             Dictionary of CSS property names to values.
@@ -1289,25 +1295,29 @@ class TextConverter(ConverterProtocol):
         if text_align != "left":  # Skip default
             styles["text-align"] = text_align
 
-        # Line height and margin-top compensation calculation
+        # Line height, and the half-leading compensation that goes with it
         leading = paragraph.compute_leading()
-        margin_top_compensation = 0.0  # Track compensation for later use
+        half_leading_compensation = 0.0
 
         if leading > 0:
             styles["line-height"] = svg_utils.num2str_with_unit(leading)
 
-            # Calculate half-leading compensation for all paragraphs
-            # CSS line-height centers text within a line box, adding unwanted space
-            # above each line. We calculate the negative margin as:
-            # margin-top = -(leading - font_size) / 2
-            # This removes the half-leading space above each paragraph.
-            if paragraph.spans:
-                # Get font size from the first span
-                first_span = paragraph.spans[0]
-                font_size = first_span.style.font_size
+            # Half-leading compensation, first paragraph only. CSS centers the
+            # text within the line box, so half the leading sits before the
+            # first line and pushes the block off the top of its box; a negative
+            # margin takes it back. Later paragraphs must not repeat it:
+            # adjacent line boxes already sit exactly one line-height apart, and
+            # a second negative margin would pull every paragraph break closer
+            # by half the leading.
+            # Only the first line's own content sets its line box, and where
+            # the paragraph breaks is not known without laying it out, so the
+            # largest span stands in for it. That is exact for a paragraph that
+            # fits on one line, and too small by half the size difference when
+            # the largest span wraps away from the first line.
+            if first_paragraph and paragraph.spans:
+                font_size = max(span.style.font_size for span in paragraph.spans)
                 if leading > font_size:
-                    # Calculate half-leading compensation
-                    margin_top_compensation = -(leading - font_size) / 2
+                    half_leading_compensation = -(leading - font_size) / 2
 
         # First line indent
         if paragraph.style.first_line_indent != 0:
@@ -1327,16 +1337,19 @@ class TextConverter(ConverterProtocol):
                 paragraph.style.end_indent
             )
 
-        # Space before paragraph - combine with line-height compensation
-        # If we have both space_before and compensation, add them together
-        total_margin_top = paragraph.style.space_before + margin_top_compensation
-        # Only add margin-top if it exceeds the negligible threshold
-        if abs(total_margin_top) > NEGLIGIBLE_MARGIN_THRESHOLD:
-            styles["margin-top"] = svg_utils.num2str_with_unit(total_margin_top)
+        # Space before paragraph - combine with line-height compensation.
+        # Both belong to the block axis, which runs right to left in
+        # vertical-rl, so they are emitted as logical margins rather than
+        # physical ones.
+        total_margin_before = paragraph.style.space_before + half_leading_compensation
+        if abs(total_margin_before) > NEGLIGIBLE_MARGIN_THRESHOLD:
+            styles["margin-block-start"] = svg_utils.num2str_with_unit(
+                total_margin_before
+            )
 
         # Space after paragraph - overrides margin: 0
         if paragraph.style.space_after != 0:
-            styles["margin-bottom"] = svg_utils.num2str_with_unit(
+            styles["margin-block-end"] = svg_utils.num2str_with_unit(
                 paragraph.style.space_after
             )
 
