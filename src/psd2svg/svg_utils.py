@@ -193,7 +193,6 @@ def create_xhtml_node(
     tag: str,
     parent: Optional[ET.Element] = None,
     text: str = "",
-    xml_space: Optional[str] = None,
     **kwargs: Any,
 ) -> ET.Element:
     """Create an XHTML node with proper namespace.
@@ -207,8 +206,6 @@ def create_xhtml_node(
         tag: HTML tag name (e.g., 'div', 'p', 'span').
         parent: Optional parent element to append this node to.
         text: Optional text content.
-        xml_space: Set xml:space attribute with proper XML namespace.
-                  Use "preserve" to preserve whitespace.
         **kwargs: Additional attributes. Underscores in keys are converted
                  to hyphens (e.g., 'font_size' becomes 'font-size').
 
@@ -223,10 +220,6 @@ def create_xhtml_node(
     """
     # Create element with XHTML namespace
     node = ET.Element(f"{{{XHTML_NAMESPACE}}}{tag}")
-
-    # Handle xml:space with proper XML namespace
-    if xml_space is not None:
-        node.set("{http://www.w3.org/XML/1998/namespace}space", xml_space)
 
     # Set attributes
     for key, value in kwargs.items():

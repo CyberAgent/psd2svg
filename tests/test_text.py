@@ -3004,19 +3004,19 @@ def test_text_whitespace_preservation_foreign_object() -> None:
     paragraphs = foreign_obj.findall(".//{http://www.w3.org/1999/xhtml}p")
     assert len(paragraphs) == 3, f"Expected 3 paragraphs, got {len(paragraphs)}"
 
-    # Verify xml:space="preserve" attribute on paragraph elements
+    # XHTML layout follows CSS white-space, not xml:space (issue #434).
     # Paragraphs 0 and 1 have whitespace that needs preservation, paragraph 2 is empty
     for i, p in enumerate(paragraphs):
-        xml_space = p.attrib.get("{http://www.w3.org/XML/1998/namespace}space")
+        assert "{http://www.w3.org/XML/1998/namespace}space" not in p.attrib
+        white_space = _parse_style_string(p.attrib.get("style", "")).get("white-space")
         if i < 2:  # First two paragraphs have whitespace
-            expected_msg = (
-                f"Paragraph {i} should have xml:space='preserve', "
-                f"got: {repr(xml_space)}"
+            assert white_space == "pre-wrap", (
+                f"Paragraph {i} should have white-space: pre-wrap, "
+                f"got: {repr(white_space)}"
             )
-            assert xml_space == "preserve", expected_msg
-        else:  # Last paragraph is empty (\r only), no xml:space needed
-            assert xml_space is None, (
-                f"Paragraph {i} should not have xml:space, got: {repr(xml_space)}"
+        else:  # Last paragraph is empty (\r only), nothing to preserve
+            assert white_space is None, (
+                f"Paragraph {i} should not set white-space, got: {repr(white_space)}"
             )
 
     # Extract text content from each paragraph
