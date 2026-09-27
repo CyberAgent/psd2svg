@@ -548,6 +548,34 @@ def test_text_style_baseline_shift_scale() -> None:
     )
 
 
+def test_text_style_uniform_scale_without_shift() -> None:
+    """Test that uniform scaling alone scales only the font size.
+
+    Same layer as style-baseline-shift-scale.psd with the baseline shift
+    removed, so the two differ only in the shift.
+    """
+    svg = convert_psd_to_svg("texts/style-uniform-scale-150.psd")
+
+    text = svg.find(".//text[@font-size]")
+    assert text is not None
+    assert float(text.attrib["font-size"]) == 48.0, "32px scaled by 150%"
+    assert text.attrib.get("transform") is None, (
+        "Uniform scaling should not use transform"
+    )
+
+    # Nothing shifts the baseline, so no element carries the attribute
+    assert svg.find(".//*[@baseline-shift]") is None
+
+    # The shift is the only thing that differs, so the pair must share a
+    # baseline. With no shift to pin to a <tspan>, the lone run merges into the
+    # <text> element and carries the position there instead.
+    shifted = convert_psd_to_svg("texts/style-baseline-shift-scale.psd")
+    shifted_run = shifted.find(".//tspan[@y]")
+    assert shifted_run is not None
+    assert float(text.attrib["y"]) == float(shifted_run.attrib["y"])
+    assert float(text.attrib["x"]) == float(shifted_run.attrib["x"])
+
+
 def test_text_style_tracking() -> None:
     """Test tracking (letter-spacing) handling."""
     svg = convert_psd_to_svg("texts/style-tracking.psd")
