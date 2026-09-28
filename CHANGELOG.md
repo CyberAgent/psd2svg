@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`crop_layers_to_canvas` option to cap layer memory use** (#TBD)
+- **`crop_layers_to_canvas` option to cap layer memory use** (#454)
   - Opt-in; crops each layer's rasterized image to the canvas before
     embedding it, so a layer whose bounding box extends far beyond the
     canvas (e.g. a Smart Object placed at a fraction of its native
