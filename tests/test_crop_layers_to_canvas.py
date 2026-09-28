@@ -1,13 +1,16 @@
 """Tests for the crop_layers_to_canvas option."""
 
-from unittest.mock import MagicMock
+import sys
+from unittest.mock import MagicMock, Mock
 from xml.etree import ElementTree as ET
 
+import pytest
 from PIL import Image
 from psd_tools import PSDImage
 from psd_tools.api import layers
 from psd_tools.constants import BlendMode
 
+import psd2svg.__main__ as cli
 from psd2svg import SVGDocument
 from psd2svg.core.converter import Converter
 from tests.conftest import get_fixture
@@ -78,6 +81,20 @@ class TestCropLayersToCanvasOption:
             ]
 
         assert image_attrs(False) == image_attrs(True)
+
+    def test_cli_crop_layers_to_canvas(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pass --crop-layers-to-canvas from the CLI to convert()."""
+        mock_convert = Mock()
+        monkeypatch.setattr(cli, "convert", mock_convert)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["psd2svg", "input.psd", "output.svg", "--crop-layers-to-canvas"],
+        )
+
+        cli.main()
+
+        assert mock_convert.call_args.kwargs["crop_layers_to_canvas"] is True
 
     def test_oversized_layer_is_cropped_through_add_pixel(self) -> None:
         """An out-of-bounds layer is cropped when driven through add_pixel().
