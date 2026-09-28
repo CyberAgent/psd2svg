@@ -2,7 +2,6 @@
 
 import sys
 from unittest.mock import MagicMock, Mock
-from xml.etree import ElementTree as ET
 
 import pytest
 from PIL import Image
@@ -14,8 +13,6 @@ import psd2svg.__main__ as cli
 from psd2svg import SVGDocument
 from psd2svg.core.converter import Converter
 from tests.conftest import get_fixture
-
-SVG_NS = "{http://www.w3.org/2000/svg}"
 
 
 class TestCropToCanvas:
@@ -65,22 +62,19 @@ class TestCropLayersToCanvasOption:
         assert converter.crop_layers_to_canvas is False
 
     def test_in_bounds_layer_is_unaffected(self) -> None:
-        """An in-canvas layer's geometry must be identical either way."""
+        """An in-canvas layer's output, including pixels, must be identical.
+
+        Comparing the full serialized SVG (data URIs and all), not just the
+        <image> geometry, so a crop that altered embedded pixel data while
+        preserving x/y/width/height would also be caught.
+        """
         psdimage = PSDImage.open(get_fixture("layer-types/smartobject-layer.psd"))
 
-        def image_attrs(crop: bool) -> list[dict[str, str]]:
+        def render(crop: bool) -> str:
             document = SVGDocument.from_psd(psdimage, crop_layers_to_canvas=crop)
-            svg = ET.fromstring(document.tostring())
-            return [
-                {
-                    k: v
-                    for k, v in image.attrib.items()
-                    if k in ("x", "y", "width", "height")
-                }
-                for image in svg.iter(f"{SVG_NS}image")
-            ]
+            return document.tostring()
 
-        assert image_attrs(False) == image_attrs(True)
+        assert render(False) == render(True)
 
     def test_cli_crop_layers_to_canvas(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Pass --crop-layers-to-canvas from the CLI to convert()."""
