@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **foreignObject text was silently clipped when it did not fit its box** (#450)
+  - The overflow now renders outside the box, and a layer that cannot fit
+    however it wraps warns at conversion time
+
 - **A lone text run lost its baseline shift** (#446)
   - The optimizer merged the run into the `<text>` element, where resvg ignores
     `baseline-shift`; the shift now stays on the `<tspan>` that owns it
