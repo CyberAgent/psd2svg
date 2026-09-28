@@ -1707,9 +1707,9 @@ class TextConverter(ConverterProtocol):
         # each paragraph takes more than its line-height and they drift apart
         # (issue #421). Matched to the span that sets the line box, the strut
         # covers that span's inline box and the line box comes out at the
-        # leading. A paragraph with no text is held open by the empty
-        # inline-block its span becomes, not by the strut: a <p> with no line
-        # box in it has no height, whatever font it names.
+        # leading. A paragraph with no text is not held open at all: its span
+        # becomes an empty inline-block, which measures 0x0 and generates no
+        # line box, so the <p> collapses to nothing whatever font it names.
         strut = self._line_box_span(paragraph, text_setting)
         if strut is not None:
             postscript_name = text_setting.get_postscript_name(strut.style.font)
