@@ -2489,6 +2489,15 @@ def test_foreignobject_paragraphs_advance_by_their_leading() -> None:
         )
 
 
+def _find_foreign_object(document: SVGDocument) -> ET.Element:
+    """Return the one foreignObject of a converted document."""
+    foreign_objects = document.svg.findall(".//foreignObject")
+    assert len(foreign_objects) == 1, (
+        f"Expected one foreignObject, got {foreign_objects}"
+    )
+    return foreign_objects[0]
+
+
 def _ink_row_span(image: Image.Image) -> tuple[int, int]:
     """Return the first and last row holding text ink in the image."""
     rgba = np.array(image.convert("RGBA")).astype(float)
@@ -2505,13 +2514,16 @@ def test_foreignobject_container_does_not_clip() -> None:
     alone leaves the rendering unchanged.
     """
     psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
-    svg = SVGDocument.from_psd(
+    document = SVGDocument.from_psd(
         psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
-    ).tostring()
+    )
 
-    assert 'overflow="visible"' in svg, svg
-    assert "overflow: visible" in svg, svg
-    assert "overflow: hidden" not in svg, svg
+    foreign_object = _find_foreign_object(document)
+    assert foreign_object.attrib.get("overflow") == "visible"
+
+    div = document.svg.find(".//{http://www.w3.org/1999/xhtml}div")
+    assert div is not None
+    assert _parse_style_string(div.attrib.get("style", ""))["overflow"] == "visible"
 
 
 def test_foreignobject_warns_when_text_cannot_fit_its_box(
@@ -2536,9 +2548,34 @@ def test_foreignobject_empty_paragraph_does_not_trigger_the_warning(
     """A paragraph that strips to nothing occupies no line, so it adds no height.
 
     A trailing carriage return is ordinary in PSD text; counting it as a line
-    would report an overflow on a layer that fits.
+    would report an overflow on a layer that fits. This fixture has two
+    rendering paragraphs needing 73.62px of an 81.03px box, and counting its
+    empty third would put the floor at 112.00px.
     """
     psdimage = PSDImage.open(get_fixture("texts/whitespaces-shapetype1.psd"))
+    with caplog.at_level(logging.WARNING, logger="psd2svg.core.text"):
+        SVGDocument.from_psd(
+            psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+        )
+
+    assert not [record for record in caplog.records if "overflows it" in record.message]
+
+
+def test_foreignobject_overflow_measures_the_block_axis(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """vertical-rl advances along x, so the box's block axis is its width.
+
+    This layer needs 112.00px against a 102.47px height but a 226.29px width,
+    so it overflows read horizontally and fits read vertically. Measuring the
+    wrong axis would warn either way.
+    """
+    monkeypatch.setattr(
+        TypeSetting,
+        "writing_direction",
+        property(lambda self: WritingDirection.VERTICAL_RL),
+    )
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
     with caplog.at_level(logging.WARNING, logger="psd2svg.core.text"):
         SVGDocument.from_psd(
             psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
@@ -2558,12 +2595,10 @@ def test_foreignobject_overflowing_text_renders_outside_its_box() -> None:
     document = SVGDocument.from_psd(
         psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
     )
-    box = re.search(
-        r'<foreignObject[^>]*\by="([\d.]+)"[^>]*\bheight="([\d.]+)"',
-        document.tostring(),
+    foreign_object = _find_foreign_object(document)
+    box_bottom = float(foreign_object.attrib["y"]) + float(
+        foreign_object.attrib["height"]
     )
-    assert box is not None
-    box_bottom = float(box.group(1)) + float(box.group(2))
 
     rasterizer = PlaywrightRasterizer()
     try:
@@ -2571,6 +2606,8 @@ def test_foreignobject_overflowing_text_renders_outside_its_box() -> None:
     finally:
         rasterizer.close()
 
+    # The fixture is 240x120 at its natural size from an origin of (0, 0), so a
+    # raster row index and a user-space y are the same number here.
     _, last_ink_row = _ink_row_span(image)
     assert last_ink_row > box_bottom, (
         f"Text ends at row {last_ink_row}, inside the {box_bottom}px box: "

@@ -263,8 +263,9 @@ def _half_leading_compensation(paragraph: Paragraph, leading: float) -> float:
     """Return the negative start margin that pulls the first line up.
 
     CSS centres text in the line box, so half the leading sits above the first
-    line. Only the paragraph that starts the layer carries this; see the call
-    site for why later paragraphs must not repeat it.
+    line, pushing the block off the top of its box. Only the paragraph that
+    starts the layer carries this: later ones already sit exactly one
+    line-height apart, and repeating it would pull every break closer.
     """
     if leading <= 0 or not paragraph.spans:
         return 0.0
@@ -279,21 +280,32 @@ def _minimum_block_extent(paragraphs: list[Paragraph]) -> float | None:
 
     Every paragraph that renders is counted at one line of its own leading.
     Wrapping only ever adds lines, so the laid-out extent is never smaller than
-    this. Returns ``None`` when a rendering paragraph has no positive leading,
-    which leaves the extent unbounded.
+    this. Returns ``None`` when a rendering paragraph has no positive leading:
+    the <p> then falls back to the renderer's own line-height, which this
+    cannot predict.
+
+    Adjacent margins collapse to the largest positive plus the smallest
+    negative, while this sums the gaps. That over-counts only where a gap is
+    positive, which raises the floor toward the real extent; a negative gap on
+    a paragraph that renders nothing is subtracted here so it cannot push the
+    floor above what the browser lays out.
     """
     extent = 0.0
     previous: Paragraph | None = None
-    for paragraph in paragraphs:
+    for index, paragraph in enumerate(paragraphs):
+        spacing = (
+            _paragraph_spacing(previous, paragraph) if previous is not None else 0.0
+        )
         if not _renders_content(paragraph):
+            # No line box, so no height - but the margin is still emitted, and
+            # a negative one pulls the paragraphs around it together.
+            extent += min(spacing, 0.0)
             previous = paragraph
             continue
         leading = paragraph.compute_leading()
         if leading <= 0:
             return None
-        if previous is not None:
-            extent += _paragraph_spacing(previous, paragraph)
-        extent += leading
+        extent += spacing + leading
         previous = paragraph
 
     # The compensation rides on the first paragraph whether or not it renders,
@@ -526,7 +538,7 @@ class TextConverter(ConverterProtocol):
         )
 
         if use_foreign_object:
-            return self._create_foreign_object_text(text_setting)
+            return self._create_foreign_object_text(text_setting, layer.name)
         else:
             return self._create_native_svg_text(text_setting)
 
@@ -791,7 +803,9 @@ class TextConverter(ConverterProtocol):
         )
         return inline_scale[0] if is_horizontal else inline_scale[1]
 
-    def _create_foreign_object_text(self, text_setting: TypeSetting) -> ET.Element:
+    def _create_foreign_object_text(
+        self, text_setting: TypeSetting, layer_name: str
+    ) -> ET.Element:
         """Create <foreignObject> with XHTML content for text wrapping.
 
         This method creates a foreignObject element containing XHTML div/p/span
@@ -800,6 +814,7 @@ class TextConverter(ConverterProtocol):
 
         Args:
             text_setting: TypeSetting object with text data.
+            layer_name: Name of the layer, for the overflow warning.
 
         Returns:
             foreignObject element containing XHTML content.
@@ -835,7 +850,7 @@ class TextConverter(ConverterProtocol):
         paragraphs = list(text_setting)
         has_hyphenation = any(p.style.auto_hyphenate for p in paragraphs)
 
-        self._warn_on_certain_overflow(paragraphs, text_setting, bounds)
+        self._warn_on_certain_overflow(paragraphs, text_setting, bounds, layer_name)
 
         # Create XHTML div container with proper namespace
         container_styles = self._get_foreign_object_container_styles(
@@ -1463,6 +1478,7 @@ class TextConverter(ConverterProtocol):
         paragraphs: list[Paragraph],
         text_setting: TypeSetting,
         bounds: Rectangle,
+        layer_name: str,
     ) -> None:
         """Warn when the text cannot fit its box whatever the browser does.
 
@@ -1477,14 +1493,16 @@ class TextConverter(ConverterProtocol):
             paragraphs: Paragraphs of the layer, in order.
             text_setting: TypeSetting object, for the writing direction.
             bounds: Bounding box the paragraphs are laid out in.
+            layer_name: Name of the layer, to name in the warning.
         """
         minimum_extent = _minimum_block_extent(paragraphs)
         if minimum_extent is None:
             return
 
-        # Paragraph indents are emitted as physical padding on a border-box
-        # div, so in vertical writing they eat into the extent measured here.
-        # Ignoring them can only understate the overflow, never invent one.
+        # vertical-rl advances along x, so the box's block axis is its width.
+        # Paragraph indents are left out: they are physical padding on the <p>,
+        # which in vertical writing adds to the block extent the paragraphs
+        # need, so counting them could only raise the floor, never lower it.
         if text_setting.writing_direction == WritingDirection.VERTICAL_RL:
             box_extent = bounds.width
         else:
@@ -1492,8 +1510,10 @@ class TextConverter(ConverterProtocol):
 
         if minimum_extent > box_extent:
             logger.warning(
-                "Text needs at least %.2fpx of its %.2fpx box and overflows it; "
-                "the overflow renders outside the box instead of being clipped.",
+                "Text layer '%s' needs at least %.2fpx of its %.2fpx box and "
+                "overflows it; the overflow renders outside the box instead of "
+                "being clipped.",
+                layer_name,
                 minimum_extent,
                 box_extent,
             )
@@ -1516,11 +1536,16 @@ class TextConverter(ConverterProtocol):
             "margin": "0",
             "padding": "0",
             # The browser breaks lines where Photoshop does not, so clipping
-            # would drop text that Photoshop draws. Visible overflow also leaves
-            # the div without a block formatting context, so the first
-            # paragraph's negative start margin collapses through it: harmless
-            # while the container paints nothing, but a background or a border
-            # would start above the box.
+            # would drop text that Photoshop draws.
+            #
+            # Visible overflow costs the div its block formatting context, so
+            # the first paragraph's negative start margin now collapses out and
+            # moves the div rather than its contents. Every glyph keeps its
+            # place, since the margin shifts the box and the text with it; only
+            # a background or a border on the container would show the move.
+            # A vertical-rl div keeps a formatting context of its own, its
+            # writing mode differing from the parent's, so nothing collapses
+            # through it there.
             "overflow": "visible",
             # Ensure padding (from paragraph indents) is included in width/height,
             # not added to it, matching Photoshop's bounding box behavior

@@ -427,7 +427,8 @@ To enable text wrapping:
 * Text that does not fit its box renders outside it rather than being clipped,
   because the browser breaks lines where Photoshop does not and clipping would
   drop text Photoshop draws; the SVG canvas still bounds it, and an unbreakable
-  word wider than the box overflows the same way
+  word wider than the box overflows the same way. A layer that cannot fit
+  however it wraps names its shortfall in a conversion-time warning
   (`#449 <https://github.com/CyberAgent/psd2svg/issues/449>`_)
 * Point text (ShapeType=0) always uses native SVG ``<text>`` elements, regardless of this setting
 * Default behavior (``text_wrapping_mode=0``) maintains backward compatibility with native SVG text
