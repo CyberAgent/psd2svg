@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The helper had no callers and wrote an inert `font-family` attribute on
     XHTML elements
 
+- **Removed the stale `psd2svg.version` module** (#452)
+  - It reported `0.3.0` regardless of the installed release; read the version
+    from `importlib.metadata.version("psd2svg")`
+
 ### Fixed
 
 - **foreignObject text was silently clipped when it did not fit its box** (#450)
