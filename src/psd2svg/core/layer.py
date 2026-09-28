@@ -149,11 +149,8 @@ class LayerConverter(ConverterProtocol):
         """Track descent beneath a group with active effects.
 
         A group's effects (e.g. a drop shadow) consume the composited alpha
-        of its children, so a child can affect the group's rendered effect
-        even if the child itself has no effects and uses normal blending.
-        crop_layers_to_canvas must not crop any layer while inside one of
-        these, since cropping a child would change what the ancestor's
-        effects see.
+        of its children, so crop_layers_to_canvas must not crop a layer
+        beneath one, even if that layer has no effects of its own.
         """
         if layer.has_effects():
             self._effects_ancestor_depth += 1
@@ -209,10 +206,9 @@ class LayerConverter(ConverterProtocol):
             )
             return None
 
-        # Validate image dimensions before decoding the layer. This checks the
-        # layer's full, pre-crop size: topil() always decodes the full bbox,
-        # so crop_layers_to_canvas cannot rescue a layer that is oversized
-        # before cropping, only reduce the memory held after it decodes.
+        # Checked pre-decode against the full, pre-crop size: topil() always
+        # decodes the full bbox, so crop_layers_to_canvas can't rescue an
+        # oversized layer here, only reduce memory held after decoding.
         description = f"Layer '{layer.name}'"
         self.check_image_dimension(layer.width, layer.height, description=description)
 
@@ -232,27 +228,15 @@ class LayerConverter(ConverterProtocol):
             and not layer.has_effects()
             and self._effects_ancestor_depth == 0
         ):
-            # A layer's bbox can extend far beyond the canvas, e.g. a Smart
-            # Object placed at a small fraction of its native resolution.
-            # Nothing outside the canvas is ever rendered, so crop it before
-            # it gets embedded. Skipped when the layer has effects, or is
-            # nested beneath a group that does: some effects (e.g. an
-            # aligned gradient overlay, or a group's drop shadow) size or
-            # composite themselves against the full, uncropped bounding box
-            # rather than the canvas, and cropping would change that. This
-            # checks has_effects() directly rather than has_separate_fill(),
-            # which also returns False for an Artboard or AdjustmentLayer
-            # regardless of has_effects() (they paint in place instead) -
-            # that distinction matters for the node structure below, not
-            # for whether cropping is safe.
+            # has_effects() is checked directly rather than
+            # has_separate_fill(), which also returns False for an
+            # Artboard/AdjustmentLayer regardless of has_effects() - that
+            # distinction is for node structure below, not crop safety.
             cropped = self._crop_to_canvas(image, left, top, width, height)
             if cropped is None:
-                # Entirely outside the canvas: nothing to render. Still
-                # return a node rather than None below, since a clipping
-                # base must produce one (add_clipping_target raises
-                # otherwise); an empty, zero-size placeholder clips its
-                # children to nothing, matching what an uncropped
-                # off-canvas layer would have rendered anyway.
+                # add_clipping_target() requires a node even for an empty
+                # base; a zero-size placeholder renders nothing, same as an
+                # uncropped off-canvas layer would have.
                 logger.debug(
                     f"Layer bbox is entirely outside the canvas: "
                     f"'{layer.name}' ({layer.kind})."
@@ -262,9 +246,8 @@ class LayerConverter(ConverterProtocol):
             else:
                 image, left, top, width, height = cropped
 
-        # Generate image ID before creating the <image> element. Skipped for
-        # an off-canvas layer: there is no image content to store, and the
-        # placeholder node below is a <rect>, not an <image>.
+        # Off-canvas: no image content, and the placeholder below is a
+        # <rect>, not an <image>.
         image_id = (
             None
             if is_offcanvas

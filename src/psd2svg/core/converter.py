@@ -62,27 +62,17 @@ class Converter(
         include_hidden_layers: Include layers hidden in Photoshop. When False
             (default), hidden layers are omitted from the SVG.
         crop_layers_to_canvas: Crop each layer's rasterized image to the
-            intersection with the document canvas before embedding it. When
-            False (default), a layer's image is embedded at its full bounding
-            box, which for some PSDs (e.g. a Smart Object placed at a small
-            fraction of its native resolution) can be far larger than the
-            canvas and take up a lot of memory. A layer with effects, or
-            nested beneath a group that has effects, is never cropped: some
-            effects (e.g. an aligned gradient overlay, or a group's drop
-            shadow) size or composite themselves against the full,
-            uncropped bounding box rather than the canvas. A layer entirely
-            outside the canvas is replaced with an empty placeholder rather
-            than omitted, so it still satisfies a clipping base that needs
-            one. Also, for a
-            layer using a non-normal blend mode, cropping can shift the
-            resvg-rendered result: mix-blend-mode support in SVG renderers is
-            already an approximation, and resvg's rendering of a blend-mode
-            layer's oversized image has been observed to differ (measured
-            marginally closer to psd-tools' own composite in one case) from
-            its cropped equivalent. Also, resource_limits' max_image_dimension
-            check always runs against the full pre-crop size, since topil()
-            decodes the full bbox regardless; this option reduces the memory
-            held after decoding, not the size checked before it.
+            intersection with the document canvas before embedding it.
+            Default False. Useful when a layer's bounding box (e.g. a Smart
+            Object at a fraction of its native resolution) is far larger
+            than the canvas, since those extra pixels are never rendered
+            but still cost memory. Skipped for a layer with effects, or
+            nested beneath a group with effects, since those effects
+            composite against the full bounding box. Off by default because
+            cropping has been observed to shift resvg's rendering of a
+            non-normal blend mode. The resource_limits max_image_dimension
+            check still applies to the pre-crop size, since topil() decodes
+            the full bbox regardless.
         text_letter_spacing_offset: Global offset (in pixels) to add to all
             letter-spacing values. This can be used to compensate for differences
             between Photoshop's text rendering and SVG's text rendering. Typical values
