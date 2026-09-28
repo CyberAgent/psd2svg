@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-28
+
 ### Added
 
 - **Photoshop character alignment for mixed-size text runs** (#444)
@@ -36,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Removed `svg_utils.add_font_family()`** (#395)
   - The helper had no callers and wrote an inert `font-family` attribute on
     XHTML elements
+
+- **Removed the stale `psd2svg.version` module** (#452)
+  - It reported `0.3.0` regardless of the installed release; read the version
+    from `importlib.metadata.version("psd2svg")`
 
 ### Fixed
 
@@ -162,6 +168,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Divide and Subtract blend modes rendered as `difference`, inverting colors** (#339)
   - Divide, Subtract, Linear Burn and Linear Dodge are now exact on Color,
     Gradient and Pattern Overlay effects
+
+### Dependencies
+
+- Dependency and CI action bumps (psd-tools, github/codeql-action)
 
 ## [0.12.1] - 2026-09-14
 
@@ -513,7 +523,8 @@ See [limitations.rst](https://psd2svg.readthedocs.io/en/latest/limitations.html)
 
 Previous releases - see git history for details.
 
-[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/CyberAgent/psd2svg/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/CyberAgent/psd2svg/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/CyberAgent/psd2svg/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/CyberAgent/psd2svg/compare/v0.10.1...v0.11.0
