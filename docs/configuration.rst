@@ -45,6 +45,33 @@ option to convert them like visible layers, including hidden clipping layers.
 **Enable for:** Exporting every layer, inspecting PSD structure, or preparing
 SVG templates whose layer visibility will be controlled after conversion
 
+Crop Layers to Canvas
+---------------------
+
+**Option:** ``crop_layers_to_canvas=True`` (default: ``False``)
+
+By default, a layer's rasterized image is embedded at its full bounding box.
+For some PSDs (e.g. a Smart Object placed at a small fraction of its native
+resolution) this box can be far larger than the canvas, holding and encoding
+pixels that are never rendered. Enable this option to crop each eligible
+layer's image to the intersection with the canvas before embedding it.
+
+A layer is skipped when it has effects, or is nested beneath a group that
+has effects, since some effects (e.g. an aligned gradient overlay, or a
+group's drop shadow) size or composite themselves against the full,
+uncropped bounding box.
+
+**Usage:** ``SVGDocument.from_psd(psdimage, crop_layers_to_canvas=True)`` or
+``psd2svg input.psd output.svg --crop-layers-to-canvas``
+
+**Enable for:** PSDs with Smart Object or other raster layers whose bounding
+box greatly exceeds the canvas, to reduce peak memory use and output size
+
+**Keep disabled for:** A PSD relying on a layer's non-normal blend mode
+(e.g. overlay, screen) where its uncropped size affects the exact rendered
+result; cropping such a layer has been observed to shift the resvg-rendered
+output, since SVG's ``mix-blend-mode`` support is already an approximation
+
 Text Letter Spacing
 -------------------
 

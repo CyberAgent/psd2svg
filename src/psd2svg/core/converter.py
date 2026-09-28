@@ -66,9 +66,14 @@ class Converter(
             False (default), a layer's image is embedded at its full bounding
             box, which for some PSDs (e.g. a Smart Object placed at a small
             fraction of its native resolution) can be far larger than the
-            canvas and take up a lot of memory. Layers with effects are never
-            cropped, since some effects (e.g. an aligned gradient overlay)
-            size themselves against the layer's own bounding box. Also, for a
+            canvas and take up a lot of memory. A layer with effects, or
+            nested beneath a group that has effects, is never cropped: some
+            effects (e.g. an aligned gradient overlay, or a group's drop
+            shadow) size or composite themselves against the full,
+            uncropped bounding box rather than the canvas. A layer entirely
+            outside the canvas is replaced with an empty placeholder rather
+            than omitted, so it still satisfies a clipping base that needs
+            one. Also, for a
             layer using a non-normal blend mode, cropping can shift the
             resvg-rendered result: mix-blend-mode support in SVG renderers is
             already an approximation, and resvg's rendering of a blend-mode
@@ -126,6 +131,10 @@ class Converter(
         self.resource_limits = resource_limits
         self.include_hidden_layers = include_hidden_layers
         self.crop_layers_to_canvas = crop_layers_to_canvas
+        # Depth of nested ancestor groups with active effects. A group's
+        # effects consume the composited alpha of its children, so
+        # crop_layers_to_canvas must not crop any layer beneath one.
+        self._effects_ancestor_depth = 0
 
         # Initialize the SVG root element.
         self.svg = svg_utils.create_node(

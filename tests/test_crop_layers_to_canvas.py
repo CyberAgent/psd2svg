@@ -125,6 +125,53 @@ class TestCropLayersToCanvasOption:
         [image] = converter.images.values()
         assert image.size == (32, 32)
 
+    def make_pixel_layer(
+        self,
+        *,
+        name: str,
+        left: int,
+        top: int,
+        width: int,
+        height: int,
+        has_effects: bool = False,
+    ) -> MagicMock:
+        layer = MagicMock(spec=layers.PixelLayer)
+        layer.name = name
+        layer.kind = "pixel"
+        layer.left, layer.top, layer.width, layer.height = left, top, width, height
+        layer.opacity = 255
+        layer.blend_mode = BlendMode.NORMAL
+        layer.has_pixels.return_value = True
+        layer.has_effects.return_value = has_effects
+        layer.has_mask.return_value = False
+        layer.has_vector_mask.return_value = False
+        layer.topil.return_value = Image.new("RGBA", (width, height), (1, 2, 3, 4))
+        layer.tagged_blocks.get_data.return_value = 255
+        return layer
+
+    def test_offcanvas_layer_used_as_clip_base_does_not_raise(self) -> None:
+        """An off-canvas clipping base must not crash add_clipping_target().
+
+        Regression: add_pixel() used to return None for a layer entirely
+        outside the canvas, and add_clipping_target()/add_clip_mask() raise
+        ValueError whenever the base returns None.
+        """
+        psdimage = PSDImage.open(get_fixture("layer-types/pixel-layer.psd"))
+        converter = Converter(psdimage, crop_layers_to_canvas=True)
+        # Canvas is 32x32; this base lies entirely outside it.
+        layer = self.make_pixel_layer(
+            name="outside", left=40, top=40, width=10, height=10
+        )
+
+        with converter.add_clipping_target(layer) as clip_attrib:
+            assert "mask" in clip_attrib
+
+        # The in-memory tree uses bare tag names; the SVG namespace is only
+        # attached to elements once serialized via document.tostring().
+        rect = converter.svg.find(".//rect")
+        assert rect is not None
+        assert (rect.get("width"), rect.get("height")) == ("0", "0")
+
     def test_effects_layer_is_never_cropped(self) -> None:
         """A layer with effects is exempted from cropping regardless.
 
@@ -143,3 +190,48 @@ class TestCropLayersToCanvasOption:
         assert spy.call_count == 1
         _, left, top, width, height = spy.call_args.args
         assert (left, top, width, height) == (0, 0, 128, 128)
+
+    def test_child_of_effects_group_is_never_cropped_directly(self) -> None:
+        """A child beneath a group with effects is exempted, even in bounds.
+
+        Regression: the effects exemption only checked the layer's own
+        effects. A group's effects (e.g. a drop shadow) consume the
+        composited alpha of its children, so a child must stay uncropped
+        even when it has no effects of its own.
+        """
+        psdimage = PSDImage.open(get_fixture("layer-types/pixel-layer.psd"))
+        converter = Converter(psdimage, crop_layers_to_canvas=True)
+        group = MagicMock(spec=layers.Group)
+        group.has_effects.return_value = True
+        # Canvas is 32x32; this child lies far outside it.
+        child = self.make_pixel_layer(
+            name="child", left=-100, top=-100, width=200, height=200
+        )
+
+        with converter._track_effects_ancestor(group):
+            node = converter.add_pixel(child)
+
+        assert node is not None
+        assert (node.get("x"), node.get("y")) == ("-100", "-100")
+        assert (node.get("width"), node.get("height")) == ("200", "200")
+
+    def test_group_with_effects_exempts_its_children_from_cropping(self) -> None:
+        """End-to-end: a real effects group's children never reach the crop.
+
+        color-overlay-10-group-fill-opacity.psd has two top-level pixel
+        layers ('Background', 'Base') with no effects ancestor, and three
+        groups with a color overlay effect, each with one effect-free pixel
+        child. Only the two top-level layers may reach the crop helper.
+        """
+        psdimage = PSDImage.open(
+            get_fixture("effects/color-overlay-10-group-fill-opacity.psd")
+        )
+        converter = Converter(psdimage, crop_layers_to_canvas=True)
+        real_crop_to_canvas = converter._crop_to_canvas
+        spy = MagicMock(side_effect=real_crop_to_canvas)
+        converter._crop_to_canvas = spy  # type: ignore[method-assign]
+
+        converter.build()
+
+        assert spy.call_count == 2
+        assert converter._effects_ancestor_depth == 0

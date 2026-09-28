@@ -108,7 +108,7 @@ class LayerConverter(ConverterProtocol):
                 id=self.auto_id("group"),
                 **attrib,  # type: ignore[arg-type]
             )
-            with self.set_current(node):
+            with self.set_current(node), self._track_effects_ancestor(layer):
                 self.add_children(layer, depth=depth + 1)
 
             self.set_opacity(layer.opacity / 255, node)
@@ -130,7 +130,7 @@ class LayerConverter(ConverterProtocol):
             id=self.auto_id("group") if layer.has_effects() else None,
             **attrib,  # type: ignore[arg-type]
         )
-        with self.set_current(node):
+        with self.set_current(node), self._track_effects_ancestor(layer):
             self.add_children(layer, depth=depth + 1)
 
         self.apply_background_effects(layer, node, insert_before_target=True)
@@ -141,6 +141,27 @@ class LayerConverter(ConverterProtocol):
         self.set_layer_attributes(layer, node)
         node = self.apply_mask(layer, node)
         return node
+
+    @contextlib.contextmanager
+    def _track_effects_ancestor(
+        self, layer: layers.Group | layers.Layer
+    ) -> Iterator[None]:
+        """Track descent beneath a group with active effects.
+
+        A group's effects (e.g. a drop shadow) consume the composited alpha
+        of its children, so a child can affect the group's rendered effect
+        even if the child itself has no effects and uses normal blending.
+        crop_layers_to_canvas must not crop any layer while inside one of
+        these, since cropping a child would change what the ancestor's
+        effects see.
+        """
+        if layer.has_effects():
+            self._effects_ancestor_depth += 1
+        try:
+            yield
+        finally:
+            if layer.has_effects():
+                self._effects_ancestor_depth -= 1
 
     def add_children(
         self, group: layers.Group | layers.Artboard | PSDImage, depth: int = 0
@@ -205,25 +226,45 @@ class LayerConverter(ConverterProtocol):
 
         left, top, width, height = layer.left, layer.top, layer.width, layer.height
         has_separate_fill = self.has_separate_fill(layer)
-        if self.crop_layers_to_canvas and not has_separate_fill:
+        is_offcanvas = False
+        if (
+            self.crop_layers_to_canvas
+            and not has_separate_fill
+            and self._effects_ancestor_depth == 0
+        ):
             # A layer's bbox can extend far beyond the canvas, e.g. a Smart
             # Object placed at a small fraction of its native resolution.
             # Nothing outside the canvas is ever rendered, so crop it before
-            # it gets embedded. Skipped when the layer has effects: some
-            # (e.g. an aligned gradient overlay) size themselves against the
-            # layer's own bounding box rather than the canvas, and cropping
-            # would change that box.
+            # it gets embedded. Skipped when the layer has effects, or is
+            # nested beneath a group that does: some effects (e.g. an
+            # aligned gradient overlay, or a group's drop shadow) size or
+            # composite themselves against the full, uncropped bounding box
+            # rather than the canvas, and cropping would change that.
             cropped = self._crop_to_canvas(image, left, top, width, height)
             if cropped is None:
+                # Entirely outside the canvas: nothing to render. Still
+                # return a node rather than None below, since a clipping
+                # base must produce one (add_clipping_target raises
+                # otherwise); an empty, zero-size placeholder clips its
+                # children to nothing, matching what an uncropped
+                # off-canvas layer would have rendered anyway.
                 logger.debug(
-                    f"Layer bbox is entirely outside the canvas, skipping: "
+                    f"Layer bbox is entirely outside the canvas: "
                     f"'{layer.name}' ({layer.kind})."
                 )
-                return None
-            image, left, top, width, height = cropped
+                is_offcanvas = True
+                left, top, width, height = 0, 0, 0, 0
+            else:
+                image, left, top, width, height = cropped
 
-        # Generate image ID before creating the <image> element
-        image_id = self.register_image(image.convert("RGBA"), description=description)
+        # Generate image ID before creating the <image> element. Skipped for
+        # an off-canvas layer: there is no image content to store, and the
+        # placeholder node below is a <rect>, not an <image>.
+        image_id = (
+            None
+            if is_offcanvas
+            else self.register_image(image.convert("RGBA"), description=description)
+        )
 
         # Raster layers can have both fill opacity and overall opacity.
         fill_opacity = layer.tagged_blocks.get_data(Tag.BLEND_FILL_OPACITY, 255)
@@ -253,7 +294,7 @@ class LayerConverter(ConverterProtocol):
             self.apply_stroke_effect(layer, node)
         else:
             node = self.create_node(
-                "image",
+                "rect" if is_offcanvas else "image",
                 id=image_id,
                 x=left,
                 y=top,
