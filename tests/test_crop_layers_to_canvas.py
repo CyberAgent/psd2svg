@@ -119,6 +119,40 @@ class TestCropLayersToCanvasOption:
         [image] = converter.images.values()
         assert image.size == (32, 32)
 
+    def test_adjustment_layer_with_effects_is_never_cropped(self) -> None:
+        """An AdjustmentLayer/Artboard with effects must not be cropped.
+
+        Regression: the crop gate used to key off has_separate_fill(),
+        which returns False for an Artboard or AdjustmentLayer regardless
+        of has_effects() (they paint their content in place instead). If
+        such a layer ever reached add_pixel() with effects, that made it
+        look exempt-from-effects and thus eligible for cropping. The gate
+        must check has_effects() directly.
+        """
+        psdimage = PSDImage.open(get_fixture("layer-types/pixel-layer.psd"))
+        converter = Converter(psdimage, crop_layers_to_canvas=True)
+
+        layer = MagicMock(spec=layers.AdjustmentLayer)
+        layer.name = "Adjustment"
+        layer.kind = "adjustmentlayer"
+        # Canvas is 32x32; this bbox lies far outside it.
+        layer.left, layer.top, layer.width, layer.height = -100, -100, 200, 200
+        layer.opacity = 255
+        layer.blend_mode = BlendMode.NORMAL
+        layer.has_pixels.return_value = True
+        layer.has_effects.return_value = True
+        layer.has_mask.return_value = False
+        layer.topil.return_value = Image.new("RGBA", (200, 200), (5, 6, 7, 8))
+        layer.tagged_blocks.get_data.return_value = 255
+
+        assert converter.has_separate_fill(layer) is False
+
+        node = converter.add_pixel(layer)
+
+        assert node is not None
+        assert (node.get("x"), node.get("y")) == ("-100", "-100")
+        assert (node.get("width"), node.get("height")) == ("200", "200")
+
     def make_pixel_layer(
         self,
         *,

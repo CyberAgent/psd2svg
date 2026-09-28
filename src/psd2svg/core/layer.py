@@ -229,7 +229,7 @@ class LayerConverter(ConverterProtocol):
         is_offcanvas = False
         if (
             self.crop_layers_to_canvas
-            and not has_separate_fill
+            and not layer.has_effects()
             and self._effects_ancestor_depth == 0
         ):
             # A layer's bbox can extend far beyond the canvas, e.g. a Smart
@@ -239,7 +239,12 @@ class LayerConverter(ConverterProtocol):
             # nested beneath a group that does: some effects (e.g. an
             # aligned gradient overlay, or a group's drop shadow) size or
             # composite themselves against the full, uncropped bounding box
-            # rather than the canvas, and cropping would change that.
+            # rather than the canvas, and cropping would change that. This
+            # checks has_effects() directly rather than has_separate_fill(),
+            # which also returns False for an Artboard or AdjustmentLayer
+            # regardless of has_effects() (they paint in place instead) -
+            # that distinction matters for the node structure below, not
+            # for whether cropping is safe.
             cropped = self._crop_to_canvas(image, left, top, width, height)
             if cropped is None:
                 # Entirely outside the canvas: nothing to render. Still
