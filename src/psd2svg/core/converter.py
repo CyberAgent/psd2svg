@@ -69,10 +69,12 @@ class Converter(
             but still cost memory. Skipped for a layer with effects, or
             nested beneath a group with effects, since those effects
             composite against the full bounding box. Off by default because
-            cropping has been observed to shift resvg's rendering of a
-            non-normal blend mode. The resource_limits max_image_dimension
-            check still applies to the pre-crop size, since topil() decodes
-            the full bbox regardless.
+            it also discards the cropped-out pixels for good, making the
+            layer no longer freely movable or resizable in an SVG editor,
+            and because cropping has been observed to shift resvg's
+            rendering of a non-normal blend mode. The resource_limits
+            max_image_dimension check still applies to the pre-crop size,
+            since topil() decodes the full bbox regardless.
         text_letter_spacing_offset: Global offset (in pixels) to add to all
             letter-spacing values. This can be used to compensate for differences
             between Photoshop's text rendering and SVG's text rendering. Typical values

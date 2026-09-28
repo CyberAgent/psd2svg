@@ -67,10 +67,13 @@ uncropped bounding box.
 **Enable for:** PSDs with Smart Object or other raster layers whose bounding
 box greatly exceeds the canvas, to reduce peak memory use and output size
 
-**Keep disabled for:** A PSD relying on a layer's non-normal blend mode
-(e.g. overlay, screen) where its uncropped size affects the exact rendered
-result; cropping such a layer has been observed to shift the resvg-rendered
-output, since SVG's ``mix-blend-mode`` support is already an approximation
+**Keep disabled for:** An SVG meant to stay editable; the cropped-out
+pixels are discarded for good, so a cropped layer can no longer be moved
+or resized within its original bounds. Also keep disabled for a PSD
+relying on a layer's non-normal blend mode (e.g. overlay, screen) where
+its uncropped size affects the exact rendered result; cropping such a
+layer has been observed to shift the resvg-rendered output, since SVG's
+``mix-blend-mode`` support is already an approximation
 
 Text Letter Spacing
 -------------------
