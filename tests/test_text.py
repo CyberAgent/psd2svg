@@ -2489,6 +2489,95 @@ def test_foreignobject_paragraphs_advance_by_their_leading() -> None:
         )
 
 
+def _ink_row_span(image: Image.Image) -> tuple[int, int]:
+    """Return the first and last row holding text ink in the image."""
+    rgba = np.array(image.convert("RGBA")).astype(float)
+    ink = (rgba[..., 3] > 32) & (rgba[..., :3].mean(axis=2) < 128)
+    rows = np.flatnonzero(ink.any(axis=1))
+    assert rows.size > 0, "No text rendered"
+    return int(rows[0]), int(rows[-1])
+
+
+def test_foreignobject_container_does_not_clip() -> None:
+    """Both the foreignObject and its div have to let the overflow through.
+
+    A foreignObject establishes its own viewport and clips to it, so the CSS
+    alone leaves the rendering unchanged.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    svg = SVGDocument.from_psd(
+        psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+    ).tostring()
+
+    assert 'overflow="visible"' in svg, svg
+    assert "overflow: visible" in svg, svg
+    assert "overflow: hidden" not in svg, svg
+
+
+def test_foreignobject_warns_when_text_cannot_fit_its_box(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Text that overflows on one line per paragraph overflows however it wraps."""
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    with caplog.at_level(logging.WARNING, logger="psd2svg.core.text"):
+        SVGDocument.from_psd(
+            psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+        )
+
+    overflow = [record for record in caplog.records if "overflows it" in record.message]
+    assert len(overflow) == 1, caplog.text
+    assert "112.00px" in overflow[0].getMessage()
+    assert "102.47px" in overflow[0].getMessage()
+
+
+def test_foreignobject_empty_paragraph_does_not_trigger_the_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A paragraph that strips to nothing occupies no line, so it adds no height.
+
+    A trailing carriage return is ordinary in PSD text; counting it as a line
+    would report an overflow on a layer that fits.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/whitespaces-shapetype1.psd"))
+    with caplog.at_level(logging.WARNING, logger="psd2svg.core.text"):
+        SVGDocument.from_psd(
+            psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+        )
+
+    assert not [record for record in caplog.records if "overflows it" in record.message]
+
+
+@requires_playwright
+def test_foreignobject_overflowing_text_renders_outside_its_box() -> None:
+    """Text the browser pushes past the box is drawn, not dropped.
+
+    Chromium lays each paragraph of this fixture on one line where Photoshop
+    wraps it onto two, so the block runs past the box it was measured for.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    document = SVGDocument.from_psd(
+        psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+    )
+    box = re.search(
+        r'<foreignObject[^>]*\by="([\d.]+)"[^>]*\bheight="([\d.]+)"',
+        document.tostring(),
+    )
+    assert box is not None
+    box_bottom = float(box.group(1)) + float(box.group(2))
+
+    rasterizer = PlaywrightRasterizer()
+    try:
+        image = document.rasterize(rasterizer=rasterizer)
+    finally:
+        rasterizer.close()
+
+    _, last_ink_row = _ink_row_span(image)
+    assert last_ink_row > box_bottom, (
+        f"Text ends at row {last_ink_row}, inside the {box_bottom}px box: "
+        "the overflow is being clipped"
+    )
+
+
 def _ink_column_span(image: Image.Image) -> tuple[int, int]:
     """Return the first and last column holding text ink in the image."""
     rgba = np.array(image.convert("RGBA")).astype(float)

@@ -424,6 +424,11 @@ To enable text wrapping:
   each line box to cover the smallest span on it, and the ascent and descent it
   would take to prevent that are not known when the markup is written
   (`#427 <https://github.com/CyberAgent/psd2svg/issues/427>`_)
+* Text that does not fit its box renders outside it rather than being clipped,
+  because the browser breaks lines where Photoshop does not and clipping would
+  drop text Photoshop draws; the SVG canvas still bounds it, and an unbreakable
+  word wider than the box overflows the same way
+  (`#449 <https://github.com/CyberAgent/psd2svg/issues/449>`_)
 * Point text (ShapeType=0) always uses native SVG ``<text>`` elements, regardless of this setting
 * Default behavior (``text_wrapping_mode=0``) maintains backward compatibility with native SVG text
 * For web-only SVG display or browser-based rendering, foreignObject provides better text wrapping

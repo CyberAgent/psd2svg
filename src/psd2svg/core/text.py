@@ -249,6 +249,62 @@ def _paragraph_spacing(previous: Paragraph, paragraph: Paragraph) -> float:
     return previous.style.space_after + paragraph.style.space_before
 
 
+def _renders_content(paragraph: Paragraph) -> bool:
+    """Whether a paragraph puts a line box on the page.
+
+    A paragraph whose spans all strip to empty - a lone carriage return is the
+    common case - emits a self-closing span and measures zero, so it occupies
+    none of the block axis. The strip matches the one the span emitter applies.
+    """
+    return any(span.text.strip("\r") for span in paragraph.spans)
+
+
+def _half_leading_compensation(paragraph: Paragraph, leading: float) -> float:
+    """Return the negative start margin that pulls the first line up.
+
+    CSS centres text in the line box, so half the leading sits above the first
+    line. Only the paragraph that starts the layer carries this; see the call
+    site for why later paragraphs must not repeat it.
+    """
+    if leading <= 0 or not paragraph.spans:
+        return 0.0
+    font_size = max(span.style.font_size for span in paragraph.spans)
+    if leading <= font_size:
+        return 0.0
+    return -(leading - font_size) / 2
+
+
+def _minimum_block_extent(paragraphs: list[Paragraph]) -> float | None:
+    """Return the least block-axis extent the paragraphs can occupy.
+
+    Every paragraph that renders is counted at one line of its own leading.
+    Wrapping only ever adds lines, so the laid-out extent is never smaller than
+    this. Returns ``None`` when a rendering paragraph has no positive leading,
+    which leaves the extent unbounded.
+    """
+    extent = 0.0
+    previous: Paragraph | None = None
+    for paragraph in paragraphs:
+        if not _renders_content(paragraph):
+            previous = paragraph
+            continue
+        leading = paragraph.compute_leading()
+        if leading <= 0:
+            return None
+        if previous is not None:
+            extent += _paragraph_spacing(previous, paragraph)
+        extent += leading
+        previous = paragraph
+
+    # The compensation rides on the first paragraph whether or not it renders,
+    # exactly as the paragraph styles emit it.
+    if paragraphs and paragraphs[0].spans:
+        extent += _half_leading_compensation(
+            paragraphs[0], paragraphs[0].compute_leading()
+        )
+    return extent
+
+
 def _paragraph_advance(
     writing_direction: WritingDirection, block_advance: float
 ) -> tuple[float | None, float | None]:
@@ -764,6 +820,10 @@ class TextConverter(ConverterProtocol):
             y=transform.ty + bounds.top,
             width=bounds.width,
             height=bounds.height,
+            # A foreignObject establishes its own viewport and clips to it,
+            # independently of the container's CSS overflow. Both have to allow
+            # the overflow through for either to have any effect.
+            overflow="visible",
         )
 
         # Apply non-translation transform if needed
@@ -774,6 +834,8 @@ class TextConverter(ConverterProtocol):
         # If so, add lang attribute for CSS hyphens to work
         paragraphs = list(text_setting)
         has_hyphenation = any(p.style.auto_hyphenate for p in paragraphs)
+
+        self._warn_on_certain_overflow(paragraphs, text_setting, bounds)
 
         # Create XHTML div container with proper namespace
         container_styles = self._get_foreign_object_container_styles(
@@ -1396,6 +1458,46 @@ class TextConverter(ConverterProtocol):
         default = _default_em_fraction(text_setting.writing_direction)
         return (fraction - default) * (reference_size - em)
 
+    def _warn_on_certain_overflow(
+        self,
+        paragraphs: list[Paragraph],
+        text_setting: TypeSetting,
+        bounds: Rectangle,
+    ) -> None:
+        """Warn when the text cannot fit its box whatever the browser does.
+
+        Photoshop's line breaking and the browser's do not agree, so text can
+        need more of the block axis than the box holds. Counting every
+        paragraph at a single line gives the least it can occupy: exceeding the
+        box there means the overflow is certain rather than merely possible.
+        The converse - text that only overflows once the browser wraps it -
+        needs the layout this converter does not have, and goes unwarned.
+
+        Args:
+            paragraphs: Paragraphs of the layer, in order.
+            text_setting: TypeSetting object, for the writing direction.
+            bounds: Bounding box the paragraphs are laid out in.
+        """
+        minimum_extent = _minimum_block_extent(paragraphs)
+        if minimum_extent is None:
+            return
+
+        # Paragraph indents are emitted as physical padding on a border-box
+        # div, so in vertical writing they eat into the extent measured here.
+        # Ignoring them can only understate the overflow, never invent one.
+        if text_setting.writing_direction == WritingDirection.VERTICAL_RL:
+            box_extent = bounds.width
+        else:
+            box_extent = bounds.height
+
+        if minimum_extent > box_extent:
+            logger.warning(
+                "Text needs at least %.2fpx of its %.2fpx box and overflows it; "
+                "the overflow renders outside the box instead of being clipped.",
+                minimum_extent,
+                box_extent,
+            )
+
     def _get_foreign_object_container_styles(
         self, text_setting: TypeSetting, bounds: Rectangle
     ) -> dict[str, str]:
@@ -1413,7 +1515,13 @@ class TextConverter(ConverterProtocol):
             "height": svg_utils.num2str_with_unit(bounds.height),
             "margin": "0",
             "padding": "0",
-            "overflow": "hidden",  # Match Photoshop clipping behavior
+            # The browser breaks lines where Photoshop does not, so clipping
+            # would drop text that Photoshop draws. Visible overflow also leaves
+            # the div without a block formatting context, so the first
+            # paragraph's negative start margin collapses through it: harmless
+            # while the container paints nothing, but a background or a border
+            # would start above the box.
+            "overflow": "visible",
             # Ensure padding (from paragraph indents) is included in width/height,
             # not added to it, matching Photoshop's bounding box behavior
             "box-sizing": "border-box",
@@ -1605,10 +1713,10 @@ class TextConverter(ConverterProtocol):
             # largest span stands in for it. That is exact for a paragraph that
             # fits on one line, and too small by half the size difference when
             # the largest span wraps away from the first line.
-            if first_paragraph and paragraph.spans:
-                font_size = max(span.style.font_size for span in paragraph.spans)
-                if leading > font_size:
-                    half_leading_compensation = -(leading - font_size) / 2
+            if first_paragraph:
+                half_leading_compensation = _half_leading_compensation(
+                    paragraph, leading
+                )
 
         # First line indent
         if paragraph.style.first_line_indent != 0:
@@ -1638,8 +1746,8 @@ class TextConverter(ConverterProtocol):
         # break would render as max() where Photoshop renders their sum. Leaving
         # one side unset makes the collapse a no-op. The consequence is that a
         # paragraph's own space_after shows up in the *next* paragraph's style,
-        # and that the last paragraph's space_after is dropped - inert, since the
-        # div has a fixed height and clips.
+        # and that the last paragraph's space_after is dropped - inert, since
+        # nothing follows it in the container.
         total_margin_before = spacing + half_leading_compensation
         if abs(total_margin_before) > NEGLIGIBLE_MARGIN_THRESHOLD:
             styles["margin-block-start"] = svg_utils.num2str_with_unit(
