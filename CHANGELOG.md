@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`crop_layers_to_canvas` option to cap layer memory use** (#TBD)
+  - Opt-in; crops each layer's rasterized image to the canvas before
+    embedding it, so a layer whose bounding box extends far beyond the
+    canvas (e.g. a Smart Object placed at a fraction of its native
+    resolution) no longer holds and encodes its full, mostly invisible,
+    pixel data. Skipped for layers with effects. Off by default: for a
+    layer with a non-normal blend mode, cropping has been observed to
+    shift resvg's already-approximate mix-blend-mode rendering.
+
 ## [0.13.0] - 2026-09-28
 
 ### Added

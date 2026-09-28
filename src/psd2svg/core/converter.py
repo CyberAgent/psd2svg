@@ -61,6 +61,23 @@ class Converter(
             "drop-shadow-effect", "fill") for debugging or styling.
         include_hidden_layers: Include layers hidden in Photoshop. When False
             (default), hidden layers are omitted from the SVG.
+        crop_layers_to_canvas: Crop each layer's rasterized image to the
+            intersection with the document canvas before embedding it. When
+            False (default), a layer's image is embedded at its full bounding
+            box, which for some PSDs (e.g. a Smart Object placed at a small
+            fraction of its native resolution) can be far larger than the
+            canvas and take up a lot of memory. Layers with effects are never
+            cropped, since some effects (e.g. an aligned gradient overlay)
+            size themselves against the layer's own bounding box. Also, for a
+            layer using a non-normal blend mode, cropping can shift the
+            resvg-rendered result: mix-blend-mode support in SVG renderers is
+            already an approximation, and resvg's rendering of a blend-mode
+            layer's oversized image has been observed to differ (measured
+            marginally closer to psd-tools' own composite in one case) from
+            its cropped equivalent. Also, resource_limits' max_image_dimension
+            check always runs against the full pre-crop size, since topil()
+            decodes the full bbox regardless; this option reduces the memory
+            held after decoding, not the size checked before it.
         text_letter_spacing_offset: Global offset (in pixels) to add to all
             letter-spacing values. This can be used to compensate for differences
             between Photoshop's text rendering and SVG's text rendering. Typical values
@@ -92,6 +109,7 @@ class Converter(
         font_mapping: dict[str, dict[str, float | str]] | None = None,
         resource_limits: ResourceLimits | None = None,
         include_hidden_layers: bool = False,
+        crop_layers_to_canvas: bool = False,
     ) -> None:
         """Initialize the converter internal state."""
         # Source PSD image.
@@ -102,11 +120,12 @@ class Converter(
         self.enable_text = enable_text
         self.enable_title = enable_title
         self.enable_class = enable_class
-        self.include_hidden_layers = include_hidden_layers
         self.text_letter_spacing_offset = text_letter_spacing_offset
         self.text_wrapping_mode = text_wrapping_mode
         self.font_mapping = font_mapping
         self.resource_limits = resource_limits
+        self.include_hidden_layers = include_hidden_layers
+        self.crop_layers_to_canvas = crop_layers_to_canvas
 
         # Initialize the SVG root element.
         self.svg = svg_utils.create_node(

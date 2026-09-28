@@ -3,6 +3,7 @@ import logging
 from typing import Callable, Iterator
 from xml.etree import ElementTree as ET
 
+from PIL import Image
 from psd_tools import PSDImage
 from psd_tools.api import adjustments, layers
 from psd_tools.constants import BlendMode, Tag
@@ -187,7 +188,10 @@ class LayerConverter(ConverterProtocol):
             )
             return None
 
-        # Validate image dimensions before decoding the layer.
+        # Validate image dimensions before decoding the layer. This checks the
+        # layer's full, pre-crop size: topil() always decodes the full bbox,
+        # so crop_layers_to_canvas cannot rescue a layer that is oversized
+        # before cropping, only reduce the memory held after it decodes.
         description = f"Layer '{layer.name}'"
         self.check_image_dimension(layer.width, layer.height, description=description)
 
@@ -199,6 +203,25 @@ class LayerConverter(ConverterProtocol):
             )
             return None
 
+        left, top, width, height = layer.left, layer.top, layer.width, layer.height
+        has_separate_fill = self.has_separate_fill(layer)
+        if self.crop_layers_to_canvas and not has_separate_fill:
+            # A layer's bbox can extend far beyond the canvas, e.g. a Smart
+            # Object placed at a small fraction of its native resolution.
+            # Nothing outside the canvas is ever rendered, so crop it before
+            # it gets embedded. Skipped when the layer has effects: some
+            # (e.g. an aligned gradient overlay) size themselves against the
+            # layer's own bounding box rather than the canvas, and cropping
+            # would change that box.
+            cropped = self._crop_to_canvas(image, left, top, width, height)
+            if cropped is None:
+                logger.debug(
+                    f"Layer bbox is entirely outside the canvas, skipping: "
+                    f"'{layer.name}' ({layer.kind})."
+                )
+                return None
+            image, left, top, width, height = cropped
+
         # Generate image ID before creating the <image> element
         image_id = self.register_image(image.convert("RGBA"), description=description)
 
@@ -207,15 +230,15 @@ class LayerConverter(ConverterProtocol):
 
         # When the layer has effects, we need to create a separate <image>
         # to handle fill opacity.
-        if self.has_separate_fill(layer):
+        if has_separate_fill:
             defs = self.create_node("defs")
             node = self.create_node(
                 "image",
                 parent=defs,
-                x=layer.left,
-                y=layer.top,
-                width=layer.width,
-                height=layer.height,
+                x=left,
+                y=top,
+                width=width,
+                height=height,
                 title=layer.name,
                 class_=layer.kind,
                 id=image_id,
@@ -232,10 +255,10 @@ class LayerConverter(ConverterProtocol):
             node = self.create_node(
                 "image",
                 id=image_id,
-                x=layer.left,
-                y=layer.top,
-                width=layer.width,
-                height=layer.height,
+                x=left,
+                y=top,
+                width=width,
+                height=height,
                 title=layer.name,
                 class_=layer.kind,
                 **attrib,  # type: ignore[arg-type]
@@ -245,6 +268,39 @@ class LayerConverter(ConverterProtocol):
             self.set_layer_attributes(layer, node)
             node = self.apply_mask(layer, node)
         return node
+
+    def _crop_to_canvas(
+        self, image: Image.Image, left: int, top: int, width: int, height: int
+    ) -> tuple[Image.Image, int, int, int, int] | None:
+        """Crop a layer's image to the intersection of its bbox and the canvas.
+
+        Returns the cropped image with its new (left, top, width, height), or
+        None if the bbox lies entirely outside the canvas.
+        """
+        canvas_width, canvas_height = self.psd.width, self.psd.height
+        crop_left = max(left, 0)
+        crop_top = max(top, 0)
+        crop_right = min(left + width, canvas_width)
+        crop_bottom = min(top + height, canvas_height)
+        if crop_right <= crop_left or crop_bottom <= crop_top:
+            return None
+        if (crop_left, crop_top, crop_right, crop_bottom) == (
+            left,
+            top,
+            left + width,
+            top + height,
+        ):
+            return image, left, top, width, height
+        cropped = image.crop(
+            (crop_left - left, crop_top - top, crop_right - left, crop_bottom - top)
+        )
+        return (
+            cropped,
+            crop_left,
+            crop_top,
+            crop_right - crop_left,
+            crop_bottom - crop_top,
+        )
 
     def add_shape(
         self, layer: layers.ShapeLayer, depth: int = 0, **attrib: str

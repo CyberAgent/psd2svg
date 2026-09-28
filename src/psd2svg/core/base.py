@@ -27,6 +27,7 @@ class ConverterProtocol(Protocol):
     enable_title: bool
     enable_class: bool
     include_hidden_layers: bool
+    crop_layers_to_canvas: bool
 
     # Text conversion configuration
     text_letter_spacing_offset: float
