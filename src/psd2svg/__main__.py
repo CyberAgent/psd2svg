@@ -61,6 +61,16 @@ def parse_args() -> tuple[argparse.Namespace, argparse.ArgumentParser]:
         help="Include layers hidden in Photoshop in the SVG output.",
     )
     parser.add_argument(
+        "--crop-layers-to-canvas",
+        action="store_true",
+        help=(
+            "Crop each layer's rasterized image to the canvas before embedding "
+            "it, reducing memory use for layers (e.g. Smart Objects) whose "
+            "bounding box extends far beyond the canvas. May shift rendering "
+            "for layers using a non-normal blend mode."
+        ),
+    )
+    parser.add_argument(
         "--image-format",
         metavar="FORMAT",
         type=str,
@@ -199,6 +209,7 @@ def main() -> None:
         enable_title=args.enable_title,
         enable_class=args.enable_class,
         include_hidden_layers=args.include_hidden_layers,
+        crop_layers_to_canvas=args.crop_layers_to_canvas,
         image_format=args.image_format,
         text_letter_spacing_offset=args.text_letter_spacing_offset,
         embed_fonts=args.embed_fonts,

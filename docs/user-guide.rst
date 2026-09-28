@@ -73,6 +73,7 @@ For simple one-step conversions, use the ``convert()`` convenience function:
 * ``image_format`` (str): Image format - 'png', 'jpeg', or 'webp' (default: 'webp')
 * ``enable_title`` (bool): Enable insertion of <title> elements with layer names (default: False)
 * ``include_hidden_layers`` (bool): Include layers hidden in Photoshop (default: False)
+* ``crop_layers_to_canvas`` (bool): Crop each layer's rasterized image to the canvas before embedding it (default: False); see :doc:`configuration` for when to keep this disabled
 * ``text_letter_spacing_offset`` (float): Global offset (in pixels) to add to all letter-spacing values (default: 0.0)
 
 SVGDocument Class

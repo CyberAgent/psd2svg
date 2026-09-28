@@ -65,6 +65,7 @@ class SVGDocument:
         font_mapping: dict[str, dict[str, float | str]] | None = None,
         resource_limits: ResourceLimits | None = None,
         include_hidden_layers: bool = False,
+        crop_layers_to_canvas: bool = False,
     ) -> "SVGDocument":
         """Create a new SVGDocument from a PSDImage.
 
@@ -88,6 +89,21 @@ class SVGDocument:
             include_hidden_layers: Include layers hidden in Photoshop. When False
                 (default), hidden layers are omitted from the SVG. When True, they are
                 converted like visible layers.
+            crop_layers_to_canvas: Crop each layer's rasterized image to the
+                intersection with the document canvas before embedding it.
+                Default False. Useful when a layer's bounding box (e.g. a
+                Smart Object at a fraction of its native resolution) is far
+                larger than the canvas, since those extra pixels are never
+                rendered but still cost memory. Skipped for a layer with
+                effects, or nested beneath a group with effects, since
+                those effects composite against the full bounding box. Off
+                by default because it also discards the cropped-out pixels
+                for good, making the layer no longer freely movable or
+                resizable in an SVG editor, and because cropping has been
+                observed to shift resvg's rendering of a non-normal blend
+                mode. The resource_limits max_image_dimension check still
+                applies to the pre-crop size, since topil() decodes the
+                full bbox regardless.
             text_letter_spacing_offset: Global offset (in pixels) to add to all
                 letter-spacing values. This can be used to compensate for differences
                 between Photoshop's text rendering and SVG's text rendering. Typical
@@ -130,6 +146,7 @@ class SVGDocument:
             enable_title=enable_title,
             enable_class=enable_class,
             include_hidden_layers=include_hidden_layers,
+            crop_layers_to_canvas=crop_layers_to_canvas,
             text_letter_spacing_offset=text_letter_spacing_offset,
             text_wrapping_mode=text_wrapping_mode,
             font_mapping=font_mapping,
@@ -1010,6 +1027,7 @@ def convert(
     font_format: str = "woff2",
     resource_limits: ResourceLimits | None = None,
     include_hidden_layers: bool = False,
+    crop_layers_to_canvas: bool = False,
 ) -> None:
     """Convenience method to convert a PSD file to an SVG file.
 
@@ -1036,6 +1054,20 @@ def convert(
         include_hidden_layers: Include layers hidden in Photoshop. When False
             (default), hidden layers are omitted from the SVG. When True, they are
             converted like visible layers.
+        crop_layers_to_canvas: Crop each layer's rasterized image to the
+            intersection with the document canvas before embedding it.
+            Default False. Useful when a layer's bounding box (e.g. a Smart
+            Object at a fraction of its native resolution) is far larger
+            than the canvas, since those extra pixels are never rendered
+            but still cost memory. Skipped for a layer with effects, or
+            nested beneath a group with effects, since those effects
+            composite against the full bounding box. Off by default because
+            it also discards the cropped-out pixels for good, making the
+            layer no longer freely movable or resizable in an SVG editor,
+            and because cropping has been observed to shift resvg's
+            rendering of a non-normal blend mode. The resource_limits
+            max_image_dimension check still applies to the pre-crop size,
+            since topil() decodes the full bbox regardless.
         image_format: Image format to use when embedding or saving images.
             Supported formats: 'webp', 'png', 'jpeg'. Default is 'webp'.
         text_letter_spacing_offset: Global offset (in pixels) to add to all
@@ -1091,6 +1123,7 @@ def convert(
         enable_title=enable_title,
         enable_class=enable_class,
         include_hidden_layers=include_hidden_layers,
+        crop_layers_to_canvas=crop_layers_to_canvas,
         text_letter_spacing_offset=text_letter_spacing_offset,
         text_wrapping_mode=text_wrapping_mode,
         font_mapping=font_mapping,
