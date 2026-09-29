@@ -27,7 +27,9 @@ classifiers = [
 ]
 dependencies = [
     "pillow>=12.3.0",
-    "numpy",
+    "numpy>=1.26.0; python_version < '3.13'",
+    "numpy>=2.1.0; python_version == '3.13'",
+    "numpy>=2.3.2; python_version >= '3.14'",
     "psd-tools>=1.20.0",
     "resvg-py>=0.2.5",
     "fontconfig-py>=0.4.0; sys_platform != 'win32'",
