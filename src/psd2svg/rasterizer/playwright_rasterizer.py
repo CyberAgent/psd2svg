@@ -350,14 +350,15 @@ class PlaywrightRasterizer(BaseRasterizer):
         interface (with statement) for automatic cleanup.
         """
         # If running in event loop, cleanup must happen in the same thread
-        if self._in_event_loop and self._executor is not None:
-            future = self._executor.submit(self._close_sync)
-            future.result()
-            # Shutdown executor
-            self._executor.shutdown(wait=True)
-            self._executor = None
-        else:
-            self._close_sync()
+        try:
+            if self._in_event_loop and self._executor is not None:
+                self._executor.submit(self._close_sync).result()
+            else:
+                self._close_sync()
+        finally:
+            if self._executor is not None:
+                self._executor.shutdown(wait=True)
+                self._executor = None
 
     def _close_sync(self) -> None:
         """Internal synchronous cleanup method (runs in thread if needed)."""
