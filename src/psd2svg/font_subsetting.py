@@ -71,6 +71,7 @@ def subset_font(
     input_path: str,
     output_format: str,
     unicode_codepoints: set[int],
+    face_index: int = 0,
 ) -> bytes:
     """Subset a font file to include only specified Unicode codepoints.
 
@@ -82,6 +83,7 @@ def subset_font(
         output_format: Output format - "ttf", "otf", or "woff2".
         unicode_codepoints: Set of Unicode codepoints (integers) to include in
             the subset.
+        face_index: Zero-based face index for TTC/OTC input files.
 
     Returns:
         Subset font file as bytes.
@@ -117,7 +119,7 @@ def subset_font(
 
     try:
         # Load the font
-        font = TTFont(input_path)
+        font = TTFont(input_path, fontNumber=face_index)
 
         # Create subsetter with options
         subsetter = subset.Subsetter()

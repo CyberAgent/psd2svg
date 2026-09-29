@@ -630,6 +630,54 @@ class TestSVGDocumentEmbedFonts:
         assert "MOCK_arial" in result
         assert "MOCK_times" in result
 
+    @patch("psd2svg.core.font_utils.encode_font_with_options")
+    @patch("psd2svg.core.font_utils.FontInfo.resolve")
+    def test_embed_fonts_keeps_distinct_faces_from_same_collection(
+        self, mock_resolve: MagicMock, mock_encode: MagicMock, tmp_path: Path
+    ) -> None:
+        """Different faces in one TTC produce separate embedded fonts (#373)."""
+        collection = tmp_path / "family.ttc"
+        collection.write_bytes(b"FAKE_COLLECTION")
+
+        fonts = {
+            "Family-Light": FontInfo(
+                postscript_name="Family-Light",
+                family="Family",
+                style="Light",
+                weight=50.0,
+                file=str(collection),
+                face_index=0,
+            ),
+            "Family-Bold": FontInfo(
+                postscript_name="Family-Bold",
+                family="Family",
+                style="Bold",
+                weight=200.0,
+                file=str(collection),
+                face_index=1,
+            ),
+        }
+        mock_resolve.side_effect = lambda name, **kwargs: fonts[name]
+        mock_encode.side_effect = lambda **kwargs: (
+            f"data:font/ttf;base64,FACE{kwargs['face_index']}"
+        )
+
+        svg = ET.Element("svg")
+        light = ET.SubElement(svg, "text", {"font-family": "Family-Light"})
+        light.text = "Light"
+        bold = ET.SubElement(svg, "text", {"font-family": "Family-Bold"})
+        bold.text = "Bold"
+
+        result = SVGDocument(svg=svg, images={}).tostring(embed_fonts=True)
+
+        assert result.count("@font-face") == 2
+        assert "FACE0" in result
+        assert "FACE1" in result
+        assert {call.kwargs["face_index"] for call in mock_encode.call_args_list} == {
+            0,
+            1,
+        }
+
     @patch("psd2svg.core.font_utils.encode_font_data_uri")
     @patch("psd2svg.core.font_utils.FontInfo.resolve")
     def test_font_embedding_with_foreignobject_mode(

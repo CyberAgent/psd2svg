@@ -1,5 +1,7 @@
 """Tests for psd2svg.core.font_utils module."""
 
+import base64
+import io
 import logging
 import sys
 from pathlib import Path
@@ -7,7 +9,11 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fontTools.fontBuilder import FontBuilder
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTCollection, TTFont
 
+from psd2svg.core import font_utils
 from psd2svg.core.font_utils import HAS_FONTCONFIG, FontInfo, create_file_url
 
 
@@ -336,6 +342,7 @@ class TestFontInfoResolve:
             "family": "CustomFont",
             "style": "Regular",
             "weight": 80.0,
+            "index": 3,
         }
 
         font = FontInfo.resolve("CustomFont-Regular")
@@ -346,10 +353,11 @@ class TestFontInfoResolve:
         assert font.family == "CustomFont"
         assert font.style == "Regular"
         assert font.weight == 80.0
+        assert font.face_index == 3
 
         mock_match.assert_called_once_with(
             pattern=":postscriptname=CustomFont-Regular",
-            select=("file", "family", "style", "weight"),
+            select=("file", "family", "style", "weight", "index"),
         )
 
     @pytest.mark.skipif(not HAS_FONTCONFIG, reason="Requires fontconfig (Linux/macOS)")
@@ -449,7 +457,7 @@ class TestFontInfoResolve:
         assert font.postscript_name == "SpecialFont-Regular_1.0"
         mock_match.assert_called_once_with(
             pattern=":postscriptname=SpecialFont-Regular_1.0",
-            select=("file", "family", "style", "weight"),
+            select=("file", "family", "style", "weight", "index"),
         )
 
     @pytest.mark.skipif(not HAS_FONTCONFIG, reason="Requires fontconfig (Linux/macOS)")
@@ -555,7 +563,7 @@ class TestFontInfoResolve:
         assert font is not None
         mock_match.assert_called_once_with(
             pattern=":postscriptname=TestFont-Regular",
-            select=("file", "family", "style", "weight"),
+            select=("file", "family", "style", "weight", "index"),
         )
 
 
@@ -710,6 +718,8 @@ class TestFontInfoSerialization:
             family="Arial",
             style="Bold",
             weight=200.0,
+            charset={65, 66},
+            face_index=2,
         )
 
         # Convert to dict and back
@@ -722,6 +732,22 @@ class TestFontInfoSerialization:
         assert restored.family == original.family
         assert restored.style == original.style
         assert restored.weight == original.weight
+        assert restored.charset == original.charset
+        assert restored.face_index == original.face_index
+
+    def test_from_dict_defaults_face_index_for_legacy_data(self) -> None:
+        """Serialized data from before TTC support still loads as face zero."""
+        font = FontInfo.from_dict(
+            {
+                "postscript_name": "ArialMT",
+                "file": "/path/to/arial.ttf",
+                "family": "Arial",
+                "style": "Regular",
+                "weight": 80.0,
+            }
+        )
+
+        assert font.face_index == 0
 
     def test_from_dict_with_string_weight(self) -> None:
         """Test from_dict handles string weight by converting to float."""
@@ -877,3 +903,96 @@ class TestCreateFileUrl:
         assert url.startswith("file:///")
         assert ":" in url  # Drive letter
         assert "\\" not in url  # No backslashes
+
+
+def _build_face(postscript_name: str) -> TTFont:
+    """Build a minimal TrueType face with one glyph for "A"."""
+    builder = FontBuilder(1000, isTTF=True)
+    builder.setupGlyphOrder([".notdef", "A"])
+    builder.setupCharacterMap({0x41: "A"})
+    pen = TTGlyphPen(None)
+    pen.moveTo((0, 0))
+    pen.lineTo((0, 500))
+    pen.lineTo((500, 0))
+    pen.closePath()
+    glyph = pen.glyph()
+    builder.setupGlyf({".notdef": glyph, "A": glyph})
+    builder.setupHorizontalMetrics({".notdef": (500, 0), "A": (500, 0)})
+    builder.setupHorizontalHeader(ascent=800, descent=-200)
+    builder.setupNameTable(
+        {"familyName": "Family", "styleName": "Regular", "psName": postscript_name}
+    )
+    builder.setupOS2()
+    builder.setupPost()
+    return builder.font
+
+
+@pytest.fixture
+def collection_path(tmp_path: Path) -> Path:
+    """A two-face TrueType Collection."""
+    collection = TTCollection()
+    collection.fonts = [_build_face("Family-Light"), _build_face("Family-Bold")]
+    path = tmp_path / "family.ttc"
+    collection.save(str(path))
+    return path
+
+
+class TestCollectionFaceEncoding:
+    """Tests for embedding one face of a TTC/OTC collection."""
+
+    @staticmethod
+    def _decode_postscript_name(data_uri: str) -> str:
+        font = TTFont(io.BytesIO(base64.b64decode(data_uri.split(",", 1)[1])))
+        return str(font["name"].getDebugName(6))
+
+    def test_is_font_collection(self) -> None:
+        assert font_utils.is_font_collection("/fonts/Family.TTC")
+        assert font_utils.is_font_collection("/fonts/family.otc")
+        assert not font_utils.is_font_collection("/fonts/family.ttf")
+
+    def test_encode_collection_face_extracts_requested_face(
+        self, collection_path: Path
+    ) -> None:
+        data_uri = font_utils.encode_collection_face_data_uri(str(collection_path), 1)
+
+        assert data_uri.startswith("data:font/ttf;base64,")
+        assert self._decode_postscript_name(data_uri) == "Family-Bold"
+
+    def test_full_font_embedding_keeps_each_face(self, collection_path: Path) -> None:
+        cache: dict[str, str] = {}
+        light = font_utils.encode_font_with_options(
+            str(collection_path), cache, face_index=0
+        )
+        bold = font_utils.encode_font_with_options(
+            str(collection_path), cache, face_index=1
+        )
+
+        assert self._decode_postscript_name(light) == "Family-Light"
+        assert self._decode_postscript_name(bold) == "Family-Bold"
+
+    def test_subset_embedding_keeps_each_face(self, collection_path: Path) -> None:
+        cache: dict[str, str] = {}
+        bold = font_utils.encode_font_with_options(
+            str(collection_path), cache, subset_codepoints={0x41}, face_index=1
+        )
+
+        assert self._decode_postscript_name(bold) == "Family-Bold"
+
+    def test_encode_collection_face_missing_file(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            font_utils.encode_collection_face_data_uri(str(tmp_path / "x.ttc"), 0)
+
+    def test_resolve_via_windows_reads_face_index(self) -> None:
+        match = {
+            "postscript_name": "Family-Bold",
+            "file": "C:\\Windows\\Fonts\\family.ttc",
+            "family": "Family",
+            "style": "Bold",
+            "weight": 200.0,
+            "face_index": 1,
+        }
+        with patch.object(FontInfo, "_match_windows", return_value=match):
+            font = FontInfo._resolve_via_windows("Family-Bold", None)
+
+        assert font is not None
+        assert font.face_index == 1
