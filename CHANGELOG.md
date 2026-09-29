@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     layer with a non-normal blend mode, cropping has been observed to
     shift resvg's already-approximate mix-blend-mode rendering.
 
+### Fixed
+
+- **numpy has a minimum version for each supported Python** (#460)
+  - `numpy>=1.26.0` below Python 3.13, `>=2.1.0` on 3.13, `>=2.3.2` on 3.14
+
 ## [0.13.0] - 2026-09-28
 
 ### Added
