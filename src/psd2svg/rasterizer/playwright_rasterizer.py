@@ -271,11 +271,11 @@ class PlaywrightRasterizer(BaseRasterizer):
                 viewport=viewport,
                 device_scale_factor=self._dpi_scale(self.dpi),
             )
+            if self.timeout is not None:
+                page.set_default_timeout(self.timeout)
         except Exception:
             self._discard_browser_sync()
             raise
-        if self.timeout is not None:
-            page.set_default_timeout(self.timeout)
 
         failed = True
         try:
@@ -334,8 +334,8 @@ class PlaywrightRasterizer(BaseRasterizer):
     def restart(self) -> None:
         """Discard the browser; the next rasterization launches a fresh one.
 
-        Use this to recycle the browser after abandoning a call that exceeded
-        a caller-enforced deadline.
+        Call it between rasterizations, not while another call is in flight:
+        the call is serialized behind any in-progress render.
         """
         if self._in_event_loop and self._executor is not None:
             self._executor.submit(self._discard_browser_sync).result()
