@@ -288,7 +288,7 @@ Launch Options and Recovery
 
 A failed render, or a crashed or disconnected browser, is discarded and the next
 call launches a fresh browser. Discarding a wedged browser can take up to 30
-seconds. Call ``restart()`` between rasterizations to recycle the browser; it waits for any in-progress call.
+seconds. Call ``restart()`` between rasterizations to recycle the browser; calling it while another call is in flight is unsupported.
 
 With SVGDocument
 ~~~~~~~~~~~~~~~~

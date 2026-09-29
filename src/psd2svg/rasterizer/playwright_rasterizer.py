@@ -334,8 +334,8 @@ class PlaywrightRasterizer(BaseRasterizer):
     def restart(self) -> None:
         """Discard the browser; the next rasterization launches a fresh one.
 
-        Call it between rasterizations, not while another call is in flight:
-        the call is serialized behind any in-progress render.
+        Call it between rasterizations; calling it while another call is in
+        flight is unsupported.
         """
         if self._in_event_loop and self._executor is not None:
             self._executor.submit(self._discard_browser_sync).result()
