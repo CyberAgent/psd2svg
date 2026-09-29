@@ -905,8 +905,12 @@ class TestCreateFileUrl:
         assert "\\" not in url  # No backslashes
 
 
-def _build_face(postscript_name: str) -> TTFont:
-    """Build a minimal TrueType face with one glyph for "A"."""
+def _build_face(postscript_name: str, variable: bool = False) -> TTFont:
+    """Build a minimal TrueType face with one glyph for "A".
+
+    A variable face has a ``wght`` axis (100-900) and the named instances
+    Family-Thin (100) and Family-Black (900).
+    """
     builder = FontBuilder(1000, isTTF=True)
     builder.setupGlyphOrder([".notdef", "A"])
     builder.setupCharacterMap({0x41: "A"})
@@ -924,6 +928,23 @@ def _build_face(postscript_name: str) -> TTFont:
     )
     builder.setupOS2()
     builder.setupPost()
+    if variable:
+        builder.setupFvar(
+            axes=[("wght", 100, 400, 900, "Weight")],
+            instances=[
+                {
+                    "location": {"wght": 100},
+                    "stylename": "Thin",
+                    "postscriptfontname": "Family-Thin",
+                },
+                {
+                    "location": {"wght": 900},
+                    "stylename": "Black",
+                    "postscriptfontname": "Family-Black",
+                },
+            ],
+        )
+        builder.setupGvar({})
     return builder.font
 
 
@@ -934,6 +955,14 @@ def collection_path(tmp_path: Path) -> Path:
     collection.fonts = [_build_face("Family-Light"), _build_face("Family-Bold")]
     path = tmp_path / "family.ttc"
     collection.save(str(path))
+    return path
+
+
+@pytest.fixture
+def variable_font_path(tmp_path: Path) -> Path:
+    """A variable font with two named instances."""
+    path = tmp_path / "family-vf.ttf"
+    _build_face("Family-Regular", variable=True).save(str(path))
     return path
 
 
@@ -953,7 +982,7 @@ class TestCollectionFaceEncoding:
     def test_encode_collection_face_extracts_requested_face(
         self, collection_path: Path
     ) -> None:
-        data_uri = font_utils.encode_collection_face_data_uri(str(collection_path), 1)
+        data_uri = font_utils.encode_font_face_data_uri(str(collection_path), 1)
 
         assert data_uri.startswith("data:font/ttf;base64,")
         assert self._decode_postscript_name(data_uri) == "Family-Bold"
@@ -980,7 +1009,7 @@ class TestCollectionFaceEncoding:
 
     def test_encode_collection_face_missing_file(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
-            font_utils.encode_collection_face_data_uri(str(tmp_path / "x.ttc"), 0)
+            font_utils.encode_font_face_data_uri(str(tmp_path / "x.ttc"), 0)
 
     def test_resolve_via_windows_reads_face_index(self) -> None:
         match = {
@@ -996,3 +1025,78 @@ class TestCollectionFaceEncoding:
 
         assert font is not None
         assert font.face_index == 1
+
+
+class TestNamedInstanceEncoding:
+    """Tests for fontconfig named instances of variable fonts."""
+
+    @staticmethod
+    def _decode(data_uri: str) -> TTFont:
+        return TTFont(io.BytesIO(base64.b64decode(data_uri.split(",", 1)[1])))
+
+    @pytest.mark.parametrize(
+        ("index", "expected"),
+        [(0, (0, None)), (2, (2, None)), (0x340000, (0, 51)), (0x30002, (2, 2))],
+    )
+    def test_split_fontconfig_index(
+        self, index: int, expected: tuple[int, int | None]
+    ) -> None:
+        assert font_utils.split_fontconfig_index(index) == expected
+
+    @pytest.mark.skipif(not HAS_FONTCONFIG, reason="Requires fontconfig (Linux/macOS)")
+    def test_resolve_splits_named_instance_from_face(self) -> None:
+        match = {
+            "file": "/fonts/numeric.ttc",
+            "family": "Numeric",
+            "style": "ExtraCompressedLight",
+            "weight": 47.0,
+            "index": 0x340000,
+        }
+        with patch("fontconfig.match", return_value=match):
+            font = FontInfo.resolve("Numeric-ExtraCompressedLight")
+
+        assert font is not None
+        assert font.face_index == 0
+        assert font.named_instance == 51
+
+    @pytest.mark.parametrize("subset", [None, {0x41}])
+    def test_embedding_pins_named_instance(
+        self, variable_font_path: Path, subset: set[int] | None
+    ) -> None:
+        data_uri = font_utils.encode_font_with_options(
+            str(variable_font_path), {}, subset_codepoints=subset, named_instance=1
+        )
+
+        font = self._decode(data_uri)
+        assert "fvar" not in font
+        assert font["OS/2"].usWeightClass == 900
+
+    def test_named_instances_are_cached_separately(
+        self, variable_font_path: Path
+    ) -> None:
+        cache: dict[str, str] = {}
+        thin = font_utils.encode_font_with_options(
+            str(variable_font_path), cache, named_instance=0
+        )
+        black = font_utils.encode_font_with_options(
+            str(variable_font_path), cache, named_instance=1
+        )
+
+        assert self._decode(thin)["OS/2"].usWeightClass == 100
+        assert self._decode(black)["OS/2"].usWeightClass == 900
+
+    def test_missing_named_instance_raises(self, variable_font_path: Path) -> None:
+        with pytest.raises(IOError, match="Named instance 5 not found"):
+            font_utils.encode_font_face_data_uri(str(variable_font_path), 0, 5)
+
+    def test_named_instance_round_trips(self) -> None:
+        original = FontInfo(
+            postscript_name="Family-Black",
+            file="/fonts/family-vf.ttf",
+            family="Family",
+            style="Black",
+            weight=210.0,
+            named_instance=1,
+        )
+
+        assert FontInfo.from_dict(original.to_dict()).named_instance == 1

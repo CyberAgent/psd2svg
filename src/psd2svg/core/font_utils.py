@@ -22,8 +22,6 @@ try:
 except ImportError:
     HAS_FONTCONFIG = False
 
-from fontTools.ttLib import TTFont
-
 from psd2svg import font_subsetting
 from psd2svg.core import font_mapping as _font_mapping
 from psd2svg.core.font_weights import fontconfig_to_opentype_weight
@@ -145,6 +143,9 @@ class FontInfo:
             are converted to characters only when needed for font subsetting.
         face_index: Zero-based face index within a TrueType/OpenType Collection.
             This is 0 for standalone fonts and the first face of a collection.
+        named_instance: Zero-based index into the ``fvar`` named instances when
+            the PostScript name refers to a named instance of a variable font.
+            None for static fonts and the default instance.
     """
 
     postscript_name: str
@@ -154,6 +155,7 @@ class FontInfo:
     weight: float
     charset: set[int] | None = None
     face_index: int = 0
+    named_instance: int | None = None
 
     @property
     def family_name(self) -> str:
@@ -261,6 +263,7 @@ class FontInfo:
             weight=float(data["weight"]),
             charset=data.get("charset"),
             face_index=int(data.get("face_index", 0)),
+            named_instance=_optional_int(data.get("named_instance")),
         )
 
     def to_font_face_css(self, data_uri: str) -> str:
@@ -434,6 +437,9 @@ class FontInfo:
             )
             # Store codepoints directly
             charset: set[int] | None = charset_codepoints
+            face_index, named_instance = split_fontconfig_index(
+                int(match.get("index", 0))  # type: ignore[call-overload]
+            )
 
             return FontInfo(
                 postscript_name=postscriptname,
@@ -442,7 +448,8 @@ class FontInfo:
                 style=match["style"],  # type: ignore
                 weight=match["weight"],  # type: ignore
                 charset=charset,
-                face_index=int(match.get("index", 0)),
+                face_index=face_index,
+                named_instance=named_instance,
             )
 
         return None
@@ -873,6 +880,7 @@ class FontInfo:
             style=str(custom_data["style"]),
             weight=float(custom_data["weight"]),
             face_index=int(custom_data.get("face_index", 0)),
+            named_instance=_optional_int(custom_data.get("named_instance")),
         )
 
     @staticmethod
@@ -990,15 +998,19 @@ def encode_font_data_uri(font_path: str) -> str:
     return f"data:{mime_type};base64,{base64_data}"
 
 
-def encode_collection_face_data_uri(font_path: str, face_index: int) -> str:
-    """Encode one face of a TTC/OTC collection as a standalone font data URI.
+def encode_font_face_data_uri(
+    font_path: str, face_index: int = 0, named_instance: int | None = None
+) -> str:
+    """Encode one face of a font file as a standalone font data URI.
 
-    Browsers load only the first face of a collection, so each face is
-    extracted into its own font file.
+    Browsers load only the first face of a TTC/OTC collection and the default
+    instance of a variable font, so the face is extracted, and pinned to its
+    named instance, into its own font file.
 
     Args:
-        font_path: Absolute path to the collection file.
-        face_index: Zero-based face index within the collection.
+        font_path: Absolute path to the font file.
+        face_index: Zero-based face index within a collection.
+        named_instance: Zero-based ``fvar`` named instance, or None.
 
     Returns:
         Data URI string for the extracted face.
@@ -1011,7 +1023,7 @@ def encode_collection_face_data_uri(font_path: str, face_index: int) -> str:
         raise FileNotFoundError(f"Font file not found: {font_path}")
 
     try:
-        font = TTFont(font_path, fontNumber=face_index)
+        font = font_subsetting.load_font_face(font_path, face_index, named_instance)
         try:
             buffer = io.BytesIO()
             font.save(buffer)
@@ -1029,10 +1041,32 @@ def is_font_collection(font_path: str) -> bool:
     return os.path.splitext(font_path)[1].lower() in (".ttc", ".otc")
 
 
-def _encode_full_font(font_path: str, face_index: int) -> str:
-    """Encode a whole font, extracting the face when the file is a collection."""
-    if is_font_collection(font_path):
-        return encode_collection_face_data_uri(font_path, face_index)
+def split_fontconfig_index(index: int) -> tuple[int, int | None]:
+    """Split a fontconfig ``index`` into face index and named instance.
+
+    The lower 16 bits are the face within a collection; the upper bits are the
+    one-based ``fvar`` named instance, 0 meaning none.
+
+    Args:
+        index: fontconfig ``index`` value.
+
+    Returns:
+        ``(face_index, named_instance)`` with named_instance zero-based, or None.
+    """
+    instance = index >> 16
+    return index & 0xFFFF, instance - 1 if instance else None
+
+
+def _optional_int(value: Any) -> int | None:
+    return None if value is None else int(value)
+
+
+def _encode_full_font(
+    font_path: str, face_index: int, named_instance: int | None
+) -> str:
+    """Encode a whole font, extracting the face for collections and instances."""
+    if named_instance is not None or is_font_collection(font_path):
+        return encode_font_face_data_uri(font_path, face_index, named_instance)
     return encode_font_data_uri(font_path)
 
 
@@ -1081,6 +1115,7 @@ def encode_font_with_options(
     subset_codepoints: set[int] | None = None,
     font_format: str = "ttf",
     face_index: int = 0,
+    named_instance: int | None = None,
 ) -> str:
     """Encode a font file as a data URI with optional subsetting and caching.
 
@@ -1094,6 +1129,8 @@ def encode_font_with_options(
             to subset the font to. If None, the full font is encoded.
         font_format: Font format for output: "ttf", "otf", or "woff2".
         face_index: Zero-based face index for TTC/OTC input files.
+        named_instance: Zero-based ``fvar`` named instance to pin a variable
+            font to, or None.
 
     Returns:
         Data URI string for the encoded font.
@@ -1105,15 +1142,19 @@ def encode_font_with_options(
 
     Note:
         - Cache keys include the face, format, and exact codepoints for subsets
-        - Full-font cache keys include the file path and face index
-        - A face of a TTC/OTC collection is extracted as a standalone font
+        - Full-font cache keys include the file path and face
+        - A face of a TTC/OTC collection or a named instance of a variable font
+          is extracted as a standalone font
         - Missing codepoints trigger fallback to full font with warning
     """
+    face_key = f"{font_path}:{face_index}:{named_instance}"
+    full_font_key = f"{face_key}:full"
+
     # Subsetting path
     if subset_codepoints:
         codepoints = ",".join(f"{value:x}" for value in sorted(subset_codepoints))
         subset_digest = hashlib.sha256(codepoints.encode("ascii")).hexdigest()
-        cache_key = f"{font_path}:{face_index}:{font_format}:{subset_digest}"
+        cache_key = f"{face_key}:{font_format}:{subset_digest}"
 
         if cache_key not in cache:
             logger.debug(
@@ -1126,6 +1167,7 @@ def encode_font_with_options(
                     output_format=font_format,
                     unicode_codepoints=subset_codepoints,
                     face_index=face_index,
+                    named_instance=named_instance,
                 )
                 data_uri = encode_font_bytes_to_data_uri(font_bytes, font_format)
                 cache[cache_key] = data_uri
@@ -1135,18 +1177,18 @@ def encode_font_with_options(
                     "Falling back to full font"
                 )
                 # Fall back to full font
-                full_font_key = f"{font_path}:{face_index}:full"
                 if full_font_key not in cache:
                     logger.debug(f"Encoding full font: {font_path}")
-                    cache[full_font_key] = _encode_full_font(font_path, face_index)
+                    cache[full_font_key] = _encode_full_font(
+                        font_path, face_index, named_instance
+                    )
                 return cache[full_font_key]
         return cache[cache_key]
 
     # Full font encoding path
-    full_font_key = f"{font_path}:{face_index}:full"
     if full_font_key not in cache:
         logger.debug(f"Encoding font: {font_path}")
-        cache[full_font_key] = _encode_full_font(font_path, face_index)
+        cache[full_font_key] = _encode_full_font(font_path, face_index, named_instance)
     return cache[full_font_key]
 
 

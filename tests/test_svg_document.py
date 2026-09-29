@@ -678,6 +678,45 @@ class TestSVGDocumentEmbedFonts:
             1,
         }
 
+    @patch("psd2svg.core.font_utils.encode_font_with_options")
+    @patch("psd2svg.core.font_utils.FontInfo.resolve")
+    def test_embed_fonts_keeps_distinct_named_instances(
+        self, mock_resolve: MagicMock, mock_encode: MagicMock, tmp_path: Path
+    ) -> None:
+        """Named instances of one variable font produce separate embedded fonts."""
+        variable_font = tmp_path / "family-vf.ttf"
+        variable_font.write_bytes(b"FAKE_VARIABLE_FONT")
+
+        fonts = {
+            name: FontInfo(
+                postscript_name=name,
+                family="Family",
+                style=style,
+                weight=weight,
+                file=str(variable_font),
+                named_instance=instance,
+            )
+            for name, style, weight, instance in [
+                ("Family-Thin", "Thin", 0.0, 0),
+                ("Family-Black", "Black", 210.0, 1),
+            ]
+        }
+        mock_resolve.side_effect = lambda name, **kwargs: fonts[name]
+        mock_encode.side_effect = lambda **kwargs: (
+            f"data:font/ttf;base64,INSTANCE{kwargs['named_instance']}"
+        )
+
+        svg = ET.Element("svg")
+        for name in fonts:
+            text = ET.SubElement(svg, "text", {"font-family": name})
+            text.text = name
+
+        result = SVGDocument(svg=svg, images={}).tostring(embed_fonts=True)
+
+        assert result.count("@font-face") == 2
+        assert "INSTANCE0" in result
+        assert "INSTANCE1" in result
+
     @patch("psd2svg.core.font_utils.encode_font_data_uri")
     @patch("psd2svg.core.font_utils.FontInfo.resolve")
     def test_font_embedding_with_foreignobject_mode(

@@ -30,9 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Faces sharing one TTC/OTC collection are embedded separately** (#373)
-  - Previously only the first-resolved face was embedded, so e.g. Hiragino W3
-    and W6 in one document rendered one of them in a fallback font
+- **Faces sharing one TTC/OTC collection are embedded separately** (#461)
+  - Named instances of a variable font are embedded pinned to their axis
+    coordinates rather than as the default instance
 
 - **foreignObject paragraphs were taller than their leading** (#425)
   - Each `<p>` now names the font of its tallest span, so a paragraph whose

@@ -48,9 +48,10 @@ Font embedding is fully supported on all platforms:
 * **Windows**: Windows registry + fontTools cmap parsing
 * **Text conversion**: Works without font files (uses SVG ``<text>`` with font-family names)
 * **Font embedding**: Automatically locates font files when ``embed_fonts=True``
-* **Font collections (TTC/OTC)**: Data URI embedding extracts each face as its own font.
-  A ``file://`` URL cannot select a face, so browsers use the first face of the
-  collection; resvg loads every face and is not affected
+* **Font collections and variable fonts**: Data URI embedding extracts each face of a
+  TTC/OTC collection as its own font, and pins a named instance of a variable font to
+  its axis coordinates. A ``file://`` URL can select neither, so browsers use the first
+  face at its default instance; resvg loads every face of a collection
 
 **Custom Font Mapping:**
 
