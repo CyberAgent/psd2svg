@@ -3,7 +3,7 @@
 import asyncio
 import os
 import tempfile
-from typing import Any, NoReturn
+from typing import NoReturn
 
 import pytest
 from PIL import Image
@@ -425,30 +425,77 @@ def test_rasterizer_does_not_resize_viewport(
 
 
 @requires_playwright
-def test_rasterizer_closes_page_when_rendering_fails(
+def test_rasterizer_discards_browser_when_rendering_fails(
     simple_svg: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Test that a failed render propagates and still closes the page."""
+    """Test that a failed render propagates and the next call relaunches."""
     from playwright.sync_api import Page  # noqa: PLC0415
     from playwright.sync_api import (  # noqa: PLC0415
         TimeoutError as PlaywrightTimeoutError,
     )
 
-    closed: list[Page] = []
-    real_close = Page.close
-
     def fail(*args: object, **kwargs: object) -> NoReturn:
         raise PlaywrightTimeoutError("Page.screenshot: Timeout 30000ms exceeded.")
 
-    def spy_close(self: Page, **kwargs: Any) -> None:
-        closed.append(self)
-        real_close(self, **kwargs)
-
-    monkeypatch.setattr(Page, "screenshot", fail)
-    monkeypatch.setattr(Page, "close", spy_close)
-
     with PlaywrightRasterizer(dpi=96) as rasterizer:
+        with monkeypatch.context() as patch:
+            patch.setattr(Page, "screenshot", fail)
+            with pytest.raises(PlaywrightTimeoutError):
+                rasterizer.from_string(simple_svg)
+
+        assert rasterizer._browser is None
+        assert rasterizer.from_string(simple_svg).size == (100, 100)
+
+
+@requires_playwright
+def test_rasterizer_recovers_from_closed_browser(simple_svg: str) -> None:
+    """Test that a disconnected browser is relaunched on the next call."""
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        rasterizer.from_string(simple_svg)
+        assert rasterizer._browser is not None
+        rasterizer._browser.close()
+
+        assert rasterizer.from_string(simple_svg).size == (100, 100)
+
+
+@requires_playwright
+def test_rasterizer_restart(simple_svg: str) -> None:
+    """Test that restart() drops the browser and the next call relaunches."""
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        rasterizer.from_string(simple_svg)
+        rasterizer.restart()
+        assert rasterizer._browser is None
+
+        assert rasterizer.from_string(simple_svg).size == (100, 100)
+
+
+@requires_playwright
+def test_rasterizer_passes_launch_args(simple_svg: str) -> None:
+    """Test that launch_args reach the browser."""
+    with PlaywrightRasterizer(launch_args=["--user-agent=psd2svg-test"]) as rasterizer:
+        rasterizer.from_string(simple_svg)
+        assert rasterizer._browser is not None
+        page = rasterizer._browser.new_page()
+        try:
+            assert page.evaluate("navigator.userAgent") == "psd2svg-test"
+        finally:
+            page.close()
+
+
+@requires_playwright
+def test_rasterizer_timeout_applies_to_page(simple_svg: str) -> None:
+    """Test that a too-short timeout fails the render instead of hanging."""
+    from playwright.sync_api import (  # noqa: PLC0415
+        TimeoutError as PlaywrightTimeoutError,
+    )
+
+    with PlaywrightRasterizer(timeout=0.001) as rasterizer:
         with pytest.raises(PlaywrightTimeoutError):
             rasterizer.from_string(simple_svg)
 
-    assert closed, "page.close() was not called on the failure path"
+
+@pytest.mark.parametrize("key", ["args", "headless"])
+def test_rasterizer_rejects_reserved_launch_kwargs(key: str) -> None:
+    """Test that launch_kwargs cannot override launch_args or headless."""
+    with pytest.raises(ValueError, match="launch_kwargs"):
+        PlaywrightRasterizer(launch_kwargs={key: True})
