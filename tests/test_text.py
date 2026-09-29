@@ -13,15 +13,20 @@ from psd_tools.api.layers import TypeLayer
 from psd2svg import SVGDocument
 from psd2svg.core.converter import Converter
 from psd2svg.core.text import (
+    EM_BOX_DESCENT_RATIO,
     TextWrappingMode,
+    _alignment_em_fraction,
     _common_span_scale,
+    _default_em_fraction,
     _isolate_trailing_letter_spacing,
 )
 from psd2svg.core.typesetting import (
     FontBaseline,
     Paragraph,
     ParagraphSheet,
+    ShapeType,
     Span,
+    StyleRunAlignment,
     StyleSheet,
     TypeSetting,
     WritingDirection,
@@ -501,11 +506,13 @@ def test_text_style_subscript() -> None:
 def test_text_style_baseline_shift() -> None:
     """Test baseline shift handling."""
     svg = convert_psd_to_svg("texts/style-baseline-shift.psd")
-    # baseline-shift can be on text or tspan elements
-    element = svg.find(".//*[@baseline-shift]")
-    assert element is not None
+    # resvg ignores baseline-shift on <text>, so the shift of a lone run must
+    # stay on its <tspan> instead of being merged into the parent.
+    assert svg.find(".//text[@baseline-shift]") is None
+    tspan = svg.find(".//tspan[@baseline-shift]")
+    assert tspan is not None
     # Should have non-zero baseline shift
-    baseline_shift = float(element.attrib.get("baseline-shift", "0"))
+    baseline_shift = float(tspan.attrib.get("baseline-shift", "0"))
     assert baseline_shift != 0
 
 
@@ -518,21 +525,55 @@ def test_text_style_baseline_shift_scale() -> None:
     """
     svg = convert_psd_to_svg("texts/style-baseline-shift-scale.psd")
 
-    # Find element with baseline-shift
-    element = svg.find(".//*[@baseline-shift]")
-    assert element is not None, "Should have element with baseline-shift"
+    # The shift stays on the <tspan>, which is the only element resvg reads it
+    # from; the scaled font-size is hoisted to the <text> element.
+    assert svg.find(".//text[@baseline-shift]") is None
+    tspan = svg.find(".//tspan[@baseline-shift]")
+    assert tspan is not None, "Should have a tspan with baseline-shift"
 
-    # Get baseline-shift value
-    baseline_shift = float(element.attrib.get("baseline-shift", "0"))
-    assert baseline_shift != 0, "Should have non-zero baseline-shift"
+    # The stored 16px shift is emitted as-is, not scaled with the font
+    assert float(tspan.attrib["baseline-shift"]) == 16.0
 
     # Font should be scaled (uniform 150% scale)
-    font_size = float(element.attrib.get("font-size", "0"))
-    assert font_size > 0, "Should have positive font-size"
+    text = svg.find(".//text[@font-size]")
+    assert text is not None, "Should have a text element with font-size"
+    assert float(text.attrib["font-size"]) == 48.0, "32px scaled by 150%"
 
     # Should NOT have transform for uniform scaling
-    transform = element.attrib.get("transform")
-    assert transform is None, "Uniform scaling should not use transform"
+    assert text.attrib.get("transform") is None, (
+        "Uniform scaling should not use transform"
+    )
+    assert tspan.attrib.get("transform") is None, (
+        "Uniform scaling should not use transform"
+    )
+
+
+def test_text_style_uniform_scale_without_shift() -> None:
+    """Test that uniform scaling alone scales only the font size.
+
+    Same layer as style-baseline-shift-scale.psd with the baseline shift
+    removed, so the two differ only in the shift.
+    """
+    svg = convert_psd_to_svg("texts/style-uniform-scale-150.psd")
+
+    text = svg.find(".//text[@font-size]")
+    assert text is not None
+    assert float(text.attrib["font-size"]) == 48.0, "32px scaled by 150%"
+    assert text.attrib.get("transform") is None, (
+        "Uniform scaling should not use transform"
+    )
+
+    # Nothing shifts the baseline, so no element carries the attribute
+    assert svg.find(".//*[@baseline-shift]") is None
+
+    # The shift is the only thing that differs, so the pair must share a
+    # baseline. With no shift to pin to a <tspan>, the lone run merges into the
+    # <text> element and carries the position there instead.
+    shifted = convert_psd_to_svg("texts/style-baseline-shift-scale.psd")
+    shifted_run = shifted.find(".//tspan[@y]")
+    assert shifted_run is not None
+    assert float(text.attrib["y"]) == float(shifted_run.attrib["y"])
+    assert float(text.attrib["x"]) == float(shifted_run.attrib["x"])
 
 
 def test_text_style_tracking() -> None:
@@ -2448,6 +2489,191 @@ def test_foreignobject_paragraphs_advance_by_their_leading() -> None:
         )
 
 
+def _find_foreign_object(document: SVGDocument) -> ET.Element:
+    """Return the one foreignObject of a converted document."""
+    foreign_objects = document.svg.findall(".//foreignObject")
+    assert len(foreign_objects) == 1, (
+        f"Expected one foreignObject, got {foreign_objects}"
+    )
+    return foreign_objects[0]
+
+
+def _ink_row_span(image: Image.Image) -> tuple[int, int]:
+    """Return the first and last row holding text ink in the image."""
+    rgba = np.array(image.convert("RGBA")).astype(float)
+    ink = (rgba[..., 3] > 32) & (rgba[..., :3].mean(axis=2) < 128)
+    rows = np.flatnonzero(ink.any(axis=1))
+    assert rows.size > 0, "No text rendered"
+    return int(rows[0]), int(rows[-1])
+
+
+def test_foreignobject_container_does_not_clip() -> None:
+    """Both the foreignObject and its div have to let the overflow through.
+
+    A foreignObject establishes its own viewport and clips to it, so the CSS
+    alone leaves the rendering unchanged.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    document = SVGDocument.from_psd(
+        psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+    )
+
+    foreign_object = _find_foreign_object(document)
+    assert foreign_object.attrib.get("overflow") == "visible"
+
+    div = document.svg.find(".//{http://www.w3.org/1999/xhtml}div")
+    assert div is not None
+    assert _parse_style_string(div.attrib.get("style", ""))["overflow"] == "visible"
+
+
+def test_foreignobject_warns_when_text_cannot_fit_its_box(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Text that overflows on one line per paragraph overflows however it wraps."""
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    with caplog.at_level(logging.WARNING, logger="psd2svg.core.text"):
+        SVGDocument.from_psd(
+            psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+        )
+
+    overflow = [record for record in caplog.records if "overflows it" in record.message]
+    assert len(overflow) == 1, caplog.text
+    assert "112.00px" in overflow[0].getMessage()
+    assert "102.47px" in overflow[0].getMessage()
+
+
+def test_foreignobject_empty_paragraph_does_not_trigger_the_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A paragraph that strips to nothing occupies no line, so it adds no height.
+
+    A trailing carriage return is ordinary in PSD text; counting it as a line
+    would report an overflow on a layer that fits. This fixture has two
+    rendering paragraphs needing 73.62px of an 81.03px box, and counting its
+    empty third would put the floor at 112.00px.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/whitespaces-shapetype1.psd"))
+    with caplog.at_level(logging.WARNING, logger="psd2svg.core.text"):
+        SVGDocument.from_psd(
+            psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+        )
+
+    assert not [record for record in caplog.records if "overflows it" in record.message]
+
+
+def test_foreignobject_overflow_measures_the_block_axis(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """vertical-rl advances along x, so the box's block axis is its width.
+
+    This layer needs 112.00px against a 102.47px height but a 226.29px width,
+    so it overflows read horizontally and fits read vertically. Measuring the
+    wrong axis would warn either way.
+    """
+    monkeypatch.setattr(
+        TypeSetting,
+        "writing_direction",
+        property(lambda self: WritingDirection.VERTICAL_RL),
+    )
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    with caplog.at_level(logging.WARNING, logger="psd2svg.core.text"):
+        SVGDocument.from_psd(
+            psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+        )
+
+    assert not [record for record in caplog.records if "overflows it" in record.message]
+
+
+@requires_playwright
+def test_foreignobject_overflowing_text_renders_outside_its_box() -> None:
+    """Text the browser pushes past the box is drawn, not dropped.
+
+    Chromium lays each paragraph of this fixture on one line where Photoshop
+    wraps it onto two, so the block runs past the box it was measured for.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    document = SVGDocument.from_psd(
+        psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+    )
+    foreign_object = _find_foreign_object(document)
+    box_bottom = float(foreign_object.attrib["y"]) + float(
+        foreign_object.attrib["height"]
+    )
+
+    rasterizer = PlaywrightRasterizer()
+    try:
+        image = document.rasterize(rasterizer=rasterizer)
+    finally:
+        rasterizer.close()
+
+    # The fixture is 240x120 at its natural size from an origin of (0, 0), so a
+    # raster row index and a user-space y are the same number here.
+    _, last_ink_row = _ink_row_span(image)
+    assert last_ink_row > box_bottom, (
+        f"Text ends at row {last_ink_row}, inside the {box_bottom}px box: "
+        "the overflow is being clipped"
+    )
+
+
+def _ink_column_span(image: Image.Image) -> tuple[int, int]:
+    """Return the first and last column holding text ink in the image."""
+    rgba = np.array(image.convert("RGBA")).astype(float)
+    ink = (rgba[..., 3] > 32) & (rgba[..., :3].mean(axis=2) < 128)
+    columns = np.flatnonzero(ink.any(axis=0))
+    assert columns.size > 0, "No text rendered"
+    return int(columns[0]), int(columns[-1])
+
+
+def test_foreignobject_spans_serialize_without_separating_whitespace() -> None:
+    """Adjacent spans of a paragraph carry nothing between them.
+
+    Whitespace between two XHTML inline elements renders as a space, so the
+    serializer's indentation would split a word across style runs.
+    """
+    psdimage = PSDImage.open(
+        get_fixture("texts/paragraph-shapetype1-multiple-spans.psd")
+    )
+    svg = SVGDocument.from_psd(
+        psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+    ).tostring()
+
+    assert ">Lo</span><span " in svg, svg
+
+
+@requires_playwright
+def test_foreignobject_multi_span_word_renders_unbroken() -> None:
+    """A word split across two style runs renders as one word, on one line.
+
+    The two modes are measured against each other so the comparison survives
+    font substitution: both lay out the same five characters. The line count
+    is asserted as well, because a substitute wide enough to wrap the box
+    would show up as a second line rather than as extra width.
+    """
+    psdimage = PSDImage.open(
+        get_fixture("texts/paragraph-shapetype1-multiple-spans.psd")
+    )
+    rasterizer = PlaywrightRasterizer()
+    try:
+        images = {
+            mode: SVGDocument.from_psd(psdimage, text_wrapping_mode=mode).rasterize(
+                rasterizer=rasterizer
+            )
+            for mode in (TextWrappingMode.NONE, TextWrappingMode.FOREIGN_OBJECT)
+        }
+    finally:
+        rasterizer.close()
+
+    lines = _ink_row_tops(images[TextWrappingMode.FOREIGN_OBJECT])
+    assert len(lines) == 1, f"The fixture is a single line, but rendered as {lines}"
+
+    native = _ink_column_span(images[TextWrappingMode.NONE])
+    wrapped = _ink_column_span(images[TextWrappingMode.FOREIGN_OBJECT])
+    assert abs((wrapped[1] - wrapped[0]) - (native[1] - native[0])) <= 1, (
+        f"The foreignObject output spans {wrapped} columns, "
+        f"but the native one spans {native}"
+    )
+
+
 @pytest.mark.parametrize("baseline", [FontBaseline.SUPERSCRIPT, FontBaseline.SUBSCRIPT])
 def test_foreignobject_scripts_take_the_native_baseline_shift(
     monkeypatch: pytest.MonkeyPatch, baseline: FontBaseline
@@ -2940,19 +3166,19 @@ def test_text_whitespace_preservation_foreign_object() -> None:
     paragraphs = foreign_obj.findall(".//{http://www.w3.org/1999/xhtml}p")
     assert len(paragraphs) == 3, f"Expected 3 paragraphs, got {len(paragraphs)}"
 
-    # Verify xml:space="preserve" attribute on paragraph elements
+    # XHTML layout follows CSS white-space, not xml:space (issue #434).
     # Paragraphs 0 and 1 have whitespace that needs preservation, paragraph 2 is empty
     for i, p in enumerate(paragraphs):
-        xml_space = p.attrib.get("{http://www.w3.org/XML/1998/namespace}space")
+        assert "{http://www.w3.org/XML/1998/namespace}space" not in p.attrib
+        white_space = _parse_style_string(p.attrib.get("style", "")).get("white-space")
         if i < 2:  # First two paragraphs have whitespace
-            expected_msg = (
-                f"Paragraph {i} should have xml:space='preserve', "
-                f"got: {repr(xml_space)}"
+            assert white_space == "pre-wrap", (
+                f"Paragraph {i} should have white-space: pre-wrap, "
+                f"got: {repr(white_space)}"
             )
-            assert xml_space == "preserve", expected_msg
-        else:  # Last paragraph is empty (\r only), no xml:space needed
-            assert xml_space is None, (
-                f"Paragraph {i} should not have xml:space, got: {repr(xml_space)}"
+        else:  # Last paragraph is empty (\r only), nothing to preserve
+            assert white_space is None, (
+                f"Paragraph {i} should not set white-space, got: {repr(white_space)}"
             )
 
     # Extract text content from each paragraph
@@ -3657,3 +3883,523 @@ def test_unsupported_text_color_falls_back_to_default(
         assert stroke_style.stroke_color == (0.0, 0.0, 0.0, 0.0)
         assert stroke_style.get_stroke_color() == "none"
     assert "Unsupported text color" in caplog.text
+
+
+def _emitted_baseline_shifts(psd_file: str) -> list[float]:
+    """Return every baseline-shift the conversion emits, in document order."""
+    svg = convert_psd_to_svg(psd_file)
+    return [
+        float(value)
+        for node in svg.iter()
+        if (value := node.attrib.get("baseline-shift")) is not None
+    ]
+
+
+# Photoshop's own offsets for the character-alignment fixtures, which all put a
+# 64px and a 32px run on one line. Aligning two em boxes by the same fraction of
+# their height leaves the smaller run's baseline
+# (fraction - EM_BOX_DESCENT_RATIO) * 32 from the larger one's, so em box bottom
+# gives -3.84, the centre +12.16 and the top +28.16.
+@pytest.mark.parametrize(
+    ("fixture", "expected"),
+    [
+        ("texts/style-run-alignment-0.psd", [-3.84]),
+        ("texts/style-run-alignment-2.psd", []),
+        ("texts/style-run-alignment-3.psd", [12.16]),
+        ("texts/style-run-alignment-5.psd", [28.16]),
+        ("texts/style-run-alignment-3-baseline-shift.psd", [20.16]),
+        ("texts/style-run-alignment-2-writingdirection2.psd", []),
+        ("texts/style-run-alignment-3-writingdirection2.psd", [-12.16]),
+        ("texts/style-run-alignment-vertical-scale.psd", [-3.84]),
+    ],
+)
+def test_character_alignment_offsets(fixture: str, expected: list[float]) -> None:
+    """Test that each StyleRunAlignment mode offsets the smaller run correctly.
+
+    The reference run is the largest one, which keeps its own baseline, so a
+    two-run fixture emits exactly one offset. Modes that align on the Roman
+    baseline emit none at all, because that is where SVG already puts the run.
+    See GitHub issue #439.
+    """
+    assert _emitted_baseline_shifts(fixture) == pytest.approx(expected)
+
+
+def test_character_alignment_leaves_the_roman_baseline_alone() -> None:
+    """Test that Roman-baseline alignment emits nothing in either direction.
+
+    Values 2 and 3 swap meaning between the writing directions: 2 is the Roman
+    baseline in horizontal text and 3 is in vertical text. Each is the SVG
+    default, so the conversion has nothing to emit, while its counterpart in the
+    same direction aligns em boxes and does.
+    """
+    assert _emitted_baseline_shifts("texts/style-run-alignment-2.psd") == []
+    assert _emitted_baseline_shifts("texts/style-run-alignment-3.psd") != []
+    # Vertical text is centred on the em box by default, not rested on the Roman
+    # baseline, so it is the em box centre that costs nothing there.
+    assert (
+        _emitted_baseline_shifts("texts/style-run-alignment-2-writingdirection2.psd")
+        == []
+    )
+    assert (
+        _emitted_baseline_shifts("texts/style-run-alignment-3-writingdirection2.psd")
+        != []
+    )
+
+
+def test_character_alignment_composes_with_baseline_shift() -> None:
+    """Test that an authored BaselineShift adds to the alignment offset.
+
+    Both move the run across the writing direction, so they are summed into one
+    attribute rather than emitted as two offsets that a renderer could
+    accumulate. The fixture pairs em box centre alignment (+12.16) with an
+    authored 8px shift.
+    """
+    aligned = _emitted_baseline_shifts("texts/style-run-alignment-3.psd")
+    composed = _emitted_baseline_shifts(
+        "texts/style-run-alignment-3-baseline-shift.psd"
+    )
+    assert aligned == pytest.approx([12.16])
+    assert composed == pytest.approx([20.16])
+    assert composed[0] - aligned[0] == pytest.approx(8.0)
+
+
+def test_character_alignment_reference_follows_vertical_scale() -> None:
+    """Test that the alignment reference is the em box, not the font size.
+
+    Both runs of the fixture carry FontSize 64 and differ only in
+    VerticalScale, so a reference taken from FontSize would leave them level.
+    Photoshop offsets the scaled run, because vertical scale resizes the em box
+    it is aligned by.
+    """
+    _, text_setting = _first_text_setting(
+        "texts/style-run-alignment-vertical-scale.psd"
+    )
+    sizes = {span.style.font_size for para in text_setting for span in para}
+    assert sizes == {64.0}, "Fixture must isolate VerticalScale from FontSize"
+
+    assert _emitted_baseline_shifts(
+        "texts/style-run-alignment-vertical-scale.psd"
+    ) == pytest.approx([-3.84])
+
+
+_ALIGNMENT_DIRECTION_FIXTURES = {
+    WritingDirection.HORIZONTAL_TB: "texts/style-run-alignment-2.psd",
+    WritingDirection.VERTICAL_RL: "texts/style-run-alignment-2-writingdirection2.psd",
+}
+
+
+def _shift_for(
+    alignment: StyleRunAlignment,
+    writing_direction: WritingDirection,
+    font_size: float,
+    reference_size: float,
+    text: str = "X",
+) -> float:
+    """Return the offset the converter gives one synthesised run.
+
+    The writing direction comes from a real fixture, so the span is the only
+    thing synthesised.
+    """
+    psdimage = PSDImage.open(
+        get_fixture(_ALIGNMENT_DIRECTION_FIXTURES[writing_direction])
+    )
+    converter = Converter(psdimage)
+    layer = next(
+        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
+    )
+    text_setting = TypeSetting(layer._data)
+    assert text_setting.writing_direction == writing_direction
+    span = Span(
+        start=0,
+        end=len(text),
+        text=text,
+        style=StyleSheet(
+            name="",
+            style_sheet_data={
+                "FontSize": font_size,
+                "StyleRunAlignment": int(alignment),
+            },
+        ),
+    )
+    return converter._character_alignment_shift(span, text_setting, reference_size)
+
+
+@pytest.mark.parametrize("alignment", list(StyleRunAlignment))
+@pytest.mark.parametrize(
+    "writing_direction", [WritingDirection.HORIZONTAL_TB, WritingDirection.VERTICAL_RL]
+)
+def test_character_alignment_ignores_equal_sized_runs(
+    alignment: StyleRunAlignment, writing_direction: WritingDirection
+) -> None:
+    """Test that runs of one size are untouched, whatever the alignment is.
+
+    The offset is proportional to the difference between a run's em box and the
+    largest one on the line, so a paragraph of one size has nothing to align, in
+    every mode and both writing directions.
+    """
+    assert _shift_for(alignment, writing_direction, 32.0, 32.0) == 0.0
+
+
+def test_character_alignment_skips_runs_that_draw_nothing() -> None:
+    """Test that a paragraph break is not offset.
+
+    A break is a run of its own carrying the default size, which the reference
+    size leaves out. Offsetting it would put an attribute on an invisible
+    <tspan> and stop the optimizer merging it away.
+    """
+    assert (
+        _shift_for(
+            StyleRunAlignment.BOTTOM, WritingDirection.HORIZONTAL_TB, 32.0, 64.0, "\r"
+        )
+        == 0.0
+    )
+    # The same run with text in it is offset.
+    assert _shift_for(
+        StyleRunAlignment.BOTTOM, WritingDirection.HORIZONTAL_TB, 32.0, 64.0
+    ) == pytest.approx(-3.84)
+
+
+@pytest.mark.parametrize(
+    ("alignment", "expected"),
+    [
+        (StyleRunAlignment.BOTTOM, -16.0),
+        (StyleRunAlignment.ROMAN, 0.0),
+        (StyleRunAlignment.CENTER, -12.16),
+        (StyleRunAlignment.TOP, 16.0),
+    ],
+)
+def test_character_alignment_vertical_offsets(
+    alignment: StyleRunAlignment, expected: float
+) -> None:
+    """Test the vertical offsets, including the two modes with no fixture.
+
+    Vertical text is centred on the em box by default, so the em box edges sit a
+    symmetric half of the size difference away and the Roman baseline
+    ``0.5 - EM_BOX_DESCENT_RATIO`` of it. The fixtures cover ROMAN and CENTER;
+    BOTTOM and TOP are asserted here.
+    """
+    assert _shift_for(
+        alignment, WritingDirection.VERTICAL_RL, 32.0, 64.0
+    ) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("alignment", "horizontal", "vertical"),
+    [
+        (StyleRunAlignment.BOTTOM, 0.0, 0.0),
+        (StyleRunAlignment.ICF_BOTTOM, None, None),
+        (StyleRunAlignment.ROMAN, EM_BOX_DESCENT_RATIO, 0.5),
+        (StyleRunAlignment.CENTER, 0.5, EM_BOX_DESCENT_RATIO),
+        (StyleRunAlignment.ICF_TOP, None, None),
+        (StyleRunAlignment.TOP, 1.0, 1.0),
+    ],
+)
+def test_alignment_em_fraction(
+    alignment: StyleRunAlignment, horizontal: float | None, vertical: float | None
+) -> None:
+    """Test the point in the em box that each alignment mode aligns runs by.
+
+    ``ROMAN`` and ``CENTER`` trade places between the two writing directions.
+    The ICF modes are None in both, because the ideographic character face is
+    measured per font, which conversion cannot do; see GitHub issue #440.
+    """
+    assert (
+        _alignment_em_fraction(alignment, WritingDirection.HORIZONTAL_TB) == horizontal
+    )
+    assert _alignment_em_fraction(alignment, WritingDirection.VERTICAL_RL) == vertical
+
+
+def test_style_run_alignment_parses_every_value() -> None:
+    """Test that all six StyleRunAlignment values are parsed and retained."""
+    for value in range(6):
+        style = StyleSheet(name="", style_sheet_data={"StyleRunAlignment": value})
+        assert style.style_run_alignment == StyleRunAlignment(value)
+    default = StyleSheet(name="", style_sheet_data={})
+    assert default.style_run_alignment == StyleRunAlignment.BOTTOM
+
+
+def test_foreignobject_character_alignment_offsets_the_span() -> None:
+    """Test that the foreignObject path applies the same alignment offset.
+
+    The offset is a logical inset pointing towards the start of the block axis,
+    so it runs against the shift the native <text> path emits.
+    """
+    # The foreignObject path only handles box text, so this uses the
+    # shapetype1 fixture rather than the point-text one. The native path leaves
+    # that fixture alone, so the expected offset comes from the point-text
+    # fixture carrying the same alignment mode and sizes.
+    fixture = "texts/style-run-alignment-3-shapetype1.psd"
+    native = _emitted_baseline_shifts("texts/style-run-alignment-3.psd")
+    assert native == pytest.approx([12.16])
+
+    psdimage = PSDImage.open(get_fixture(fixture))
+    wrapped = SVGDocument.from_psd(
+        psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+    ).svg
+    insets = [
+        float(style["inset-block-start"].removesuffix("px"))
+        for span in wrapped.findall(".//{http://www.w3.org/1999/xhtml}span")
+        if "inset-block-start"
+        in (style := _parse_style_string(span.attrib.get("style", "")))
+    ]
+    assert insets == pytest.approx([-native[0]])
+
+
+def test_character_alignment_defaults_differ_by_writing_direction() -> None:
+    """Test that each writing direction emits nothing for its own default.
+
+    SVG rests horizontal text on the alphabetic baseline but centres vertical
+    text on the em box, so the mode that needs no offset is the Roman baseline
+    in horizontal writing and the em box centre in vertical writing. The same
+    stored value therefore emits an offset in one direction and not the other.
+    """
+    assert _default_em_fraction(WritingDirection.HORIZONTAL_TB) == pytest.approx(
+        EM_BOX_DESCENT_RATIO
+    )
+    assert _default_em_fraction(WritingDirection.VERTICAL_RL) == pytest.approx(0.5)
+
+    # StyleRunAlignment 2 is the Roman baseline horizontally and the em box
+    # centre vertically, which is each direction's own default.
+    assert _emitted_baseline_shifts("texts/style-run-alignment-2.psd") == []
+    assert (
+        _emitted_baseline_shifts("texts/style-run-alignment-2-writingdirection2.psd")
+        == []
+    )
+
+
+def test_character_alignment_skips_native_box_text() -> None:
+    """Test that native box text keeps the position it has today.
+
+    The hanging ``dominant-baseline`` that places box text already displaces
+    mixed-size runs, so the native path leaves them alone; see the call site in
+    ``core/text.py`` and GitHub issue #443.
+    """
+    svg = convert_psd_to_svg("texts/style-run-alignment-3-shapetype1.psd")
+    assert svg.find('.//*[@dominant-baseline="hanging"]') is not None
+    assert _emitted_baseline_shifts("texts/style-run-alignment-3-shapetype1.psd") == []
+
+
+def test_character_alignment_skips_scripts() -> None:
+    """Test that a superscript or subscript run is not aligned.
+
+    Photoshop offsets neither, whatever their size. Measured on the fixture,
+    a 32px superscript beside a 64px run lands in the same place under em box
+    bottom alignment as under Roman baseline alignment, while a plain 32px run
+    moves 3.94px between the two. So the script offset is emitted alone.
+    """
+    _, text_setting = _first_text_setting("texts/style-run-alignment-0-superscript.psd")
+    spans = [span for para in text_setting for span in para if span.text.strip("\r")]
+    assert [span.style.font_baseline for span in spans] == [
+        FontBaseline.ROMAN,
+        FontBaseline.SUPERSCRIPT,
+    ]
+    assert {span.style.style_run_alignment for span in spans} == {
+        StyleRunAlignment.BOTTOM
+    }
+    assert {span.style.font_size for span in spans} == {64.0, 32.0}
+
+    # The superscript offset is positive and carries no alignment term, which
+    # would have subtracted EM_BOX_DESCENT_RATIO * 32 from it.
+    shifts = _emitted_baseline_shifts("texts/style-run-alignment-0-superscript.psd")
+    assert len(shifts) == 1
+    # The emitted attribute is rounded, so compare within a hundredth.
+    assert shifts[0] == pytest.approx(
+        32.0 * text_setting.superscript_position, abs=0.01
+    ), "Script runs carry the script offset alone"
+
+
+def test_character_alignment_ignores_icf_modes() -> None:
+    """Test that the ICF modes produce no offset through a conversion.
+
+    The ideographic character face is measured per font, which conversion cannot
+    do, so those two values parse and are retained but move nothing. This uses a
+    real size difference, so it would fail if they fell through to an em box
+    reference. See GitHub issue #440.
+    """
+    for alignment in (StyleRunAlignment.ICF_BOTTOM, StyleRunAlignment.ICF_TOP):
+        for direction in (
+            WritingDirection.HORIZONTAL_TB,
+            WritingDirection.VERTICAL_RL,
+        ):
+            assert _shift_for(alignment, direction, 32.0, 64.0) == 0.0
+
+
+def test_character_alignment_ignores_runs_without_an_em_box() -> None:
+    """Test that a run of no size is not offset.
+
+    A span whose font size is zero or negative draws nothing, so offsetting it
+    would put most of the reference size on an invisible run.
+    """
+    for font_size in (0.0, -32.0):
+        assert (
+            _shift_for(
+                StyleRunAlignment.TOP,
+                WritingDirection.HORIZONTAL_TB,
+                font_size,
+                64.0,
+            )
+            == 0.0
+        )
+
+
+def test_character_alignment_is_scoped_to_the_paragraph() -> None:
+    """Test that a run does not align to a larger run in another paragraph.
+
+    ``font-sizes-1.psd`` carries four sizes, 16 through 24, one per paragraph
+    and one run each. Each paragraph is its own reference, so nothing moves; a
+    reference taken across the layer would offset three of the four.
+    """
+    _, text_setting = _first_text_setting("texts/font-sizes-1.psd")
+    paragraphs = list(text_setting)
+    sizes = [
+        {span.style.font_size for span in para if span.text.strip("\r")}
+        for para in paragraphs
+    ]
+    assert len(paragraphs) > 1
+    assert all(len(sizes_in_paragraph) == 1 for sizes_in_paragraph in sizes)
+    assert len({next(iter(s)) for s in sizes if s}) > 1, (
+        "Fixture should carry different sizes across paragraphs"
+    )
+
+    assert _emitted_baseline_shifts("texts/font-sizes-1.psd") == []
+
+
+def test_character_alignment_leaves_equal_sized_runs_alone_end_to_end() -> None:
+    """Test that a converted layer of equally sized runs gains no offset.
+
+    The fixture has to be point text carrying a mode that does emit an offset
+    when sizes differ, or the empty result proves nothing: box text skips
+    alignment in the native path, and the Roman baseline mode emits nothing
+    whatever the sizes are.
+    """
+    fixture = "texts/style-tracking-tsume.psd"
+    _, text_setting = _first_text_setting(fixture)
+    assert text_setting.shape_type == ShapeType.POINT, (
+        "Box text bypasses native alignment, so it cannot witness this"
+    )
+    spans = [span for para in text_setting for span in para if span.text.strip("\r")]
+    assert len(spans) > 1
+    assert (
+        len({span.style.font_size * span.style.vertical_scale for span in spans}) == 1
+    )
+    assert {span.style.style_run_alignment for span in spans} == {
+        StyleRunAlignment.BOTTOM
+    }, "A mode that offsets nothing by itself would make this vacuous"
+
+    assert _emitted_baseline_shifts(fixture) == []
+
+
+def test_foreignobject_character_alignment_in_vertical_writing() -> None:
+    """Test that the foreignObject path offsets vertical runs the right way.
+
+    The inset points towards the start of the block axis, which is the right
+    edge in vertical-rl, so it runs against the shift exactly as it does in
+    horizontal writing. This is the combination the docs steer box-text users
+    towards, so the sign is worth pinning.
+    """
+    fixture = "texts/style-run-alignment-3-writingdirection2.psd"
+    psdimage = PSDImage.open(get_fixture(fixture))
+    layer = next(
+        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
+    )
+    text_setting = TypeSetting(layer._data)
+    assert text_setting.writing_direction == WritingDirection.VERTICAL_RL
+
+    converter = Converter(psdimage)
+    paragraph = next(iter(text_setting))
+    reference = converter._alignment_reference_size(paragraph, text_setting)
+    smaller = min(paragraph.spans, key=lambda span: span.style.font_size)
+    shift = converter._character_alignment_shift(smaller, text_setting, reference)
+    assert shift == pytest.approx(-12.16)
+
+    styles = converter._get_foreign_object_span_styles(
+        smaller, text_setting, paragraph, reference
+    )
+    assert styles["position"] == "relative"
+    assert float(styles["inset-block-start"].removesuffix("px")) == pytest.approx(
+        -shift
+    )
+
+
+def test_alignment_reference_is_the_drawn_em_box_of_a_script() -> None:
+    """Test that a script run sets the reference by its reduced em box.
+
+    A superscript is never itself aligned, but its em box is still drawn on the
+    line and can be the largest one there. Photoshop measures the box the run
+    is drawn at, not its FontSize: a 20px Roman run beside a 152px superscript
+    moves 8.0px between Roman baseline and em box bottom alignment, where the
+    unreduced FontSize would move it 15.8px and excluding the script entirely
+    would leave it still.
+    """
+    psdimage = PSDImage.open(get_fixture("texts/style-run-alignment-2.psd"))
+    converter = Converter(psdimage)
+    layer = next(
+        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
+    )
+    text_setting = TypeSetting(layer._data)
+
+    def span_at(font_size: float, baseline: FontBaseline) -> Span:
+        return Span(
+            start=0,
+            end=1,
+            text="X",
+            style=StyleSheet(
+                name="",
+                style_sheet_data={
+                    "FontSize": font_size,
+                    "FontBaseline": int(baseline),
+                    "StyleRunAlignment": int(StyleRunAlignment.BOTTOM),
+                },
+            ),
+        )
+
+    roman = span_at(20.0, FontBaseline.ROMAN)
+    script = span_at(152.0, FontBaseline.SUPERSCRIPT)
+    paragraph = Paragraph(
+        style=ParagraphSheet(name="", default_style_sheet=0, properties={}),
+        spans=[roman, script],
+    )
+
+    reference = converter._alignment_reference_size(paragraph, text_setting)
+    assert reference == pytest.approx(152.0 * text_setting.superscript_size)
+    assert reference < 152.0, "The unreduced FontSize must not be the reference"
+
+    # The Roman run is offset by the descent fraction of the difference, and the
+    # script itself is not offset at all.
+    assert converter._character_alignment_shift(
+        roman, text_setting, reference
+    ) == pytest.approx(-EM_BOX_DESCENT_RATIO * (reference - 20.0))
+    assert converter._character_alignment_shift(script, text_setting, reference) == 0.0
+
+
+def test_character_alignment_offsets_stay_on_their_own_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that a shift shared by every run is not hoisted onto <text>.
+
+    resvg honors ``baseline-shift`` on a ``<tspan>`` but ignores it on
+    ``<text>``, so hoisting one that all runs happen to share drops it from the
+    render entirely. Character alignment makes that collision reachable: here
+    the 64px run's authored BaselineShift equals what alignment gives the 32px
+    run, so both totals are 12.16. See GitHub issue #445.
+    """
+    monkeypatch.setattr(
+        StyleSheet,
+        "baseline_shift",
+        property(
+            lambda self: (
+                12.16
+                if self.font_size == 64.0
+                else float(self.style_sheet_data.get("BaselineShift", 0.0))
+            )
+        ),
+    )
+
+    svg = convert_psd_to_svg("texts/style-run-alignment-3.psd")
+    text = svg.find(".//text")
+    assert text is not None
+    assert "baseline-shift" not in text.attrib, (
+        "A shift on <text> is silently dropped by resvg"
+    )
+    shifts = [tspan.attrib.get("baseline-shift") for tspan in text.findall("tspan")]
+    assert shifts == ["12.16", "12.16"]

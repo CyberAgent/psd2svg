@@ -102,6 +102,17 @@ Disable insertion of ``<title>`` elements with layer names. This reduces file si
    # Compact output: disable titles and use paths
    psd2svg input.psd output.svg --no-title --no-live-shapes
 
+**--crop-layers-to-canvas**
+
+Crop each layer's rasterized image to the canvas before embedding it. This
+reduces memory use and output size for a layer (e.g. a Smart Object) whose
+bounding box extends far beyond the canvas. See :doc:`configuration` for
+when to keep this disabled.
+
+.. code-block:: bash
+
+   psd2svg input.psd output.svg --crop-layers-to-canvas
+
 Text Adjustment
 ~~~~~~~~~~~~~~~
 

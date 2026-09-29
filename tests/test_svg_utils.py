@@ -1,6 +1,9 @@
 """Tests for SVG utility functions."""
 
+import io
+import re
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import SupportsFloat
 
 import numpy
@@ -1481,6 +1484,95 @@ class TestMergeSingletonChildren:
         assert text[0].text == "A"
         assert text[1].text == "B"
 
+    def test_excluded_attribute_blocks_merge_into_another_tag(self) -> None:
+        """Test that a child owning an excluded attribute is left in place."""
+        # <text><tspan baseline-shift="16" x="10">Text</tspan></text>
+        text = ET.Element("text")
+        tspan = ET.SubElement(text, "tspan", attrib={"baseline-shift": "16", "x": "10"})
+        tspan.text = "Text"
+
+        svg_utils.merge_singleton_children(text, pinned_attributes={"baseline-shift"})
+
+        assert len(text) == 1
+        assert text[0] is tspan
+        assert "baseline-shift" not in text.attrib
+        assert "x" not in text.attrib
+
+    def test_excluded_attribute_blocks_unwrap(self) -> None:
+        """Test that the unwrap branch also honors excludes."""
+        # <text><tspan baseline-shift="16"><tspan>A</tspan><tspan>B</tspan></tspan>
+        # </text>
+        text = ET.Element("text")
+        outer_tspan = ET.SubElement(text, "tspan", attrib={"baseline-shift": "16"})
+        inner1 = ET.SubElement(outer_tspan, "tspan")
+        inner1.text = "A"
+        inner2 = ET.SubElement(outer_tspan, "tspan")
+        inner2.text = "B"
+
+        svg_utils.merge_singleton_children(text, pinned_attributes={"baseline-shift"})
+
+        assert len(text) == 1
+        assert text[0] is outer_tspan
+        assert "baseline-shift" not in text.attrib
+
+    def test_excludes_do_not_block_other_attributes(self) -> None:
+        """Test that a child without an excluded attribute still merges."""
+        # <text><tspan font-size="32">Text</tspan></text>
+        text = ET.Element("text")
+        tspan = ET.SubElement(text, "tspan", attrib={"font-size": "32"})
+        tspan.text = "Text"
+
+        svg_utils.merge_singleton_children(text, pinned_attributes={"baseline-shift"})
+
+        assert len(text) == 0
+        assert text.text == "Text"
+        assert text.attrib.get("font-size") == "32"
+
+    def test_excluded_attribute_merges_into_the_same_tag(self) -> None:
+        """Test that an excluded attribute still merges into a parent of its tag.
+
+        A <tspan> holds what a <tspan> holds, so a lone run merges into the
+        <tspan> that wraps its paragraph; only a parent of another tag stops it.
+        """
+        # <text><tspan x="10"><tspan baseline-shift="16">A</tspan></tspan>
+        # <tspan x="20">B</tspan></text>
+        text = ET.Element("text")
+        paragraph = ET.SubElement(text, "tspan", attrib={"x": "10"})
+        run = ET.SubElement(paragraph, "tspan", attrib={"baseline-shift": "16"})
+        run.text = "A"
+        sibling = ET.SubElement(text, "tspan", attrib={"x": "20"})
+        sibling.text = "B"
+
+        svg_utils.merge_singleton_children(text, pinned_attributes={"baseline-shift"})
+
+        # The run merged into the paragraph <tspan>, which keeps the shift.
+        assert len(text) == 2
+        assert text[0] is paragraph
+        assert len(paragraph) == 0
+        assert paragraph.text == "A"
+        assert paragraph.attrib.get("baseline-shift") == "16"
+        assert paragraph.attrib.get("x") == "10"
+
+    def test_excluded_attribute_stops_at_the_outermost_tag(self) -> None:
+        """Test that a shift absorbed by a wrapper is not passed on to <text>.
+
+        The run merges into its paragraph <tspan>; the <tspan> then stays put
+        because it now owns the excluded attribute itself.
+        """
+        # <text><tspan x="10"><tspan baseline-shift="16">A</tspan></tspan></text>
+        text = ET.Element("text")
+        paragraph = ET.SubElement(text, "tspan", attrib={"x": "10"})
+        run = ET.SubElement(paragraph, "tspan", attrib={"baseline-shift": "16"})
+        run.text = "A"
+
+        svg_utils.merge_singleton_children(text, pinned_attributes={"baseline-shift"})
+
+        assert len(text) == 1
+        assert text[0] is paragraph
+        assert paragraph.text == "A"
+        assert paragraph.attrib.get("baseline-shift") == "16"
+        assert "baseline-shift" not in text.attrib
+
 
 class TestExtractTextCharacters:
     """Tests for extract_text_characters utility function."""
@@ -1731,6 +1823,122 @@ def test_strip_text_element_whitespace_with_xml_space() -> None:
     assert tspans[0].tail is None or tspans[0].tail.strip() == "", (
         "Whitespace-only tail should be stripped"
     )
+
+
+def _xhtml_tree() -> tuple[ET.Element, ET.Element]:
+    """Build an <svg> holding a <foreignObject> with a two-span paragraph."""
+    svg = ET.Element("svg")
+    ET.SubElement(svg, "g")
+    foreign_object = ET.SubElement(svg, "foreignObject")
+    div = svg_utils.create_xhtml_node("div", parent=foreign_object)
+    paragraph = svg_utils.create_xhtml_node("p", parent=div)
+    svg_utils.create_xhtml_node("span", parent=paragraph, text="Lo", style="color: red")
+    svg_utils.create_xhtml_node(
+        "span", parent=paragraph, text="rem", style="color: blue"
+    )
+    return svg, paragraph
+
+
+# Tolerates a namespace prefix so the check still bites if one ever returns.
+_ADJACENT_SPANS = re.compile(r"</(?:\w+:)?span>\s+<(?:\w+:)?span")
+
+
+@pytest.mark.parametrize("indent", ["  ", ""])
+def test_tostring_keeps_xhtml_spans_adjacent(indent: str) -> None:
+    """Indentation never lands between two spans of a <foreignObject>.
+
+    Whitespace between XHTML inline elements renders as a space, so a word
+    split across two style runs would come out as "Lo rem". An indent of ""
+    is the rasterizer's own call, and it still inserts newlines.
+    """
+    svg, _ = _xhtml_tree()
+
+    result = svg_utils.tostring(svg, indent=indent)
+
+    assert _ADJACENT_SPANS.search(result) is None, result
+
+
+def test_write_keeps_xhtml_spans_adjacent() -> None:
+    """Saving to a file goes through the same indentation."""
+    svg, _ = _xhtml_tree()
+
+    stream = io.StringIO()
+    svg_utils.write(svg, stream)
+
+    assert _ADJACENT_SPANS.search(stream.getvalue()) is None, stream.getvalue()
+
+
+def test_write_matches_tostring() -> None:
+    """A written file holds exactly the markup tostring() returns.
+
+    Both go through the same XHTML prefix removal, so a <foreignObject> is
+    written unprefixed. Chromium ignores margin-block-start on an
+    html:-prefixed element, which drops the paragraph strut compensation.
+    See GitHub issue #433.
+    """
+    expected = svg_utils.tostring(_xhtml_tree()[0])
+
+    stream = io.StringIO()
+    svg_utils.write(_xhtml_tree()[0], stream)
+
+    assert stream.getvalue() == expected
+    assert "html:" not in expected, expected
+    assert f'<div xmlns="{svg_utils.XHTML_NAMESPACE}">' in expected, expected
+
+
+def test_write_accepts_a_path(tmp_path: Path) -> None:
+    """A filename is opened as UTF-8 text, as an open file object would be."""
+    svg, paragraph = _xhtml_tree()
+    paragraph[0].text = "\u00e9\u3042"
+    destination = tmp_path / "out.svg"
+
+    svg_utils.write(svg, destination)
+
+    assert destination.read_text(encoding="utf-8") == svg_utils.tostring(svg)
+
+
+@pytest.mark.parametrize("content", [" ", "   ", "\t", "\xa0\xa0"])
+def test_tostring_keeps_whitespace_only_xhtml_content(content: str) -> None:
+    """Whitespace that is content survives exactly as it was written.
+
+    An unstyled run is written into the previous sibling's tail, or into the
+    paragraph's own text when it comes first, so either can hold nothing but
+    whitespace.
+    """
+    svg, paragraph = _xhtml_tree()
+    paragraph.text = content
+    paragraph[0].tail = content
+
+    result = svg_utils.tostring(svg)
+
+    assert f"<p>{content}<span" in result, result
+    assert f"</span>{content}<span" in result, result
+
+
+def test_tostring_keeps_whitespace_after_an_svg_in_a_paragraph() -> None:
+    """A tail belongs to its parent, whatever the child's own namespace is.
+
+    An inline <svg> inside a paragraph sits in XHTML content, so the space
+    following it renders, and indentation put there would render too.
+    """
+    svg, paragraph = _xhtml_tree()
+    inline = ET.SubElement(paragraph, "svg")
+    inline.tail = "\xa0"
+    svg_utils.create_xhtml_node("span", parent=paragraph, text="ipsum")
+
+    result = svg_utils.tostring(svg)
+
+    assert "</span><svg" in result, result
+    assert "\xa0<span" in result, result
+
+
+def test_tostring_still_indents_svg_elements() -> None:
+    """Only the XHTML is exempt; the surrounding SVG is still pretty-printed."""
+    svg, _ = _xhtml_tree()
+
+    result = svg_utils.tostring(svg)
+
+    assert "\n  <g" in result, result
 
 
 class TestSafeUtf8:

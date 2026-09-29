@@ -17,6 +17,7 @@ Key features:
 - Vertical and horizontal text direction
 - Letter spacing, tracking, and kerning
 - Font effects (superscript, subscript, small caps)
+- Character alignment of mixed-size runs on a line
 
 Note: This module re-exports TypeSetting and TextWrappingMode for backward
       compatibility. New code should import these directly from
@@ -40,6 +41,7 @@ from psd2svg.core.typesetting import (
     Rectangle,
     ShapeType,
     Span,
+    StyleRunAlignment,
     TextWrappingMode,
     TypeSetting,
     WritingDirection,
@@ -64,6 +66,42 @@ SCALE_TOLERANCE = 1e-6
 # style-faux-bold*.psd fixtures against their own unthickened line is 2.9-3.2%
 # of the em, depending on which scanlines are sampled. See GitHub issue #337.
 FAUX_BOLD_STROKE_RATIO = 0.03
+
+# Distance from the Roman baseline down to the em box bottom, as a fraction of
+# the em.
+#
+# Character alignment places runs by their em box, so it needs to know where the
+# baseline sits inside that box. Photoshop reads this per font, from the
+# ideographic baseline in the font's BASE table, but conversion never opens a
+# font (see docs/technical-notes.rst), so a single constant stands in for it.
+# 0.12 is the 88/12 em box that Japanese faces are drawn to, which is what
+# character alignment exists for: it is exact for Noto Sans CJK JP, whose BASE
+# table gives -120/1000, and approximate for faces built to other proportions,
+# such as Arial, which has no BASE table and behaves as about 0.146.
+#
+# The size this is a fraction of is the em box across the writing direction,
+# vertical scale included; see :meth:`TextConverter._cross_axis_em`. GitHub
+# issue #439 records the measurements.
+EM_BOX_DESCENT_RATIO = 0.12
+
+# Attributes resvg only honors on a <tspan>: it ignores baseline-shift on
+# <text>, so a shift that reaches the <text> element is dropped from the
+# render. Two optimization passes can put it there. Hoisting reaches it when
+# every run shares a value, which character alignment makes possible: a run
+# offset by alignment and a run carrying the same authored BaselineShift end up
+# with equal totals. Merging reaches it when a lone run is folded into its
+# parent. See GitHub issue #445.
+_TSPAN_PINNED_ATTRIBUTES = {"baseline-shift"}
+
+# Attributes that must stay on the <tspan> that owns them. Positions are
+# per-run by definition.
+_UNHOISTABLE_TEXT_ATTRIBUTES = {
+    "x",
+    "y",
+    "dx",
+    "dy",
+    "transform",
+} | _TSPAN_PINNED_ATTRIBUTES
 
 
 class EmittedSpan(NamedTuple):
@@ -99,6 +137,47 @@ class TextScaling(NamedTuple):
     font_size: float
     baseline_size: float
     transform_scale: tuple[float, float] | None
+
+
+def _alignment_em_fraction(
+    alignment: StyleRunAlignment, writing_direction: WritingDirection
+) -> float | None:
+    """Return the point in the em box that an alignment mode aligns runs by.
+
+    The fraction runs from 0 at the em box bottom to 1 at its top, and from 0 at
+    the left edge to 1 at the right one in vertical writing.
+
+    ``ROMAN`` and ``CENTER`` trade places between the two writing directions, so
+    the fraction each maps to is not the one its name suggests in both. The ICF
+    modes return None because the ideographic character face is measured per
+    font, which conversion cannot do; see GitHub issue #440.
+    """
+    horizontal = writing_direction == WritingDirection.HORIZONTAL_TB
+    if alignment == StyleRunAlignment.BOTTOM:
+        return 0.0
+    if alignment == StyleRunAlignment.TOP:
+        return 1.0
+    if alignment == StyleRunAlignment.ROMAN:
+        return EM_BOX_DESCENT_RATIO if horizontal else 0.5
+    if alignment == StyleRunAlignment.CENTER:
+        return 0.5 if horizontal else EM_BOX_DESCENT_RATIO
+    return None
+
+
+def _default_em_fraction(writing_direction: WritingDirection) -> float:
+    """Return the point in the em box that SVG itself aligns runs of a line by.
+
+    Horizontal text rests on the alphabetic baseline, which sits
+    ``EM_BOX_DESCENT_RATIO`` above the em box bottom. Vertical text is centred
+    on the em box instead, the central baseline that SVG and CSS both make the
+    default there. A mode asking for the point SVG already uses needs nothing
+    emitted, so the Roman baseline is free in horizontal writing and the em box
+    centre is free in vertical writing. Which stored value that is differs
+    between the two; see :class:`~psd2svg.core.typesetting.StyleRunAlignment`.
+    """
+    if writing_direction == WritingDirection.HORIZONTAL_TB:
+        return EM_BOX_DESCENT_RATIO
+    return 0.5
 
 
 def _common_span_scale(paragraphs: list[Paragraph]) -> tuple[float, float] | None:
@@ -168,6 +247,74 @@ def _paragraph_spacing(previous: Paragraph, paragraph: Paragraph) -> float:
     ever called for a paragraph that has a predecessor.
     """
     return previous.style.space_after + paragraph.style.space_before
+
+
+def _renders_content(paragraph: Paragraph) -> bool:
+    """Whether a paragraph puts a line box on the page.
+
+    A paragraph whose spans all strip to empty - a lone carriage return is the
+    common case - emits a self-closing span and measures zero, so it occupies
+    none of the block axis. The strip matches the one the span emitter applies.
+    """
+    return any(span.text.strip("\r") for span in paragraph.spans)
+
+
+def _half_leading_compensation(paragraph: Paragraph, leading: float) -> float:
+    """Return the negative start margin that pulls the first line up.
+
+    CSS centres text in the line box, so half the leading sits above the first
+    line, pushing the block off the top of its box. Only the paragraph that
+    starts the layer carries this: later ones already sit exactly one
+    line-height apart, and repeating it would pull every break closer.
+    """
+    if leading <= 0 or not paragraph.spans:
+        return 0.0
+    font_size = max(span.style.font_size for span in paragraph.spans)
+    if leading <= font_size:
+        return 0.0
+    return -(leading - font_size) / 2
+
+
+def _minimum_block_extent(paragraphs: list[Paragraph]) -> float | None:
+    """Return the least block-axis extent the paragraphs can occupy.
+
+    Every paragraph that renders is counted at one line of its own leading.
+    Wrapping only ever adds lines, so the laid-out extent is never smaller than
+    this. Returns ``None`` when a rendering paragraph has no positive leading:
+    the <p> then falls back to the renderer's own line-height, which this
+    cannot predict.
+
+    Adjacent margins collapse to the largest positive plus the smallest
+    negative, while this sums the gaps. That over-counts only where a gap is
+    positive, which raises the floor toward the real extent; a negative gap on
+    a paragraph that renders nothing is subtracted here so it cannot push the
+    floor above what the browser lays out.
+    """
+    extent = 0.0
+    previous: Paragraph | None = None
+    for index, paragraph in enumerate(paragraphs):
+        spacing = (
+            _paragraph_spacing(previous, paragraph) if previous is not None else 0.0
+        )
+        if not _renders_content(paragraph):
+            # No line box, so no height - but the margin is still emitted, and
+            # a negative one pulls the paragraphs around it together.
+            extent += min(spacing, 0.0)
+            previous = paragraph
+            continue
+        leading = paragraph.compute_leading()
+        if leading <= 0:
+            return None
+        extent += spacing + leading
+        previous = paragraph
+
+    # The compensation rides on the first paragraph whether or not it renders,
+    # exactly as the paragraph styles emit it.
+    if paragraphs and paragraphs[0].spans:
+        extent += _half_leading_compensation(
+            paragraphs[0], paragraphs[0].compute_leading()
+        )
+    return extent
 
 
 def _paragraph_advance(
@@ -338,11 +485,10 @@ def _needs_whitespace_preservation(text: str) -> bool:
     - Multiple consecutive spaces (2 or more)
     - Tabs or other whitespace characters
 
-    When whitespace needs preservation, the xml:space="preserve" attribute is added
-    to the SVG element. While MDN recommends the CSS white-space property as the
-    modern approach (https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/xml:space),
-    we use xml:space for better compatibility with SVG renderers including resvg-py.
-    The attribute works equivalently to CSS "white-space: pre".
+    When whitespace needs preservation, the SVG <text> element gets
+    xml:space="preserve", which resvg-py honors where it ignores the CSS
+    white-space property. The XHTML <p> of the foreignObject output gets
+    "white-space: pre-wrap" instead, since XHTML layout ignores xml:space.
 
     Note: Carriage returns (\r) are ignored since they are stripped
     during text processing.
@@ -351,7 +497,7 @@ def _needs_whitespace_preservation(text: str) -> bool:
         text: Text content to check.
 
     Returns:
-        True if xml:space="preserve" is needed, False otherwise.
+        True if whitespace must be preserved, False otherwise.
     """
     if not text:
         return False
@@ -392,7 +538,7 @@ class TextConverter(ConverterProtocol):
         )
 
         if use_foreign_object:
-            return self._create_foreign_object_text(text_setting)
+            return self._create_foreign_object_text(text_setting, layer.name)
         else:
             return self._create_native_svg_text(text_setting)
 
@@ -514,6 +660,17 @@ class TextConverter(ConverterProtocol):
                 origin_y += paragraph_offset_y
                 previous_font_size: float | None = None
                 final_span: EmittedSpan | None = None
+                # Box text is placed by a hanging dominant-baseline, which
+                # already aligns runs of different sizes by their hanging
+                # baseline rather than by the Roman one. An offset measured from
+                # the Roman baseline would compound that, so character alignment
+                # is left to the <foreignObject> path for box text. See
+                # GitHub issue #443.
+                alignment_reference_size = (
+                    None
+                    if text_setting.shape_type == ShapeType.BOUNDING_BOX
+                    else self._alignment_reference_size(paragraph, text_setting)
+                )
                 for span in paragraph:
                     emitted = self._add_text_span(
                         text_setting,
@@ -522,6 +679,7 @@ class TextConverter(ConverterProtocol):
                         paragraph_origin=(origin_x, origin_y),
                         text_element_scale=text_element_scale,
                         kerning_reference_size=previous_font_size,
+                        alignment_reference_size=alignment_reference_size,
                     )
                     # Manual kerning belongs to the boundary before the current
                     # character. Empty and carriage-return-only runs do not create
@@ -544,7 +702,7 @@ class TextConverter(ConverterProtocol):
             for child in container_node:
                 svg_utils.merge_common_child_attributes(
                     child,
-                    excludes={"x", "y", "dx", "dy", "transform"},
+                    excludes=_UNHOISTABLE_TEXT_ATTRIBUTES,
                 )
                 svg_utils.merge_consecutive_siblings(child)
                 svg_utils.merge_offset_siblings(child)
@@ -553,11 +711,13 @@ class TextConverter(ConverterProtocol):
         else:
             svg_utils.merge_common_child_attributes(
                 text_node,
-                excludes={"x", "y", "dx", "dy", "transform"},
+                excludes=_UNHOISTABLE_TEXT_ATTRIBUTES,
             )
             svg_utils.merge_consecutive_siblings(text_node)
             svg_utils.merge_offset_siblings(text_node)
-            svg_utils.merge_singleton_children(text_node)
+            svg_utils.merge_singleton_children(
+                text_node, pinned_attributes=_TSPAN_PINNED_ATTRIBUTES
+            )
             svg_utils.merge_attribute_less_children(text_node)
         return text_node
 
@@ -643,7 +803,9 @@ class TextConverter(ConverterProtocol):
         )
         return inline_scale[0] if is_horizontal else inline_scale[1]
 
-    def _create_foreign_object_text(self, text_setting: TypeSetting) -> ET.Element:
+    def _create_foreign_object_text(
+        self, text_setting: TypeSetting, layer_name: str
+    ) -> ET.Element:
         """Create <foreignObject> with XHTML content for text wrapping.
 
         This method creates a foreignObject element containing XHTML div/p/span
@@ -652,6 +814,7 @@ class TextConverter(ConverterProtocol):
 
         Args:
             text_setting: TypeSetting object with text data.
+            layer_name: Name of the layer, for the overflow warning.
 
         Returns:
             foreignObject element containing XHTML content.
@@ -672,6 +835,10 @@ class TextConverter(ConverterProtocol):
             y=transform.ty + bounds.top,
             width=bounds.width,
             height=bounds.height,
+            # A foreignObject establishes its own viewport and clips to it,
+            # independently of the container's CSS overflow. Both have to allow
+            # the overflow through for either to have any effect.
+            overflow="visible",
         )
 
         # Apply non-translation transform if needed
@@ -682,6 +849,8 @@ class TextConverter(ConverterProtocol):
         # If so, add lang attribute for CSS hyphens to work
         paragraphs = list(text_setting)
         has_hyphenation = any(p.style.auto_hyphenate for p in paragraphs)
+
+        self._warn_on_certain_overflow(paragraphs, text_setting, bounds, layer_name)
 
         # Create XHTML div container with proper namespace
         container_styles = self._get_foreign_object_container_styles(
@@ -901,6 +1070,7 @@ class TextConverter(ConverterProtocol):
         paragraph_origin: tuple[float, float] = (0.0, 0.0),
         text_element_scale: float | None = None,
         kerning_reference_size: float | None = None,
+        alignment_reference_size: float | None = None,
     ) -> EmittedSpan:
         """Add a text span to the paragraph node.
 
@@ -914,6 +1084,9 @@ class TextConverter(ConverterProtocol):
                 ``<text>`` element by :meth:`_apply_text_element_scaling`, if any.
             kerning_reference_size: Emitted font size of the preceding drawable
                 character, or None at a paragraph boundary.
+            alignment_reference_size: Largest em box in the paragraph, which
+                character alignment aligns this span to, or None to leave the
+                span where SVG puts it.
 
         Returns:
             The emitted ``<tspan>`` with the metrics later spans and the
@@ -966,6 +1139,20 @@ class TextConverter(ConverterProtocol):
                 stroke_linejoin = "round"
                 paint_order = "stroke"
 
+        # Character alignment and the authored baseline shift both move the run
+        # across the writing direction, and a script replaces the authored shift
+        # rather than adding to it. Summing them into one attribute keeps the
+        # <tspan>s independent of each other, so no offset can accumulate.
+        baseline_shift = self._character_alignment_shift(
+            span, text_setting, alignment_reference_size
+        )
+        if style.font_baseline == FontBaseline.SUPERSCRIPT:
+            baseline_shift += scaling.baseline_size * text_setting.superscript_position
+        elif style.font_baseline == FontBaseline.SUBSCRIPT:
+            baseline_shift -= scaling.baseline_size * text_setting.subscript_position
+        else:
+            baseline_shift += style.baseline_shift
+
         with self.set_current(paragraph_node):
             tspan = self.create_node(
                 "tspan",
@@ -980,8 +1167,8 @@ class TextConverter(ConverterProtocol):
                 stroke_width=stroke_width,
                 stroke_linejoin=stroke_linejoin,
                 paint_order=paint_order,
-                baseline_shift=style.baseline_shift
-                if style.baseline_shift != 0.0
+                baseline_shift=baseline_shift
+                if abs(baseline_shift) >= NEGLIGIBLE_MARGIN_THRESHOLD
                 else None,
             )
         if style.font_caps == FontCaps.ALL_CAPS:
@@ -1029,21 +1216,9 @@ class TextConverter(ConverterProtocol):
 
         # NOTE: Photoshop uses different values for subscript position/size.
         # Using baseline-shift with sub or super will result in inaccurate rendering.
-        # NOTE: The baseline shift is perpendicular to the writing direction, so it
-        # follows the cross-axis size rather than the emitted font-size.
-        if style.font_baseline == FontBaseline.SUPERSCRIPT:
-            svg_utils.set_attribute(
-                tspan,
-                "baseline-shift",
-                scaling.baseline_size * text_setting.superscript_position,
-            )
-            svg_utils.set_attribute(tspan, "font-size", emitted_font_size)
-        elif style.font_baseline == FontBaseline.SUBSCRIPT:
-            svg_utils.set_attribute(
-                tspan,
-                "baseline-shift",
-                -scaling.baseline_size * text_setting.subscript_position,
-            )
+        # The shift itself is summed into baseline-shift above; only the reduced
+        # size is left to set here.
+        if style.font_baseline in (FontBaseline.SUPERSCRIPT, FontBaseline.SUBSCRIPT):
             svg_utils.set_attribute(tspan, "font-size", emitted_font_size)
 
         # Apply letter spacing from tracking, tsume, and optional global offset
@@ -1215,6 +1390,134 @@ class TextConverter(ConverterProtocol):
         )
         return TextScaling(font_size * inline_scale, baseline_size, transform_scale)
 
+    def _cross_axis_em(self, span: Span, text_setting: TypeSetting) -> float:
+        """Return the size of a span's drawn em box across the writing direction.
+
+        Character alignment measures the em box a run is actually drawn at, so
+        this follows the cross-axis scale and the superscript and subscript
+        reductions alike. A script run is never itself aligned
+        (:meth:`_character_alignment_shift`), but its smaller em box can still
+        be the largest on the line and so become what the others align to.
+        """
+        style = span.style
+        em = self._calculate_text_scaling(
+            style.font_size,
+            style.horizontal_scale,
+            style.vertical_scale,
+            text_setting.writing_direction,
+        ).baseline_size
+        if style.font_baseline == FontBaseline.SUPERSCRIPT:
+            em *= text_setting.superscript_size
+        elif style.font_baseline == FontBaseline.SUBSCRIPT:
+            em *= text_setting.subscript_size
+        return em
+
+    def _alignment_reference_size(
+        self, paragraph: Paragraph, text_setting: TypeSetting
+    ) -> float:
+        """Return the em box size that character alignment aligns a paragraph to.
+
+        Photoshop aligns every run on a line to the largest em box drawn on it,
+        a superscript's reduced one included. Which
+        runs share a line is not known without laying the paragraph out, so the
+        largest in the whole paragraph stands in for it, the same approximation
+        :meth:`_line_box_span` makes. Relative offsets between runs of one line
+        are unaffected by the choice; only a line whose largest run sits on
+        another line is placed as if that run were present.
+
+        A paragraph break draws nothing and carries the default size, so it must
+        not be the run that is measured. A paragraph with nothing else in it
+        aligns nothing, unlike :meth:`_line_box_span`, which still has to name a
+        font for it.
+        """
+        spans = [span for span in paragraph.spans if span.text.strip("\r")]
+        if not spans:
+            return 0.0
+        return max(self._cross_axis_em(span, text_setting) for span in spans)
+
+    def _character_alignment_shift(
+        self, span: Span, text_setting: TypeSetting, reference_size: float | None
+    ) -> float:
+        """Return the cross-axis offset that character alignment gives a span.
+
+        The result is a baseline shift: positive raises the run in horizontal
+        writing and moves it towards the right in vertical writing, which is
+        what both ``baseline-shift`` and the logical CSS inset do.
+
+        Aligning two em boxes by the same fraction of their size moves the
+        smaller run by that fraction of the size difference, less whatever SVG
+        already aligns it by.
+        """
+        # A paragraph break is a run of its own carrying the default size, and
+        # it draws nothing. It is left out of the reference size, so offsetting
+        # it would put an attribute on an invisible <tspan> and keep the
+        # optimizer from merging it away.
+        if reference_size is None or not span.text.strip("\r"):
+            return 0.0
+        # Photoshop does not align a superscript or subscript run, whatever its
+        # size: measured against a run of the same size that is not one, em box
+        # bottom alignment moves it by 3.94px and leaves the script where the
+        # Roman baseline mode puts it.
+        if span.style.font_baseline != FontBaseline.ROMAN:
+            return 0.0
+        fraction = _alignment_em_fraction(
+            span.style.style_run_alignment, text_setting.writing_direction
+        )
+        if fraction is None:
+            return 0.0
+        # A run with no em box has nothing to align, and draws nothing either,
+        # so it must not take the whole reference size as its offset.
+        em = self._cross_axis_em(span, text_setting)
+        if em <= 0.0:
+            return 0.0
+        default = _default_em_fraction(text_setting.writing_direction)
+        return (fraction - default) * (reference_size - em)
+
+    def _warn_on_certain_overflow(
+        self,
+        paragraphs: list[Paragraph],
+        text_setting: TypeSetting,
+        bounds: Rectangle,
+        layer_name: str,
+    ) -> None:
+        """Warn when the text cannot fit its box whatever the browser does.
+
+        Photoshop's line breaking and the browser's do not agree, so text can
+        need more of the block axis than the box holds. Counting every
+        paragraph at a single line gives the least it can occupy: exceeding the
+        box there means the overflow is certain rather than merely possible.
+        The converse - text that only overflows once the browser wraps it -
+        needs the layout this converter does not have, and goes unwarned.
+
+        Args:
+            paragraphs: Paragraphs of the layer, in order.
+            text_setting: TypeSetting object, for the writing direction.
+            bounds: Bounding box the paragraphs are laid out in.
+            layer_name: Name of the layer, to name in the warning.
+        """
+        minimum_extent = _minimum_block_extent(paragraphs)
+        if minimum_extent is None:
+            return
+
+        # vertical-rl advances along x, so the box's block axis is its width.
+        # Paragraph indents are left out: they are physical padding on the <p>,
+        # which in vertical writing adds to the block extent the paragraphs
+        # need, so counting them could only raise the floor, never lower it.
+        if text_setting.writing_direction == WritingDirection.VERTICAL_RL:
+            box_extent = bounds.width
+        else:
+            box_extent = bounds.height
+
+        if minimum_extent > box_extent:
+            logger.warning(
+                "Text layer '%s' needs at least %.2fpx of its %.2fpx box and "
+                "overflows it; the overflow renders outside the box instead of "
+                "being clipped.",
+                layer_name,
+                minimum_extent,
+                box_extent,
+            )
+
     def _get_foreign_object_container_styles(
         self, text_setting: TypeSetting, bounds: Rectangle
     ) -> dict[str, str]:
@@ -1232,7 +1535,18 @@ class TextConverter(ConverterProtocol):
             "height": svg_utils.num2str_with_unit(bounds.height),
             "margin": "0",
             "padding": "0",
-            "overflow": "hidden",  # Match Photoshop clipping behavior
+            # The browser breaks lines where Photoshop does not, so clipping
+            # would drop text that Photoshop draws.
+            #
+            # Visible overflow costs the div its block formatting context, so
+            # the first paragraph's negative start margin now collapses out and
+            # moves the div rather than its contents. Every glyph keeps its
+            # place, since the margin shifts the box and the text with it; only
+            # a background or a border on the container would show the move.
+            # A vertical-rl div keeps a formatting context of its own, its
+            # writing mode differing from the parent's, so nothing collapses
+            # through it there.
+            "overflow": "visible",
             # Ensure padding (from paragraph indents) is included in width/height,
             # not added to it, matching Photoshop's bounding box behavior
             "box-sizing": "border-box",
@@ -1265,22 +1579,27 @@ class TextConverter(ConverterProtocol):
             paragraph, text_setting, first_paragraph, spacing
         )
 
-        # Check if any span in this paragraph needs whitespace preservation
-        needs_preserve = any(
-            _needs_whitespace_preservation(span.text) for span in paragraph
-        )
+        # XHTML layout ignores xml:space; CSS white-space governs it. pre-wrap
+        # rather than pre, since the paragraph still has to wrap.
+        if any(_needs_whitespace_preservation(span.text) for span in paragraph):
+            p_styles["white-space"] = "pre-wrap"
 
         # Create <p> element
         p_elem = svg_utils.create_xhtml_node(
             "p",
             parent=container,
-            xml_space="preserve" if needs_preserve else None,
             style=svg_utils.styles_to_string(p_styles),
         )
 
-        # Add spans
+        # Add spans. The reference size is the same for every span of the
+        # paragraph, so it is computed once here rather than per span.
+        alignment_reference_size = self._alignment_reference_size(
+            paragraph, text_setting
+        )
         for span in paragraph:
-            self._add_foreign_object_span(p_elem, span, text_setting, paragraph)
+            self._add_foreign_object_span(
+                p_elem, span, text_setting, paragraph, alignment_reference_size
+            )
 
     def _foreign_object_font_size(self, span: Span, text_setting: TypeSetting) -> float:
         """Return the font size a span renders at in the foreignObject output.
@@ -1388,9 +1707,9 @@ class TextConverter(ConverterProtocol):
         # each paragraph takes more than its line-height and they drift apart
         # (issue #421). Matched to the span that sets the line box, the strut
         # covers that span's inline box and the line box comes out at the
-        # leading. A paragraph with no text is held open by the empty
-        # inline-block its span becomes, not by the strut: a <p> with no line
-        # box in it has no height, whatever font it names.
+        # leading. A paragraph with no text is not held open at all: its span
+        # becomes an empty inline-block, which measures 0x0 and generates no
+        # line box, so the <p> collapses to nothing whatever font it names.
         strut = self._line_box_span(paragraph, text_setting)
         if strut is not None:
             postscript_name = text_setting.get_postscript_name(strut.style.font)
@@ -1419,10 +1738,10 @@ class TextConverter(ConverterProtocol):
             # largest span stands in for it. That is exact for a paragraph that
             # fits on one line, and too small by half the size difference when
             # the largest span wraps away from the first line.
-            if first_paragraph and paragraph.spans:
-                font_size = max(span.style.font_size for span in paragraph.spans)
-                if leading > font_size:
-                    half_leading_compensation = -(leading - font_size) / 2
+            if first_paragraph:
+                half_leading_compensation = _half_leading_compensation(
+                    paragraph, leading
+                )
 
         # First line indent
         if paragraph.style.first_line_indent != 0:
@@ -1452,8 +1771,8 @@ class TextConverter(ConverterProtocol):
         # break would render as max() where Photoshop renders their sum. Leaving
         # one side unset makes the collapse a no-op. The consequence is that a
         # paragraph's own space_after shows up in the *next* paragraph's style,
-        # and that the last paragraph's space_after is dropped - inert, since the
-        # div has a fixed height and clips.
+        # and that the last paragraph's space_after is dropped - inert, since
+        # nothing follows it in the container.
         total_margin_before = spacing + half_leading_compensation
         if abs(total_margin_before) > NEGLIGIBLE_MARGIN_THRESHOLD:
             styles["margin-block-start"] = svg_utils.num2str_with_unit(
@@ -1492,6 +1811,7 @@ class TextConverter(ConverterProtocol):
         span: Span,
         text_setting: TypeSetting,
         paragraph: Paragraph,
+        alignment_reference_size: float | None = None,
     ) -> None:
         """Add a text span as XHTML <span> element.
 
@@ -1500,10 +1820,13 @@ class TextConverter(ConverterProtocol):
             span: Span object containing text and style.
             text_setting: TypeSetting object for font info lookup.
             paragraph: Parent paragraph object for accessing line-height.
+            alignment_reference_size: Largest em box in the paragraph, which
+                character alignment aligns this span to, or None to leave the
+                span where CSS puts it.
         """
         # Get span CSS styles
         span_styles = self._get_foreign_object_span_styles(
-            span, text_setting, paragraph
+            span, text_setting, paragraph, alignment_reference_size
         )
 
         # Create <span> element
@@ -1531,7 +1854,11 @@ class TextConverter(ConverterProtocol):
             )
 
     def _get_foreign_object_span_styles(
-        self, span: Span, text_setting: TypeSetting, paragraph: Paragraph
+        self,
+        span: Span,
+        text_setting: TypeSetting,
+        paragraph: Paragraph,
+        alignment_reference_size: float | None = None,
     ) -> dict[str, str]:
         """Convert span style settings to CSS styles.
 
@@ -1539,6 +1866,9 @@ class TextConverter(ConverterProtocol):
             span: Span object containing text style information.
             text_setting: TypeSetting object for font info and calculations.
             paragraph: Parent paragraph object for accessing line-height.
+            alignment_reference_size: Largest em box in the paragraph, which
+                character alignment aligns this span to, or None to leave the
+                span where CSS puts it.
 
         Returns:
             Dictionary of CSS property names to values.
@@ -1621,11 +1951,17 @@ class TextConverter(ConverterProtocol):
         # the length the native <text> path shifts the baseline by. It is
         # perpendicular to the writing direction, so it follows the cross-axis
         # size rather than the emitted font-size.
-        baseline_shift = style.baseline_shift
+        # Character alignment moves the run across the writing direction too, so
+        # it is summed in rather than emitted as a second offset.
+        baseline_shift = self._character_alignment_shift(
+            span, text_setting, alignment_reference_size
+        )
         if style.font_baseline == FontBaseline.SUPERSCRIPT:
-            baseline_shift = scaling.baseline_size * text_setting.superscript_position
+            baseline_shift += scaling.baseline_size * text_setting.superscript_position
         elif style.font_baseline == FontBaseline.SUBSCRIPT:
-            baseline_shift = -scaling.baseline_size * text_setting.subscript_position
+            baseline_shift -= scaling.baseline_size * text_setting.subscript_position
+        else:
+            baseline_shift += style.baseline_shift
 
         # A shifted span is offset from where it sits rather than aligned
         # somewhere else: vertical-align grows the line box around the moved
@@ -1634,7 +1970,7 @@ class TextConverter(ConverterProtocol):
         # The offset runs along the block axis, so it is emitted as a logical
         # inset, which points towards the start of that axis and therefore
         # against the shift.
-        if baseline_shift != 0.0:
+        if abs(baseline_shift) >= NEGLIGIBLE_MARGIN_THRESHOLD:
             styles["position"] = "relative"
             styles["inset-block-start"] = svg_utils.num2str_with_unit(-baseline_shift)
 

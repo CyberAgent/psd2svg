@@ -193,7 +193,6 @@ def create_xhtml_node(
     tag: str,
     parent: Optional[ET.Element] = None,
     text: str = "",
-    xml_space: Optional[str] = None,
     **kwargs: Any,
 ) -> ET.Element:
     """Create an XHTML node with proper namespace.
@@ -207,8 +206,6 @@ def create_xhtml_node(
         tag: HTML tag name (e.g., 'div', 'p', 'span').
         parent: Optional parent element to append this node to.
         text: Optional text content.
-        xml_space: Set xml:space attribute with proper XML namespace.
-                  Use "preserve" to preserve whitespace.
         **kwargs: Additional attributes. Underscores in keys are converted
                  to hyphens (e.g., 'font_size' becomes 'font-size').
 
@@ -223,10 +220,6 @@ def create_xhtml_node(
     """
     # Create element with XHTML namespace
     node = ET.Element(f"{{{XHTML_NAMESPACE}}}{tag}")
-
-    # Handle xml:space with proper XML namespace
-    if xml_space is not None:
-        node.set("{http://www.w3.org/XML/1998/namespace}space", xml_space)
 
     # Set attributes
     for key, value in kwargs.items():
@@ -276,6 +269,50 @@ def styles_to_string(styles: dict[str, str]) -> str:
     if not styles:
         return ""
     return "; ".join(f"{key}: {value}" for key, value in styles.items())
+
+
+def _holds_xhtml(element: ET.Element) -> bool:
+    """Whether an element's own content is XHTML rather than SVG.
+
+    A <foreignObject> is an SVG element, but what it holds is an XHTML root,
+    so its content counts as XHTML too.
+    """
+    return is_xhtml_element(element) or any(
+        is_xhtml_element(child) for child in element
+    )
+
+
+def _indent(node: ET.Element, space: str) -> None:
+    """Pretty-print a tree, leaving XHTML content untouched.
+
+    Whitespace between two XHTML elements renders as a space, so indentation
+    inside a <foreignObject> would show up between the spans of a paragraph.
+    The XHTML values are restored rather than stripped afterwards: both text
+    and tail can hold a genuine space, and :func:`ET.indent` overwrites
+    exactly the empty and whitespace-only values that such a space occupies.
+
+    What makes whitespace content is the namespace of the element it sits in,
+    not the namespace of the element it follows: an element's tail belongs to
+    its parent. So an inline <svg> in a paragraph keeps the space after it,
+    and a <foreignObject>'s own tail, which belongs to the SVG around it,
+    stays indented with the rest of the document.
+
+    A space of "" still inserts newlines, so this runs on every output.
+    """
+    texts: list[tuple[ET.Element, str | None]] = []
+    tails: list[tuple[ET.Element, str | None]] = []
+    for parent in node.iter():
+        if not _holds_xhtml(parent):
+            continue
+        texts.append((parent, parent.text))
+        tails.extend((child, child.tail) for child in parent)
+
+    ET.indent(node, space=space)
+
+    for element, text in texts:
+        element.text = text
+    for element, tail in tails:
+        element.tail = tail
 
 
 def _strip_text_element_whitespace(node: ET.Element) -> None:
@@ -420,7 +457,7 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
 
 def tostring(node: ET.Element, indent: str = "  ") -> str:
     """Convert an XML node to a string."""
-    ET.indent(node, space=indent)
+    _indent(node, space=indent)
     _strip_text_element_whitespace(node)
     svg_string = ET.tostring(node, encoding="unicode", xml_declaration=False)
 
@@ -441,11 +478,18 @@ def parse(file: Any) -> ET.Element:
 
 
 def write(node: ET.Element, file: Any, indent: str = "  ") -> None:
-    """Write an XML node to a file."""
-    tree = ET.ElementTree(node)
-    ET.indent(tree, space=indent)
-    _strip_text_element_whitespace(node)
-    tree.write(file, encoding="unicode", xml_declaration=False)
+    """Write an XML node to an open text file or a path.
+
+    The node is serialized through :func:`tostring`, so a written file and a
+    returned string hold the same markup - including the unprefixed XHTML of a
+    ``<foreignObject>``.
+    """
+    svg_string = tostring(node, indent=indent)
+    if hasattr(file, "write"):
+        file.write(svg_string)
+    else:
+        with open(file, "w", encoding="utf-8") as stream:
+            stream.write(svg_string)
 
 
 def add_style(node: ET.Element, key: str, value: Any) -> None:
@@ -1225,7 +1269,9 @@ def merge_offset_siblings(element: ET.Element) -> None:
             i += 1
 
 
-def merge_singleton_children(element: ET.Element) -> None:
+def merge_singleton_children(
+    element: ET.Element, pinned_attributes: set[str] | None = None
+) -> None:
     """Recursively merge singleton child nodes into their parent nodes.
 
     This utility removes redundant wrapper elements when a parent has exactly one child
@@ -1234,6 +1280,12 @@ def merge_singleton_children(element: ET.Element) -> None:
 
     Args:
         element: The XML element to process recursively.
+        pinned_attributes: Set of attribute names bound to the element type
+                 that owns them. A child carrying one is merged only into a
+                 parent of the same tag, which holds it the same way; a parent
+                 of any other tag is left wrapping the child. As with any
+                 merged attribute, a parent that has text of its own comes
+                 under the attribute too.
 
     Example:
         Before: <text><tspan>Hello</tspan></text>
@@ -1250,14 +1302,29 @@ def merge_singleton_children(element: ET.Element) -> None:
         Before: <text><tspan><tspan>A</tspan><tspan>B</tspan></tspan></text>
         After:  <text><tspan><tspan>A</tspan><tspan>B</tspan></tspan></text>
                 (unchanged)
+
+        Not merged into another tag (pinned_attributes={"baseline-shift"}):
+        Before: <text><tspan baseline-shift="16">Text</tspan></text>
+        After:  <text><tspan baseline-shift="16">Text</tspan></text>  (unchanged)
+
+        Still merged into the same tag (pinned_attributes={"baseline-shift"}):
+        Before: <tspan x="10"><tspan baseline-shift="16">Text</tspan></tspan>
+        After:  <tspan x="10" baseline-shift="16">Text</tspan>
     """
     # First, recursively process all children
     for child in list(element):
-        merge_singleton_children(child)
+        merge_singleton_children(child, pinned_attributes)
 
     # Merge singleton child if present (checking AFTER recursion)
     if len(element) == 1:
         child = element[0]
+
+        if (
+            pinned_attributes
+            and element.tag != child.tag
+            and pinned_attributes.intersection(child.attrib)
+        ):
+            return  # A pinned attribute cannot move to a parent of another tag
 
         # If the child has its own children, we can still optimize by
         # "unwrapping" it: move the grandchildren up to be direct children of

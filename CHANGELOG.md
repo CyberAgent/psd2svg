@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`PlaywrightRasterizer` launch options, timeout, and `restart()`** (#458)
+  - New `launch_args`, `launch_kwargs`, and `timeout` parameters; a failed render or dead browser is discarded and relaunched on the next call.
+
+- **`crop_layers_to_canvas` option to cap layer memory use** (#454)
+  - Opt-in; crops each layer's rasterized image to the canvas before
+    embedding it, so a layer whose bounding box extends far beyond the
+    canvas (e.g. a Smart Object placed at a fraction of its native
+    resolution) no longer holds and encodes its full, mostly invisible,
+    pixel data. Skipped for layers with effects. Off by default: for a
+    layer with a non-normal blend mode, cropping has been observed to
+    shift resvg's already-approximate mix-blend-mode rendering.
+
+### Fixed
+
+- **Faces sharing one TTC/OTC collection are embedded separately** (#461)
+  - Named instances of a variable font are embedded pinned to their axis
+    coordinates rather than as the default instance
+
+- **numpy has a minimum version for each supported Python** (#460)
+  - `numpy>=1.26.0` below Python 3.13, `>=2.1.0` on 3.13, `>=2.3.2` on 3.14
+
+## [0.13.0] - 2026-09-28
+
+### Added
+
+- **Photoshop character alignment for mixed-size text runs** (#444)
+  - `StyleRunAlignment` 0, 2, 3 and 5 align runs by the em box or the Roman
+    baseline; not yet applied to the ideographic character face (1 and 4), nor
+    to bounding box text outside the `<foreignObject>` text wrapping mode
+
+- **Hidden layers can be included in SVG output** (#423)
+  - Pass `include_hidden_layers=True` or use `--include-hidden-layers` to
+    convert layers that Photoshop marks as hidden
+
 - **`rasterize()` accepts `image_format`** (#403)
   - Matches `tostring()`, `save()` and `export()`; pass `"png"` for images
     beyond WebP's 16383px limit
@@ -28,11 +62,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The helper had no callers and wrote an inert `font-family` attribute on
     XHTML elements
 
+- **Removed the stale `psd2svg.version` module** (#452)
+  - It reported `0.3.0` regardless of the installed release; read the version
+    from `importlib.metadata.version("psd2svg")`
+
 ### Fixed
 
-- **Faces sharing one TTC/OTC collection are embedded separately** (#461)
-  - Named instances of a variable font are embedded pinned to their axis
-    coordinates rather than as the default instance
+- **foreignObject text was silently clipped when it did not fit its box** (#450)
+  - The overflow now renders outside the box, and a layer that cannot fit
+    however it wraps warns at conversion time
+
+- **A lone text run lost its baseline shift** (#446)
+  - The optimizer merged the run into the `<text>` element, where resvg ignores
+    `baseline-shift`; the shift now stays on the `<tspan>` that owns it
+
+- **`save()` wrote `html:`-prefixed XHTML** (#437)
+  - A saved file now holds the same markup `tostring()` returns, so Chromium
+    applies `<foreignObject>` paragraph spacing instead of ignoring it
+
+- **foreignObject text keeps leading and repeated spaces** (#441)
+  - Paragraphs that need it now carry `white-space: pre-wrap`
+
+- **`dpi` had no effect with the default rasterizer** (#431)
+  - `ResvgRasterizer` now scales by `dpi / 96` as `PlaywrightRasterizer` does,
+    so `rasterize(dpi=300)` returns 9.8x the pixels it used to
+
+- **`ResvgRasterizer(dpi=0)` dropped elements sized in physical units** (#431)
+
+- **`PlaywrightRasterizer` mis-sized documents in physical units** (#431)
+  - `pt`, `mm` and `in` on the root now resolve as CSS lengths instead of
+    being read as pixels or ignored
+
+- **foreignObject spans were separated by a space** (#432)
+  - The serializer no longer indents the XHTML inside a `<foreignObject>`, so a
+    word split across two style runs renders as one word
 
 - **foreignObject paragraphs were taller than their leading** (#425)
   - Each `<p>` now names the font of its tallest span, so a paragraph whose
@@ -128,6 +191,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Divide and Subtract blend modes rendered as `difference`, inverting colors** (#339)
   - Divide, Subtract, Linear Burn and Linear Dodge are now exact on Color,
     Gradient and Pattern Overlay effects
+
+### Dependencies
+
+- Dependency and CI action bumps (psd-tools, github/codeql-action)
 
 ## [0.12.1] - 2026-09-14
 
@@ -479,7 +546,8 @@ See [limitations.rst](https://psd2svg.readthedocs.io/en/latest/limitations.html)
 
 Previous releases - see git history for details.
 
-[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/CyberAgent/psd2svg/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/CyberAgent/psd2svg/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/CyberAgent/psd2svg/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/CyberAgent/psd2svg/compare/v0.10.1...v0.11.0

@@ -58,6 +58,15 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev -p ${{ matrix.python-version }}
 
+      # Exercise the optional browser rasterizer on one supported Python
+      # version. Keep the browser executable installation explicit: importing
+      # Playwright alone is not enough to run these tests.
+      - name: Install browser test dependencies
+        if: matrix.python-version == '3.13'
+        run: |
+          uv sync --group dev --extra browser -p ${{ matrix.python-version }}
+          uv run playwright install --with-deps chromium
+
       - name: Run linting
         run: uv run ruff check src/ tests/
 

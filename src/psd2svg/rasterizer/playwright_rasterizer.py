@@ -9,7 +9,7 @@ import asyncio
 import concurrent.futures
 import logging
 import math
-import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Literal, Union
 
@@ -80,6 +80,9 @@ class PlaywrightRasterizer(BaseRasterizer):
         self,
         dpi: int = 96,
         browser_type: Literal["chromium", "firefox", "webkit"] = "chromium",
+        launch_args: Sequence[str] | None = None,
+        launch_kwargs: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> None:
         """Initialize the Playwright rasterizer.
 
@@ -93,13 +96,31 @@ class PlaywrightRasterizer(BaseRasterizer):
                 - "firefox": Good compatibility
                 - "webkit": Safari engine
                 Default is "chromium".
+            launch_args: Extra command-line arguments for the browser, for
+                example ``["--disable-dev-shm-usage", "--disable-gpu"]``.
+            launch_kwargs: Extra keyword arguments for Playwright's
+                ``launch()``, for example ``timeout`` or ``env``. ``args`` is
+                set by ``launch_args``, and ``headless`` is always True.
+            timeout: Timeout in milliseconds for loading and screenshotting a
+                page. ``None`` keeps Playwright's default (30 s).
+
+        Raises:
+            ValueError: If ``launch_kwargs`` contains ``args`` or ``headless``.
         """
         self.dpi = dpi
         self.browser_type = browser_type
+        self.launch_args = list(launch_args) if launch_args else []
+        self.launch_kwargs = dict(launch_kwargs or {})
+        self.timeout = timeout
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._executor: Any = None  # ThreadPoolExecutor if running in event loop
         self._in_event_loop = False
+        if launch_kwargs and {"args", "headless"} & launch_kwargs.keys():
+            raise ValueError(
+                "launch_kwargs must not contain 'args' or 'headless'; "
+                "use launch_args for args"
+            )
 
     def _ensure_browser(self) -> None:
         """Lazily initialize the browser instance.
@@ -127,17 +148,21 @@ class PlaywrightRasterizer(BaseRasterizer):
         # Check if we're in an asyncio event loop (e.g., Jupyter notebook)
         try:
             asyncio.get_running_loop()
-            # We're inside an event loop - need to run sync code in a dedicated thread
+            in_loop = True
+        except RuntimeError:
+            in_loop = False
+
+        self._in_event_loop = in_loop
+        if in_loop:
+            # Run sync code in a dedicated thread
             logger.debug(
                 f"Starting Playwright with {self.browser_type} browser "
                 "(running in dedicated thread due to existing event loop)"
             )
-            self._in_event_loop = True
-            self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            future = self._executor.submit(self._start_browser_sync)
-            future.result()
-        except RuntimeError:
-            # No event loop running - we can use sync API directly
+            if self._executor is None:
+                self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            self._executor.submit(self._start_browser_sync).result()
+        else:
             logger.debug(f"Starting Playwright with {self.browser_type} browser")
             self._start_browser_sync()
 
@@ -147,8 +172,14 @@ class PlaywrightRasterizer(BaseRasterizer):
         from playwright.sync_api import sync_playwright  # noqa: PLC0415
 
         self._playwright = sync_playwright().start()
-        browser_launcher = getattr(self._playwright, self.browser_type)
-        self._browser = browser_launcher.launch(headless=True)
+        try:
+            browser_launcher = getattr(self._playwright, self.browser_type)
+            self._browser = browser_launcher.launch(
+                headless=True, args=self.launch_args, **self.launch_kwargs
+            )
+        except BaseException:
+            self._discard_browser_sync()
+            raise
 
     def from_file(self, filepath: str) -> Image.Image:
         """Rasterize an SVG file to a PIL Image.
@@ -203,7 +234,20 @@ class PlaywrightRasterizer(BaseRasterizer):
         )
 
         # Parse SVG to get dimensions
-        dimensions = self._get_svg_dimensions(svg_str)
+        root = self._svg_root(svg_str)
+        dimensions = None if root is None else self._root_dimensions(root)
+        if root is None or dimensions is None:
+            raise ValueError("Could not determine SVG dimensions")
+        css_width, css_height = dimensions
+
+        # A root that sizes itself keeps that size, so an explicit zero still
+        # renders nothing. Only a relative or missing size is resolved here,
+        # where the page would otherwise resolve it a second time.
+        root_size_css = (
+            ""
+            if self._root_keeps_own_size(root)
+            else f"width: {css_width}px; height: {css_height}px;"
+        )
 
         # The viewport holds the document's CSS size, rounded up so a
         # fractional document is not clipped; DPI scaling comes from
@@ -211,17 +255,29 @@ class PlaywrightRasterizer(BaseRasterizer):
         # Both are passed to new_page(): set_viewport_size() takes no timeout
         # and can hang, and device_scale_factor is creation-only.
         viewport: ViewportSize = {
-            "width": math.ceil(dimensions["width"]),
-            "height": math.ceil(dimensions["height"]),
+            "width": math.ceil(css_width),
+            "height": math.ceil(css_height),
         }
 
-        # Create page and set content
+        # A crashed or disconnected browser never recovers; relaunch it.
+        if self._browser is None or not self._browser.is_connected():
+            self._discard_browser_sync()
+            self._start_browser_sync()
         assert self._browser is not None
-        page = self._browser.new_page(
-            viewport=viewport,
-            device_scale_factor=self.dpi / 96.0 if self.dpi > 0 else 1.0,
-        )
 
+        # Create page and set content
+        try:
+            page = self._browser.new_page(
+                viewport=viewport,
+                device_scale_factor=self._dpi_scale(self.dpi),
+            )
+            if self.timeout is not None:
+                page.set_default_timeout(self.timeout)
+        except Exception:
+            self._discard_browser_sync()
+            raise
+
+        failed = True
         try:
             # Embed SVG in minimal HTML
             html = f"""<!DOCTYPE html>
@@ -232,11 +288,13 @@ class PlaywrightRasterizer(BaseRasterizer):
         body {{
             margin: 0;
             padding: 0;
-            width: {dimensions["width"]}px;
-            height: {dimensions["height"]}px;
+            width: {css_width}px;
+            height: {css_height}px;
         }}
-        svg {{
+        /* Only the root: a nested <svg> is sized by the document. */
+        body > svg {{
             display: block;
+            {root_size_css}
         }}
     </style>
 </head>
@@ -257,69 +315,32 @@ class PlaywrightRasterizer(BaseRasterizer):
             if pil_image.mode != "RGBA":
                 pil_image = pil_image.convert("RGBA")
 
-            return self._composite_background(pil_image)
+            result = self._composite_background(pil_image)
+            failed = False
+            return result
 
         finally:
-            page.close()
+            # A wedged browser can block page.close() forever, so after a
+            # failure drop the whole browser instead; the next call relaunches.
+            if failed:
+                self._discard_browser_sync()
+            else:
+                try:
+                    page.close()
+                except Exception:
+                    logger.warning("page.close() failed; discarding browser")
+                    self._discard_browser_sync()
 
-    def _get_svg_dimensions(self, svg_content: str) -> dict[str, float]:
-        """Extract width and height from SVG content.
+    def restart(self) -> None:
+        """Discard the browser; the next rasterization launches a fresh one.
 
-        Args:
-            svg_content: SVG content as string.
-
-        Returns:
-            Dictionary with 'width' and 'height' keys in pixels.
-
-        Raises:
-            ValueError: If SVG dimensions cannot be determined.
+        Call it between rasterizations; calling it while another call is in
+        flight is unsupported.
         """
-        try:
-            root = ET.fromstring(svg_content)
-
-            # Try to get width and height attributes
-            width_str = root.get("width", "")
-            height_str = root.get("height", "")
-
-            # Parse dimensions (assuming px units or unitless)
-            width = self._parse_dimension(width_str)
-            height = self._parse_dimension(height_str)
-
-            if width and height:
-                return {"width": width, "height": height}
-
-            # Fall back to viewBox if width/height not specified
-            viewbox = root.get("viewBox", "")
-            if viewbox:
-                parts = viewbox.split()
-                if len(parts) == 4:
-                    return {"width": float(parts[2]), "height": float(parts[3])}
-
-            raise ValueError("Could not determine SVG dimensions")
-
-        except ET.ParseError as e:
-            raise ValueError("Could not determine SVG dimensions") from e
-
-    def _parse_dimension(self, value: str) -> float | None:
-        """Parse dimension value from SVG attribute.
-
-        Args:
-            value: Dimension string (e.g., "100", "100px", "10cm").
-
-        Returns:
-            Dimension in pixels, or None if parsing fails.
-        """
-        if not value:
-            return None
-
-        # Remove common units (assuming px or unitless)
-        value = value.strip().lower()
-        value = value.replace("px", "").replace("pt", "").strip()
-
-        try:
-            return float(value)
-        except ValueError:
-            return None
+        if self._in_event_loop and self._executor is not None:
+            self._executor.submit(self._discard_browser_sync).result()
+        else:
+            self._discard_browser_sync()
 
     def close(self) -> None:
         """Close the browser and cleanup resources.
@@ -329,25 +350,42 @@ class PlaywrightRasterizer(BaseRasterizer):
         interface (with statement) for automatic cleanup.
         """
         # If running in event loop, cleanup must happen in the same thread
-        if self._in_event_loop and self._executor is not None:
-            future = self._executor.submit(self._close_sync)
-            future.result()
-            # Shutdown executor
-            self._executor.shutdown(wait=True)
-            self._executor = None
-        else:
-            self._close_sync()
+        try:
+            if self._in_event_loop and self._executor is not None:
+                self._executor.submit(self._close_sync).result()
+            else:
+                self._close_sync()
+        finally:
+            if self._executor is not None:
+                self._executor.shutdown(wait=True)
+                self._executor = None
 
     def _close_sync(self) -> None:
         """Internal synchronous cleanup method (runs in thread if needed)."""
-        if self._browser is not None:
-            logger.debug("Closing Playwright browser")
-            self._browser.close()
+        try:
+            if self._browser is not None:
+                logger.debug("Closing Playwright browser")
+                self._browser.close()
+        finally:
             self._browser = None
+            if self._playwright is not None:
+                self._playwright.stop()
+                self._playwright = None
 
-        if self._playwright is not None:
-            self._playwright.stop()
-            self._playwright = None
+    def _discard_browser_sync(self) -> None:
+        """Best-effort teardown of a possibly dead browser.
+
+        Stopping the driver reaps a browser that no longer answers, where
+        ``browser.close()`` would block on it.
+        """
+        self._browser = None
+        playwright, self._playwright = self._playwright, None
+        logger.debug("Discarding Playwright browser")
+        if playwright is not None:
+            try:
+                playwright.stop()
+            except Exception:
+                logger.debug("Ignoring error during driver stop", exc_info=True)
 
     def __enter__(self) -> "PlaywrightRasterizer":
         """Enter context manager."""

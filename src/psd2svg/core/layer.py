@@ -3,6 +3,7 @@ import logging
 from typing import Callable, Iterator
 from xml.etree import ElementTree as ET
 
+from PIL import Image
 from psd_tools import PSDImage
 from psd_tools.api import adjustments, layers
 from psd_tools.constants import BlendMode, Tag
@@ -27,8 +28,7 @@ class LayerConverter(ConverterProtocol):
             depth: Current nesting depth (for resource limit checking).
             attrib: Additional attributes to set on the created node.
         """
-        if not layer.is_visible():
-            # TODO: Option to include hidden layers.
+        if not self.include_hidden_layers and not layer.is_visible():
             logger.debug(f"Layer '{layer.name}' ({layer.kind}) is invisible, skipping.")
             return None
         logger.debug(f"Adding layer: '{layer.name}' ({layer.kind})")
@@ -108,7 +108,7 @@ class LayerConverter(ConverterProtocol):
                 id=self.auto_id("group"),
                 **attrib,  # type: ignore[arg-type]
             )
-            with self.set_current(node):
+            with self.set_current(node), self._track_effects_ancestor(layer):
                 self.add_children(layer, depth=depth + 1)
 
             self.set_opacity(layer.opacity / 255, node)
@@ -130,7 +130,7 @@ class LayerConverter(ConverterProtocol):
             id=self.auto_id("group") if layer.has_effects() else None,
             **attrib,  # type: ignore[arg-type]
         )
-        with self.set_current(node):
+        with self.set_current(node), self._track_effects_ancestor(layer):
             self.add_children(layer, depth=depth + 1)
 
         self.apply_background_effects(layer, node, insert_before_target=True)
@@ -141,6 +141,24 @@ class LayerConverter(ConverterProtocol):
         self.set_layer_attributes(layer, node)
         node = self.apply_mask(layer, node)
         return node
+
+    @contextlib.contextmanager
+    def _track_effects_ancestor(
+        self, layer: layers.Group | layers.Layer
+    ) -> Iterator[None]:
+        """Track descent beneath a group with active effects.
+
+        A group's effects (e.g. a drop shadow) consume the composited alpha
+        of its children, so crop_layers_to_canvas must not crop a layer
+        beneath one, even if that layer has no effects of its own.
+        """
+        if layer.has_effects():
+            self._effects_ancestor_depth += 1
+        try:
+            yield
+        finally:
+            if layer.has_effects():
+                self._effects_ancestor_depth -= 1
 
     def add_children(
         self, group: layers.Group | layers.Artboard | PSDImage, depth: int = 0
@@ -165,10 +183,12 @@ class LayerConverter(ConverterProtocol):
                 )
 
         for layer in group:
-            if layer.clipping or not layer.is_visible():
+            if layer.clipping or (
+                not self.include_hidden_layers and not layer.is_visible()
+            ):
                 continue
 
-            if layer.has_clip_layers(visible=True):
+            if layer.has_clip_layers(visible=not self.include_hidden_layers):
                 with self.add_clipping_target(layer, depth=depth) as attrib:
                     for clip_layer in layer.clip_layers:
                         self.add_layer(clip_layer, depth=depth + 1, **attrib)
@@ -186,7 +206,9 @@ class LayerConverter(ConverterProtocol):
             )
             return None
 
-        # Validate image dimensions before decoding the layer.
+        # Checked pre-decode against the full, pre-crop size: topil() always
+        # decodes the full bbox, so crop_layers_to_canvas can't rescue an
+        # oversized layer here, only reduce memory held after decoding.
         description = f"Layer '{layer.name}'"
         self.check_image_dimension(layer.width, layer.height, description=description)
 
@@ -198,23 +220,54 @@ class LayerConverter(ConverterProtocol):
             )
             return None
 
-        # Generate image ID before creating the <image> element
-        image_id = self.register_image(image.convert("RGBA"), description=description)
+        left, top, width, height = layer.left, layer.top, layer.width, layer.height
+        has_separate_fill = self.has_separate_fill(layer)
+        is_offcanvas = False
+        if (
+            self.crop_layers_to_canvas
+            and not layer.has_effects()
+            and self._effects_ancestor_depth == 0
+        ):
+            # has_effects() is checked directly rather than
+            # has_separate_fill(), which also returns False for an
+            # Artboard/AdjustmentLayer regardless of has_effects() - that
+            # distinction is for node structure below, not crop safety.
+            cropped = self._crop_to_canvas(image, left, top, width, height)
+            if cropped is None:
+                # add_clipping_target() requires a node even for an empty
+                # base; a zero-size placeholder renders nothing, same as an
+                # uncropped off-canvas layer would have.
+                logger.debug(
+                    f"Layer bbox is entirely outside the canvas: "
+                    f"'{layer.name}' ({layer.kind})."
+                )
+                is_offcanvas = True
+                left, top, width, height = 0, 0, 0, 0
+            else:
+                image, left, top, width, height = cropped
+
+        # Off-canvas: no image content, and the placeholder below is a
+        # <rect>, not an <image>.
+        image_id = (
+            None
+            if is_offcanvas
+            else self.register_image(image.convert("RGBA"), description=description)
+        )
 
         # Raster layers can have both fill opacity and overall opacity.
         fill_opacity = layer.tagged_blocks.get_data(Tag.BLEND_FILL_OPACITY, 255)
 
         # When the layer has effects, we need to create a separate <image>
         # to handle fill opacity.
-        if self.has_separate_fill(layer):
+        if has_separate_fill:
             defs = self.create_node("defs")
             node = self.create_node(
                 "image",
                 parent=defs,
-                x=layer.left,
-                y=layer.top,
-                width=layer.width,
-                height=layer.height,
+                x=left,
+                y=top,
+                width=width,
+                height=height,
                 title=layer.name,
                 class_=layer.kind,
                 id=image_id,
@@ -229,12 +282,12 @@ class LayerConverter(ConverterProtocol):
             self.apply_stroke_effect(layer, node)
         else:
             node = self.create_node(
-                "image",
+                "rect" if is_offcanvas else "image",
                 id=image_id,
-                x=layer.left,
-                y=layer.top,
-                width=layer.width,
-                height=layer.height,
+                x=left,
+                y=top,
+                width=width,
+                height=height,
                 title=layer.name,
                 class_=layer.kind,
                 **attrib,  # type: ignore[arg-type]
@@ -244,6 +297,39 @@ class LayerConverter(ConverterProtocol):
             self.set_layer_attributes(layer, node)
             node = self.apply_mask(layer, node)
         return node
+
+    def _crop_to_canvas(
+        self, image: Image.Image, left: int, top: int, width: int, height: int
+    ) -> tuple[Image.Image, int, int, int, int] | None:
+        """Crop a layer's image to the intersection of its bbox and the canvas.
+
+        Returns the cropped image with its new (left, top, width, height), or
+        None if the bbox lies entirely outside the canvas.
+        """
+        canvas_width, canvas_height = self.psd.width, self.psd.height
+        crop_left = max(left, 0)
+        crop_top = max(top, 0)
+        crop_right = min(left + width, canvas_width)
+        crop_bottom = min(top + height, canvas_height)
+        if crop_right <= crop_left or crop_bottom <= crop_top:
+            return None
+        if (crop_left, crop_top, crop_right, crop_bottom) == (
+            left,
+            top,
+            left + width,
+            top + height,
+        ):
+            return image, left, top, width, height
+        cropped = image.crop(
+            (crop_left - left, crop_top - top, crop_right - left, crop_bottom - top)
+        )
+        return (
+            cropped,
+            crop_left,
+            crop_top,
+            crop_right - crop_left,
+            crop_bottom - crop_top,
+        )
 
     def add_shape(
         self, layer: layers.ShapeLayer, depth: int = 0, **attrib: str
@@ -646,8 +732,12 @@ class LayerConverter(ConverterProtocol):
         if "clip-path" in target.attrib:
             context["clip-path"] = target.attrib.pop("clip-path")
 
-        # Viewbox for the mask. If the mask is empty, use the full canvas.
-        viewbox = layer.bbox
+        # Viewbox for the mask. Group.bbox excludes invisible children, so include
+        # them when they are also emitted in the SVG.
+        if self.include_hidden_layers and isinstance(layer, layers.Group):
+            viewbox = layers.Group.extract_bbox(layer, include_invisible=True)
+        else:
+            viewbox = layer.bbox
         if viewbox == (0, 0, 0, 0):
             viewbox = (0, 0, self.psd.width, self.psd.height)
 

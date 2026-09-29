@@ -348,6 +348,19 @@ class TestSVGDocumentImageHandling:
         svg_arg = mock_from_string.call_args[0][0]
         assert f"data:{mime_type};base64," in svg_arg
 
+    @pytest.mark.parametrize(
+        ("dpi", "expected"),
+        [(0, (32, 16)), (96, (32, 16)), (192, (64, 32)), (300, (100, 50))],
+    )
+    def test_rasterize_dpi(self, dpi: int, expected: tuple[int, int]) -> None:
+        """Test rasterize() scales the output with the default rasterizer."""
+        svg_elem = ET.Element("svg", width="32", height="16", viewBox="0 0 32 16")
+        ET.SubElement(svg_elem, "rect", width="32", height="16", fill="red")
+
+        document = SVGDocument(svg=svg_elem)
+
+        assert document.rasterize(dpi=dpi).size == expected
+
     def test_handle_images_empty_document(self) -> None:
         """Test _handle_images() returns early when no images present."""
         svg_elem = ET.Element("svg")
@@ -907,6 +920,34 @@ class TestSVGDocumentEmbedFonts:
             assert element.get("font-weight") == "700"
             assert element.get("font-style") == "italic"
             assert "font-weight" not in element.get("style", "")
+
+
+class TestSVGDocumentSaveOutput:
+    """Tests that save() writes the same markup tostring() returns."""
+
+    def test_save_matches_tostring_for_foreignobject(self, tmp_path: Path) -> None:
+        """A saved file holds the same XHTML the string form does.
+
+        Chromium ignores margin-block-start on an html:-prefixed element, so a
+        saved document would lose the paragraph strut compensation. See GitHub
+        issue #433.
+        """
+        psdimage = PSDImage.open(
+            get_fixture("texts/paragraph-shapetype1-justification0.psd")
+        )
+        doc = SVGDocument.from_psd(
+            psdimage,
+            text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT,
+        )
+        destination = tmp_path / "out.svg"
+
+        doc.save(str(destination))
+
+        saved = destination.read_text(encoding="utf-8")
+        assert saved == doc.tostring()
+        assert "html:" not in saved, saved
+        assert 'xmlns="http://www.w3.org/1999/xhtml"' in saved, saved
+        assert "margin-block-start" in saved, saved
 
 
 class TestSVGDocumentRasterizeWithFonts:

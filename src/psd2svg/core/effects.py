@@ -546,7 +546,7 @@ class EffectConverter(ConverterProtocol):
         # When gradient is aligned to layer bounds (Aligned=True), use objectBoundingBox
         # coordinates for the filter. Otherwise use userSpaceOnUse.
         # Note: The key is b'Algn', not Key.Aligned (which is b'Algd')
-        aligned = bool(effect.value.get(b"Algn", False))
+        aligned = bool(effect.descriptor.get(b"Algn", False))
         filter_attrs = {"id": self.auto_id("gradientoverlay")}
 
         if aligned:
@@ -610,7 +610,7 @@ class EffectConverter(ConverterProtocol):
         """Set gradient transformations based on the effect properties."""
         transforms = []
         # Note: The key is b'Algn', not Key.Aligned (which is b'Algd')
-        aligned = bool(effect.value.get(b"Algn", False))
+        aligned = bool(effect.descriptor.get(b"Algn", False))
         if aligned:
             # Gradient aligned to layer bounds.
             landscape = layer.width >= layer.height
@@ -667,7 +667,9 @@ class EffectConverter(ConverterProtocol):
             transforms.append(f"rotate({svg_utils.num2str(angle)})")
 
         scale = float(
-            effect.value.get(Key.Scale, UnitFloat(unit=Unit.Percent, value=100.0)).value
+            effect.descriptor.get(
+                Key.Scale, UnitFloat(unit=Unit.Percent, value=100.0)
+            ).value
         )
         if scale != 100:
             if landscape:
@@ -685,8 +687,8 @@ class EffectConverter(ConverterProtocol):
                 gradient, "gradientTransform", transforms, reference
             )
 
-        if b"gs99" in effect.value:
-            method = effect.value[b"gs99"]
+        if b"gs99" in effect.descriptor:
+            method = effect.descriptor[b"gs99"]
             if method.enum == Enum.Perceptual:
                 logger.info("Perceptual gradient interpolation is not accurate.")
             elif method.enum == Enum.Linear:
@@ -808,7 +810,9 @@ class EffectConverter(ConverterProtocol):
 
         # Scale and rotation (applied after translations)
         scale = float(
-            effect.value.get(Key.Scale, UnitFloat(unit=Unit.Percent, value=100.0)).value
+            effect.descriptor.get(
+                Key.Scale, UnitFloat(unit=Unit.Percent, value=100.0)
+            ).value
         )
         if scale != 100.0:
             svg_utils.append_attribute(
@@ -818,7 +822,9 @@ class EffectConverter(ConverterProtocol):
             )
 
         angle = -float(
-            effect.value.get(Key.Angle, UnitFloat(unit=Unit.Angle, value=0.0)).value
+            effect.descriptor.get(
+                Key.Angle, UnitFloat(unit=Unit.Angle, value=0.0)
+            ).value
         )
         if angle != 0.0:
             svg_utils.append_attribute(
