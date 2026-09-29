@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`PlaywrightRasterizer` launch options, timeout, and `restart()`** (#PR)
+  - New `launch_args`, `launch_kwargs`, and `timeout` parameters; a failed render or dead browser is discarded and relaunched on the next call.
+
 - **`crop_layers_to_canvas` option to cap layer memory use** (#454)
   - Opt-in; crops each layer's rasterized image to the canvas before
     embedding it, so a layer whose bounding box extends far beyond the

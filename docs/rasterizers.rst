@@ -275,6 +275,21 @@ Basic Usage
        image = rasterizer.from_file('input.svg')
        image.save('output.png')
 
+Launch Options and Recovery
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   with PlaywrightRasterizer(
+       launch_args=["--disable-dev-shm-usage", "--disable-gpu"],
+       timeout=120_000,  # milliseconds
+   ) as rasterizer:
+       image = rasterizer.from_file('large.svg')
+
+A failed render, or a crashed or disconnected browser, is discarded and the next
+call launches a fresh browser. Discarding a wedged browser can take up to 30
+seconds. Call ``restart()`` to recycle the browser after abandoning a call.
+
 With SVGDocument
 ~~~~~~~~~~~~~~~~
 
@@ -342,6 +357,9 @@ API Reference
            self,
            dpi: int = 96,
            browser_type: Literal["chromium", "firefox", "webkit"] = "chromium",
+           launch_args: Sequence[str] | None = None,
+           launch_kwargs: dict[str, Any] | None = None,
+           timeout: float | None = None,
        ) -> None:
            """Initialize the Playwright rasterizer.
 
@@ -350,7 +368,13 @@ API Reference
                    means 96 DPI. Higher values produce larger, higher
                    resolution images.
                browser_type: Browser engine to use. Default is "chromium".
+               launch_args: Extra browser command-line arguments.
+               launch_kwargs: Extra keyword arguments for Playwright's launch().
+               timeout: Page timeout in milliseconds. Default is Playwright's.
            """
+
+       def restart(self) -> None:
+           """Discard the browser; the next call launches a fresh one."""
 
        def __enter__(self) -> PlaywrightRasterizer:
            """Enter context manager - starts browser."""
