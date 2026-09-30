@@ -1,12 +1,18 @@
 """Tests for font subsetting functionality."""
 
+import base64
+import io
+import re
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from fontTools.ttLib import TTFont
 from psd_tools import PSDImage
 
+import psd2svg.__main__ as cli
 from psd2svg import SVGDocument
 from psd2svg.core.font_utils import (
     FontInfo,
@@ -21,7 +27,12 @@ from psd2svg.font_subsetting import (
     extract_used_unicode,
     subset_font,
 )
-from tests.conftest import get_fixture, requires_arial, requires_noto_sans_jp
+from tests.conftest import (
+    get_fixture,
+    requires_arial,
+    requires_hiragino_mincho_collection,
+    requires_noto_sans_jp,
+)
 
 
 class TestUnicodeExtraction:
@@ -552,3 +563,34 @@ class TestFontUtilsExtensions:
 
         assert first != second
         assert mock_subset.call_count == 2
+
+
+@requires_hiragino_mincho_collection
+def test_cli_embeds_each_face_of_a_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W3 and W6 from one Hiragino TTC are embedded as their own faces (#373)."""
+    output = tmp_path / "output.svg"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "psd2svg",
+            get_fixture("texts/fonts-hiragino-mincho-pron-w3-w6.psd"),
+            str(output),
+            "--embed-fonts",
+        ],
+    )
+
+    cli.main()
+
+    rules = re.findall(r"@font-face\s*{([^}]*)}", output.read_text())
+    embedded = {}
+    for rule in rules:
+        weight = re.search(r"font-weight:\s*(\d+)", rule)
+        data = re.search(r"base64,([A-Za-z0-9+/=]+)", rule)
+        assert weight and data
+        font = TTFont(io.BytesIO(base64.b64decode(data.group(1))))
+        embedded[font["name"].getDebugName(6)] = int(weight.group(1))
+
+    assert embedded == {"HiraMinProN-W3": 300, "HiraMinProN-W6": 600}
