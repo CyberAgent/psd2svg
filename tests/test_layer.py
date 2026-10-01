@@ -20,6 +20,38 @@ def build_svg(psd_file: str, optimize: bool = False) -> ET.Element:
     return ET.fromstring(document.tostring(optimize=optimize))
 
 
+class TestArtboardBackground:
+    """Test that an artboard paints its background behind its content."""
+
+    @pytest.mark.parametrize("optimize", [False, True])
+    def test_background_rect_per_type(self, optimize: bool) -> None:
+        """Test white, black, transparent and custom color backgrounds.
+
+        The artboards are, in order, white, black, transparent and custom. Photoshop
+        stores white in the color of every type but custom, so black must come
+        from the background type.
+        """
+        svg = build_svg("layer-types/artboard-background.psd", optimize)
+        fills = [
+            [
+                (r.get("x"), r.get("y"), r.get("width"), r.get("height"), r.get("fill"))
+                for r in artboard.findall(f"{SVG_NS}rect")
+            ]
+            for artboard in svg.findall(f"{SVG_NS}svg")
+        ]
+        assert fills == [
+            [("0", "0", "100", "100", "#ffffff")],
+            [("120", "0", "100", "100", "#000000")],
+            [],
+            [("360", "0", "100", "100", "#9c190f")],
+        ]
+        # The background sits behind the content.
+        for artboard in svg.findall(f"{SVG_NS}svg"):
+            tags = [child.tag for child in artboard]
+            if f"{SVG_NS}rect" in tags:
+                assert tags[0] == f"{SVG_NS}rect"
+
+
 class TestGroupFillOpacity:
     """Test that group fill opacity is applied to the content only."""
 
