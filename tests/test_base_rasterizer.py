@@ -38,6 +38,11 @@ def test_parse_length(value: str, expected: float | None) -> None:
         assert result == pytest.approx(expected)
 
 
+def test_parse_length_long_invalid_number() -> None:
+    """Malformed long numbers do not cause backtracking through digit runs."""
+    assert BaseRasterizer._parse_length("1" * 10_000 + "!") is None
+
+
 @pytest.mark.parametrize(
     ("root_attrs", "expected"),
     [

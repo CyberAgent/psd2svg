@@ -27,7 +27,7 @@ _UNIT_TO_PX = {
 }
 
 _LENGTH_RE = re.compile(
-    r"\A\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)([a-zA-Z]*|%)\s*\Z"
+    r"\A\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)([a-zA-Z]*|%)\s*\Z"
 )
 
 # Enough to hold a root <svg> start tag; the rest of the document is never read.
