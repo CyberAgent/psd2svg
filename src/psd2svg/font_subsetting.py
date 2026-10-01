@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 from fontTools import subset
 from fontTools.ttLib import TTFont
+from fontTools.varLib import instancer
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +68,45 @@ def extract_used_unicode(svg_tree: ET.Element) -> dict[str, set[str]]:
     return font_usage
 
 
+def load_font_face(
+    input_path: str, face_index: int = 0, named_instance: int | None = None
+) -> TTFont:
+    """Load one face of a font file, pinned to a named instance if given.
+
+    Args:
+        input_path: Path to the font file.
+        face_index: Zero-based face index for TTC/OTC files.
+        named_instance: Zero-based index into the ``fvar`` named instances of a
+            variable font. The instance's axis coordinates are applied, producing
+            a static font. None keeps the font as stored.
+
+    Returns:
+        The loaded font.
+
+    Raises:
+        ValueError: If named_instance is out of range for the font.
+    """
+    font = TTFont(input_path, fontNumber=face_index)
+    if named_instance is None:
+        return font
+
+    instances = font["fvar"].instances if "fvar" in font else []
+    if not 0 <= named_instance < len(instances):
+        font.close()
+        raise ValueError(
+            f"Named instance {named_instance} not found in face {face_index} "
+            f"of '{input_path}' ({len(instances)} instance(s))"
+        )
+    coordinates = instances[named_instance].coordinates
+    return instancer.instantiateVariableFont(font, coordinates, inplace=True)
+
+
 def subset_font(
     input_path: str,
     output_format: str,
     unicode_codepoints: set[int],
+    face_index: int = 0,
+    named_instance: int | None = None,
 ) -> bytes:
     """Subset a font file to include only specified Unicode codepoints.
 
@@ -82,6 +118,9 @@ def subset_font(
         output_format: Output format - "ttf", "otf", or "woff2".
         unicode_codepoints: Set of Unicode codepoints (integers) to include in
             the subset.
+        face_index: Zero-based face index for TTC/OTC input files.
+        named_instance: Zero-based ``fvar`` named instance to pin a variable
+            font to before subsetting. None keeps the font as stored.
 
     Returns:
         Subset font file as bytes.
@@ -117,7 +156,7 @@ def subset_font(
 
     try:
         # Load the font
-        font = TTFont(input_path)
+        font = load_font_face(input_path, face_index, named_instance)
 
         # Create subsetter with options
         subsetter = subset.Subsetter()

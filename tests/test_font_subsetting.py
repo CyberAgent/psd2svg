@@ -1,13 +1,24 @@
 """Tests for font subsetting functionality."""
 
+import base64
+import io
+import re
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+from fontTools.ttLib import TTFont
 from psd_tools import PSDImage
 
+import psd2svg.__main__ as cli
 from psd2svg import SVGDocument
-from psd2svg.core.font_utils import FontInfo, encode_font_bytes_to_data_uri
+from psd2svg.core.font_utils import (
+    FontInfo,
+    encode_font_bytes_to_data_uri,
+    encode_font_with_options,
+)
 from psd2svg.font_subsetting import (
     _chars_to_unicode_list,
     _extract_font_family,
@@ -16,7 +27,12 @@ from psd2svg.font_subsetting import (
     extract_used_unicode,
     subset_font,
 )
-from tests.conftest import get_fixture, requires_arial, requires_noto_sans_jp
+from tests.conftest import (
+    get_fixture,
+    requires_arial,
+    requires_hiragino_mincho_collection,
+    requires_noto_sans_jp,
+)
 
 
 class TestUnicodeExtraction:
@@ -262,6 +278,16 @@ class TestFontSubsetting:
 
         with pytest.raises(ValueError, match="Unsupported font format"):
             subset_font("", "invalid", {0x41})  # A
+
+    def test_subset_font_selects_collection_face(self) -> None:
+        """The requested TTC face is passed to fontTools."""
+        with patch(
+            "psd2svg.font_subsetting.TTFont", side_effect=RuntimeError("stop")
+        ) as mock_ttfont:
+            with pytest.raises(RuntimeError, match="stop"):
+                subset_font("family.ttc", "ttf", {0x41}, face_index=2)
+
+        mock_ttfont.assert_called_once_with("family.ttc", fontNumber=2)
 
     @requires_noto_sans_jp
     def test_subset_font_unicode_chars(self) -> None:
@@ -520,3 +546,51 @@ class TestFontUtilsExtensions:
 
         with pytest.raises(ValueError, match="Unsupported font format"):
             encode_font_bytes_to_data_uri(b"test", "invalid")
+
+    def test_encode_font_cache_separates_collection_faces(self) -> None:
+        """Equal-sized subsets from different TTC faces do not share cache data."""
+        cache: dict[str, str] = {}
+
+        def fake_subset(**kwargs: object) -> bytes:
+            return f"face-{kwargs['face_index']}".encode()
+
+        with patch(
+            "psd2svg.core.font_utils.font_subsetting.subset_font",
+            side_effect=fake_subset,
+        ) as mock_subset:
+            first = encode_font_with_options("family.ttc", cache, {0x41}, face_index=0)
+            second = encode_font_with_options("family.ttc", cache, {0x41}, face_index=1)
+
+        assert first != second
+        assert mock_subset.call_count == 2
+
+
+@requires_hiragino_mincho_collection
+def test_cli_embeds_each_face_of_a_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W3 and W6 from one Hiragino TTC are embedded as their own faces (#373)."""
+    output = tmp_path / "output.svg"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "psd2svg",
+            get_fixture("texts/fonts-hiragino-mincho-pron-w3-w6.psd"),
+            str(output),
+            "--embed-fonts",
+        ],
+    )
+
+    cli.main()
+
+    rules = re.findall(r"@font-face\s*{([^}]*)}", output.read_text())
+    embedded = {}
+    for rule in rules:
+        weight = re.search(r"font-weight:\s*(\d+)", rule)
+        data = re.search(r"base64,([A-Za-z0-9+/=]+)", rule)
+        assert weight and data
+        font = TTFont(io.BytesIO(base64.b64decode(data.group(1))))
+        embedded[font["name"].getDebugName(6)] = int(weight.group(1))
+
+    assert embedded == {"HiraMinProN-W3": 300, "HiraMinProN-W6": 600}

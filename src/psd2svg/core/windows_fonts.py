@@ -21,7 +21,7 @@ import os
 import sys
 from typing import Any
 
-from fontTools.ttLib import TTFont
+from fontTools.ttLib import TTCollection, TTFont
 
 from psd2svg.core import font_weights
 
@@ -70,7 +70,7 @@ class WindowsFontResolver:
 
         Returns:
             Dictionary with keys: "postscript_name", "file", "family",
-            "style", "weight".
+            "style", "weight", and "face_index".
             Returns None if font not found.
 
         Example:
@@ -130,13 +130,15 @@ class WindowsFontResolver:
 
         for font_path in unique_files:
             try:
-                font_info = self._parse_font_file(font_path)
-                if font_info and font_info.get("postscript_name"):
-                    ps_name = font_info["postscript_name"]
-                    self._cache[ps_name] = font_info
-                    parsed += 1
-                else:
-                    skipped += 1
+                face_count = self._get_face_count(font_path)
+                for face_index in range(face_count):
+                    font_info = self._parse_font_file(font_path, face_index)
+                    if font_info and font_info.get("postscript_name"):
+                        ps_name = font_info["postscript_name"]
+                        self._cache[ps_name] = font_info
+                        parsed += 1
+                    else:
+                        skipped += 1
             except Exception as e:
                 logger.debug(f"Failed to parse font '{font_path}': {e}")
                 skipped += 1
@@ -232,15 +234,30 @@ class WindowsFontResolver:
 
         return fonts
 
-    def _parse_font_file(self, font_path: str) -> dict[str, Any] | None:
+    @staticmethod
+    def _get_face_count(font_path: str) -> int:
+        """Return the number of faces in a font file."""
+        if os.path.splitext(font_path)[1].lower() not in (".ttc", ".otc"):
+            return 1
+
+        collection = TTCollection(font_path, lazy=True)
+        try:
+            return len(collection.fonts)
+        finally:
+            collection.close()
+
+    def _parse_font_file(
+        self, font_path: str, face_index: int = 0
+    ) -> dict[str, Any] | None:
         """Parse font file to extract PostScript name and metadata.
 
         Args:
             font_path: Absolute path to font file (TTF/OTF).
+            face_index: Zero-based face index for TTC/OTC files.
 
         Returns:
             Dictionary with keys: "postscript_name", "file", "family",
-            "style", "weight".
+            "style", "weight", and "face_index".
             Returns None if parsing fails or file is not a valid font.
 
         Note:
@@ -251,7 +268,7 @@ class WindowsFontResolver:
             - Prefers Windows platform names (platform ID 3)
         """
         try:
-            font = TTFont(font_path)
+            font = TTFont(font_path, fontNumber=face_index)
 
             # Extract PostScript name (name ID 6)
             postscript_name = self._get_name_table_entry(font, 6)
@@ -283,6 +300,7 @@ class WindowsFontResolver:
                 "family": family,
                 "style": style,
                 "weight": float(weight),
+                "face_index": face_index,
             }
 
         except Exception as e:
@@ -393,7 +411,9 @@ class WindowsFontResolver:
         # Check charset coverage
         try:
             coverage = self._check_charset_coverage(
-                str(font_info["file"]), charset_codepoints
+                str(font_info["file"]),
+                charset_codepoints,
+                int(font_info.get("face_index", 0)),
             )
 
             if coverage < min_coverage:
@@ -418,7 +438,7 @@ class WindowsFontResolver:
             return font_info
 
     def _check_charset_coverage(
-        self, font_path: str, charset_codepoints: set[int]
+        self, font_path: str, charset_codepoints: set[int], face_index: int = 0
     ) -> float:
         """Check what percentage of charset is covered by font.
 
@@ -428,6 +448,7 @@ class WindowsFontResolver:
         Args:
             font_path: Absolute path to font file (TTF/OTF).
             charset_codepoints: Set of Unicode codepoints to check.
+            face_index: Zero-based face index for TTC/OTC files.
 
         Returns:
             Coverage ratio (0.0 to 1.0) indicating percentage of codepoints found.
@@ -448,7 +469,7 @@ class WindowsFontResolver:
             raise FileNotFoundError(f"Font file not found: {font_path}")
 
         try:
-            font = TTFont(font_path)
+            font = TTFont(font_path, fontNumber=face_index)
 
             if "cmap" not in font:
                 raise ValueError("Font missing cmap table")

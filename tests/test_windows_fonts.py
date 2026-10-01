@@ -50,6 +50,7 @@ class TestWindowsFontResolver:
                 "family": "Arial",
                 "style": "Regular",
                 "weight": 80.0,
+                "face_index": 0,
             }
         }
         resolver._initialized = True
@@ -62,10 +63,22 @@ class TestWindowsFontResolver:
         assert result["style"] == "Regular"
         assert result["weight"] == 80.0
         assert result["file"] == "C:\\Windows\\Fonts\\arial.ttf"
+        assert result["face_index"] == 0
 
         # Verify caching
         assert resolver._initialized is True
         assert "ArialMT" in resolver._cache
+
+    def test_get_face_count_for_collection(self) -> None:
+        """TTC files expose every face to the resolver."""
+        resolver = windows_fonts.WindowsFontResolver()
+        collection = MagicMock()
+        collection.fonts = [MagicMock(), MagicMock(), MagicMock()]
+
+        with patch.object(windows_fonts, "TTCollection", return_value=collection):
+            assert resolver._get_face_count("C:\\Windows\\Fonts\\family.ttc") == 3
+
+        collection.close.assert_called_once_with()
 
     def test_find_not_found(self) -> None:
         """Test find() returns None when font not found."""
@@ -138,6 +151,7 @@ class TestWindowsFontResolverParsing:
         assert result["style"] == "Regular"
         assert result["weight"] == 80.0
         assert result["file"] == "C:\\Windows\\Fonts\\arial.ttf"
+        assert result["face_index"] == 0
 
     def test_parse_font_file_no_postscript_name(self) -> None:
         """Test _parse_font_file() returns None when PostScript name missing."""

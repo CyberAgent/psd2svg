@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Artboard background color is now painted** (#467)
   - White, black and custom color backgrounds fill the artboard; transparent adds nothing.
 
+- **Faces sharing one TTC/OTC collection are embedded separately** (#461)
+  - Named instances of a variable font are embedded pinned to their axis
+    coordinates rather than as the default instance
+
 - **numpy has a minimum version for each supported Python** (#460)
   - `numpy>=1.26.0` below Python 3.13, `>=2.1.0` on 3.13, `>=2.3.2` on 3.14
 

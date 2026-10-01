@@ -776,14 +776,16 @@ class SVGDocument:
                 # Set weight and style attributes
                 self._update_element_font_attributes(element, resolved_font)
 
-    def _resolve_and_collect_fonts(self, svg: ET.Element) -> dict[str, FontInfo]:
+    def _resolve_and_collect_fonts(
+        self, svg: ET.Element
+    ) -> dict[tuple[str, int, int | None], FontInfo]:
         """Resolve PostScript names to system fonts and collect for embedding.
 
         Performs single-pass resolution:
         1. Extract PostScript names from SVG
         2. Resolve each to system font with charset (single fontconfig/Windows call)
         3. Update SVG with CSS family names
-        4. Return resolved fonts keyed by file path
+        4. Return resolved fonts keyed by file path, face index and named instance
 
         This unified method combines font resolution and SVG updates in one pass,
         eliminating the need for separate resolution and collection phases.
@@ -793,10 +795,11 @@ class SVGDocument:
                 and weight/style attributes.
 
         Returns:
-            Dictionary mapping font file paths to FontInfo instances with
-            charset populated. This can be used for font embedding without
-            re-resolving fonts. Multiple PostScript names may map to the same
-            file (e.g., TTC collections).
+            Dictionary mapping ``(font file path, face index, named instance)``
+            to FontInfo instances with charset populated. This can be used for
+            font embedding without re-resolving fonts. Aliases for the same face
+            are deduplicated, while distinct faces in a TTC/OTC collection and
+            named instances of a variable font remain separate.
 
         Note:
             - Always uses platform-specific resolution (fontconfig/Windows registry)
@@ -810,7 +813,7 @@ class SVGDocument:
         postscript_names = sorted(svg_utils.extract_font_families(svg))
 
         # Track resolved fonts for reuse in font embedding
-        resolved_fonts_map: dict[str, FontInfo] = {}
+        resolved_fonts_map: dict[tuple[str, int, int | None], FontInfo] = {}
 
         for ps_name in postscript_names:
             # Step 1: Extract elements and charset for this PostScript name
@@ -861,21 +864,26 @@ class SVGDocument:
                 self._update_element_font_attributes(element, resolved_font)
 
             # Step 4: Store resolved font for embedding
-            # Use file path as key to deduplicate fonts by file
-            # (multiple PostScript names can map to the same file)
+            # Deduplicate aliases for one face without collapsing distinct faces
+            # of a TTC/OTC collection or named instances of a variable font that
+            # share the same file path (issue #373).
             # Note: resolved_font.file is guaranteed to be non-empty by
             # find_with_files()
-            file_key = resolved_font.file
-            if file_key not in resolved_fonts_map:
+            face_key = (
+                resolved_font.file,
+                resolved_font.face_index,
+                resolved_font.named_instance,
+            )
+            if face_key not in resolved_fonts_map:
                 # Store font with charset (may already be populated from find())
                 if not resolved_font.charset and charset_codepoints:
                     resolved_font = dataclasses.replace(
                         resolved_font, charset=charset_codepoints
                     )
-                resolved_fonts_map[file_key] = resolved_font
+                resolved_fonts_map[face_key] = resolved_font
             else:
                 # Merge codepoints if same file already tracked
-                existing_font = resolved_fonts_map[file_key]
+                existing_font = resolved_fonts_map[face_key]
                 if existing_font.charset and charset_codepoints:
                     existing_font.charset.update(charset_codepoints)
 
@@ -939,8 +947,23 @@ class SVGDocument:
                         cache=self._font_data_cache,
                         subset_codepoints=subset_codepoints,
                         font_format=font_format,
+                        face_index=resolved_font.face_index,
+                        named_instance=resolved_font.named_instance,
                     )
                 else:
+                    if resolved_font.named_instance is not None or (
+                        resolved_font.face_index
+                        and font_utils.is_font_collection(resolved_font.file)
+                    ):
+                        # A URL cannot select a face or a named instance, so
+                        # browsers load the first face at its default instance.
+                        logger.debug(
+                            f"Font '{resolved_font.postscript_name}' is face "
+                            f"{resolved_font.face_index}, named instance "
+                            f"{resolved_font.named_instance} of "
+                            f"'{resolved_font.file}'; browsers loading it by "
+                            "file:// URL use the first face's default instance."
+                        )
                     css_source = font_utils.create_file_url(resolved_font.file)
 
                 # Generate @font-face CSS rule
@@ -975,7 +998,7 @@ class SVGDocument:
         subset_fonts: bool,
         font_format: str,
         use_data_uri: bool,
-        resolved_fonts_map: dict[str, FontInfo],
+        resolved_fonts_map: dict[tuple[str, int, int | None], FontInfo],
     ) -> None:
         """Insert CSS @font-face rules in a <style> element.
 

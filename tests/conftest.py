@@ -83,6 +83,29 @@ requires_arial = pytest.mark.skipif(
 )
 
 
+def faces_share_collection(*postscript_names: str) -> bool:
+    """Check that fonts resolve to distinct faces of one TTC/OTC file."""
+    try:
+        fonts = [FontInfo.resolve(name) for name in postscript_names]
+    except Exception as e:
+        logger.debug(f"Error resolving fonts: {e}")
+        return False
+    if any(
+        font is None or font.postscript_name != name
+        for font, name in zip(fonts, postscript_names)
+    ):
+        return False
+    files = {font.file for font in fonts if font}
+    faces = {font.face_index for font in fonts if font}
+    return len(files) == 1 and len(faces) == len(postscript_names)
+
+
+requires_hiragino_mincho_collection = pytest.mark.skipif(
+    not faces_share_collection("HiraMinProN-W3", "HiraMinProN-W6"),
+    reason="HiraMinProN-W3 and -W6 do not resolve to one font collection",
+)
+
+
 # Fonts the Linux workflow installs explicitly, from ttf-mscorefonts-installer.
 # That package downloads and extracts through an update-notifier hook that can
 # fail while apt still exits 0, so a missing font there means a broken runner,
