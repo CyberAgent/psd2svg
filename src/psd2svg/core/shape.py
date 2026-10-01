@@ -274,6 +274,14 @@ class ShapeConverter(ConverterProtocol):
 
         if self.enable_live_shapes and layer.has_origination():
             origination = layer.origination[path.index]
+            if (
+                layer.has_stroke()
+                and layer.stroke is not None
+                and layer.stroke.enabled
+                and _has_scaling_transform(origination)
+            ):
+                # A transform on a live shape would scale the stroke width too.
+                return self.create_path(path, **attrib)
             reference = layer.tagged_blocks.get_data(Tag.REFERENCE_POINT, (0.0, 0.0))
             if isinstance(origination, Rectangle):
                 node = self.create_origination_rectangle(
@@ -562,6 +570,15 @@ def get_origin_bbox(
     else:
         bbox = origination.bbox
     return bbox
+
+
+def _has_scaling_transform(origination: Any) -> bool:
+    """Whether the origination transform scales, rotates, or skews the shape."""
+    if b"Trnf" not in origination._data:
+        return False
+    transform = origination._data[b"Trnf"]
+    matrix = tuple(float(transform[k]) for k in (b"xx", b"xy", b"yx", b"yy"))
+    return matrix != (1.0, 0.0, 0.0, 1.0)
 
 
 def get_origin_scale(
