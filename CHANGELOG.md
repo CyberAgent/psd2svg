@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Playwright viewport follows inline SVG dimensions** (#436)
+  - Supported absolute or unitless root `style` width and height now size the
+    screenshot when they override the SVG presentation attributes.
+
 - **Stroked shapes with a scaling transform no longer get an oversized stroke** (#468)
   - They are emitted as `<path>` instead of a scaled live shape, which multiplied the stroke width.
 

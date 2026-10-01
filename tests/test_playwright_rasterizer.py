@@ -3,6 +3,8 @@
 import asyncio
 import os
 import tempfile
+import xml.etree.ElementTree as ET
+from html import escape
 from typing import NoReturn
 
 import pytest
@@ -166,6 +168,85 @@ def test_rasterizer_fractional_dimensions(fractional_svg: str) -> None:
     # All 100.5 x 2 device pixels of the rect are rendered, and the half pixel
     # the viewport rounded up to stays empty
     assert image.getchannel("A").getbbox() == (0, 0, 201, 201)
+
+
+@requires_playwright
+@pytest.mark.parametrize(
+    ("style", "expected_size"),
+    [
+        ("width:50px;height:50px", (50, 50)),
+        ("width:150px;height:50px", (150, 50)),
+        ("width:50px", (50, 100)),
+        ("width:50", (50, 100)),
+        ("width:50px!important;width:100px;height:50px", (50, 50)),
+        ("width:50px ! important;width:100px;height:50px", (50, 50)),
+        ("width:50px!important;width:75px!important", (75, 100)),
+        ('content:"x;width:5px;";width:50px', (50, 100)),
+        ('font-family:"a;width:5px";height:50px', (100, 50)),
+        ("background:url(data:image/svg+xml;a=b);width:50px", (50, 100)),
+        ("/*comment*/width:50px/*comment*/;height:50px", (50, 50)),
+        ("/*x;width:5px;*/width:50px", (50, 100)),
+    ],
+)
+def test_rasterizer_root_inline_size(
+    style: str, expected_size: tuple[int, int]
+) -> None:
+    """The screenshot canvas follows the root's inline CSS size."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" '
+        f'style="{escape(style, quote=True)}" viewBox="0 0 100 100" '
+        'preserveAspectRatio="none">'
+        '<rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        image = rasterizer.from_string(svg)
+
+    assert image.size == expected_size
+    assert image.getchannel("A").getbbox() == (0, 0, *expected_size)
+
+
+def test_inline_root_size_long_whitespace() -> None:
+    """A large, invalid style value must not stall dimension parsing."""
+    root = ET.Element("svg", width="100", height="100")
+    root.set("style", "width:" + " " * 40_000)
+
+    PlaywrightRasterizer._apply_inline_root_size(root)
+
+    assert root.get("width") == "100"
+
+
+@requires_playwright
+def test_rasterizer_zero_inline_width() -> None:
+    """A zero width retains the viewBox canvas but renders no content."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" '
+        'style="width:0" viewBox="0 0 100 100">'
+        '<rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        image = rasterizer.from_string(svg)
+
+    assert image.size == (100, 100)
+    assert image.getchannel("A").getbbox() is None
+
+
+@requires_playwright
+@pytest.mark.parametrize("style", ["width:-50px", "height:-50px"])
+def test_rasterizer_invalid_root_inline_size(style: str) -> None:
+    """Negative sizes leave the valid SVG presentation attributes in use."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" '
+        f'style="{style}" viewBox="0 0 100 100" preserveAspectRatio="none">'
+        '<rect width="100" height="100" fill="red"/></svg>'
+    )
+
+    with PlaywrightRasterizer(dpi=96) as rasterizer:
+        image = rasterizer.from_string(svg)
+
+    assert image.size == (200, 200)
+    assert image.getchannel("A").getbbox() == (0, 0, 200, 200)
 
 
 @requires_playwright

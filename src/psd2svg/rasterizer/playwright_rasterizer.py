@@ -9,7 +9,8 @@ import asyncio
 import concurrent.futures
 import logging
 import math
-from collections.abc import Sequence
+import xml.etree.ElementTree as ET
+from collections.abc import Iterator, Sequence
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Literal, Union
 
@@ -75,6 +76,69 @@ class PlaywrightRasterizer(BaseRasterizer):
             return True
         except ImportError:
             return False
+
+    @staticmethod
+    def _style_declarations(style: str) -> Iterator[str]:
+        """Split CSS declarations outside strings, comments, and functions."""
+        declaration: list[str] = []
+        quote: str | None = None
+        depth = 0
+        index = 0
+        while index < len(style):
+            char = style[index]
+            if quote is None and style.startswith("/*", index):
+                end = style.find("*/", index + 2)
+                if end < 0:
+                    break
+                index = end + 2
+                continue
+            if char == "\\" and index + 1 < len(style):
+                declaration.extend((char, style[index + 1]))
+                index += 2
+                continue
+            if quote is not None:
+                if char == quote:
+                    quote = None
+            elif char in ("'", '"'):
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth = max(depth - 1, 0)
+            elif char == ";" and depth == 0:
+                yield "".join(declaration)
+                declaration.clear()
+                index += 1
+                continue
+            declaration.append(char)
+            index += 1
+        if declaration:
+            yield "".join(declaration)
+
+    @classmethod
+    def _apply_inline_root_size(cls, root: ET.Element) -> None:
+        """Copy supported inline sizes over the root presentation attributes."""
+        inline_sizes: dict[str, tuple[str, bool]] = {}
+        for declaration in cls._style_declarations(root.get("style", "")):
+            name, separator, value = declaration.partition(":")
+            name = name.strip().lower()
+            if not separator or name not in ("width", "height"):
+                continue
+            head, bang, tail = value.rpartition("!")
+            important = bool(bang) and tail.strip().lower() == "important"
+            value = (head if important else value).strip()
+            length = cls._parse_length(value)
+            # Chromium ignores a negative SVG width or height. Relative CSS
+            # lengths and expressions are left to the browser; only sizes that
+            # can be resolved before rendering are copied here.
+            if length is None or length < 0:
+                continue
+            previous = inline_sizes.get(name)
+            # A later declaration wins unless an earlier important one does.
+            if previous is None or important or not previous[1]:
+                inline_sizes[name] = (value, important)
+        for name, (value, _) in inline_sizes.items():
+            root.set(name, value)
 
     def __init__(
         self,
@@ -235,6 +299,10 @@ class PlaywrightRasterizer(BaseRasterizer):
 
         # Parse SVG to get dimensions
         root = self._svg_root(svg_str)
+        if root is not None:
+            # Inline CSS takes precedence over the width/height presentation
+            # attributes. Use the same sizes for the screenshot viewport.
+            self._apply_inline_root_size(root)
         dimensions = None if root is None else self._root_dimensions(root)
         if root is None or dimensions is None:
             raise ValueError("Could not determine SVG dimensions")
