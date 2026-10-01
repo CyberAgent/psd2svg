@@ -36,6 +36,7 @@ from tests.conftest import get_fixture
         "layer-types/solid-color-fill.psd",
         "layer-types/pattern-fill.psd",
         "layer-types/artboard.psd",
+        "layer-types/artboard-background.psd",
         "layer-types/group.psd",
         "layer-types/group-fill-opacity.psd",
         "layer-types/pixel-layer.psd",
@@ -65,6 +66,7 @@ def evaluate_quality(psd_file: str, quality: float) -> None:
     "psd_file, quality",
     [
         pytest.param("layer-types/artboard.psd", 0.01),
+        pytest.param("layer-types/artboard-background.psd", 0.01),
         pytest.param("layer-types/group.psd", 0.01),
         pytest.param("layer-types/group-fill-opacity.psd", 0.01),
         pytest.param("layer-types/pixel-layer.psd", 0.01),

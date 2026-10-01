@@ -10,9 +10,13 @@ from psd_tools.constants import BlendMode, Tag
 
 from psd2svg import svg_utils
 from psd2svg.core.base import ConverterProtocol
+from psd2svg.core.color_utils import rgb2hex
 from psd2svg.core.constants import BLEND_MODE, INACCURATE_BLEND_MODES
 
 logger = logging.getLogger(__name__)
+
+# Artboard background type -> fill; transparent (3) is absent.
+ARTBOARD_BACKGROUND_FILL = {1: "#ffffff", 2: "#000000", 4: "custom"}
 
 
 class LayerConverter(ConverterProtocol):
@@ -85,8 +89,34 @@ class LayerConverter(ConverterProtocol):
             **attrib,  # type: ignore[arg-type]
         )
         with self.set_current(node):
+            self.add_artboard_background(layer)
             self.add_children(layer, depth=depth + 1)
         return node
+
+    def add_artboard_background(self, layer: layers.Artboard) -> None:
+        """Fill the artboard with its background; transparent adds nothing."""
+        data = layer.tagged_blocks.get_data(Tag.ARTBOARD_DATA1)
+        if data is None:
+            return
+        # Only the custom type reads the stored color, which stays white otherwise.
+        fill = ARTBOARD_BACKGROUND_FILL.get(data.get(b"artboardBackgroundType", 1))
+        if fill is None:
+            return
+        if fill == "custom":
+            color = data.get(b"Clr ")
+            channels = [b"Rd  ", b"Grn ", b"Bl  "]
+            if color is None or any(key not in color for key in channels):
+                logger.debug(f"Artboard '{layer.name}' has no RGB background color.")
+                return
+            fill = rgb2hex([color[key] for key in channels])
+        self.create_node(
+            "rect",
+            x=layer.left,
+            y=layer.top,
+            width=layer.width,
+            height=layer.height,
+            fill=fill,
+        )
 
     def add_group(
         self, layer: layers.Group, depth: int = 0, **attrib: str
