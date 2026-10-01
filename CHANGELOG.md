@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Artboard background color is now painted** ()
+- **Artboard background color is now painted** (#467)
   - White, black and custom color backgrounds fill the artboard; transparent adds nothing.
 
 - **numpy has a minimum version for each supported Python** (#460)
