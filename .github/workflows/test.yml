@@ -19,30 +19,64 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install fonts
+      - name: Check MS Core Fonts package version
+        id: core-fonts
         run: |
           sudo apt-get update
+          version=$(apt-cache policy ttf-mscorefonts-installer | awk '/Candidate:/ { print $2 }')
+          test -n "$version" && test "$version" != "(none)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The update-notifier downloader deletes each .exe after extraction, so
+      # cache a separate copy of the original archives in the runner's temp dir.
+      - name: Restore MS Core Fonts archives
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/mscorefonts-archives
+          key: mscorefonts-${{ runner.os }}-${{ steps.core-fonts.outputs.version }}
+
+      - name: Install fonts
+        env:
+          FONT_ARCHIVES: ${{ runner.temp }}/mscorefonts-archives
+        run: |
           echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | sudo debconf-set-selections
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            ttf-mscorefonts-installer \
+            cabextract \
             fontconfig \
             fonts-noto-core \
             fonts-noto-cjk \
             fonts-noto-ui-core
+
+          # Read URLs and checksums from the candidate Ubuntu package. The
+          # package version is also the cache key, so changed archives cannot
+          # be silently reused after a package update.
+          package_dir=$(mktemp -d)
+          (cd "$package_dir" && apt-get download ttf-mscorefonts-installer)
+          dpkg-deb -x "$package_dir"/*.deb "$package_dir/unpacked"
+          manifest="$package_dir/unpacked/usr/share/package-data-downloads/ttf-mscorefonts-installer"
+          test -f "$manifest"
+          mkdir -p "$FONT_ARCHIVES"
+          archives=()
+          while read -r url sha256; do
+            archive="$FONT_ARCHIVES/${url##*/}"
+            if ! printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check --status; then
+              rm -f "$archive"
+              curl --fail --location --retry 3 --retry-delay 5 \
+                --connect-timeout 20 --max-time 180 --output "$archive.tmp" "$url"
+              printf '%s  %s\n' "$sha256" "$archive.tmp" | sha256sum --check --status
+              mv "$archive.tmp" "$archive"
+            fi
+            archives+=("$archive")
+          done < <(awk '/^Url: / { url=$2 } /^Sha256: / { print url, $2 }' "$manifest")
+          test "${#archives[@]}" -gt 0
+
+          # Extract the verified, unmodified archives locally. Installing the
+          # package itself would invoke update-notifier and fetch them again.
+          sudo mkdir -p /usr/share/fonts/truetype/msttcorefonts
+          sudo cabextract -q -d /usr/share/fonts/truetype/msttcorefonts "${archives[@]}"
           sudo fc-cache -fv
-          # ttf-mscorefonts-installer downloads and extracts through an
-          # update-notifier hook, not its own postinst. When that hook loses
-          # its partial files the step reports "The fonts are NOT installed."
-          # and apt still exits 0, leaving the suite to render Arial and Times
-          # New Roman in a fallback face. Re-run the downloader once, then
-          # assert. Match on :family= so that Arial Black, which ships in a
-          # separate archive, cannot satisfy the check for Arial.
+          # Match on :family= so Arial Black cannot satisfy the Arial check.
           installed() { [ -n "$(fc-list ":family=$1" file)" ]; }
-          if ! installed "Times New Roman" || ! installed "Arial"; then
-            sudo rm -f /var/lib/update-notifier/package-data-downloads/ttf-mscorefonts-installer*
-            sudo /usr/lib/update-notifier/package-data-downloader
-            sudo fc-cache -fv
-          fi
           for family in "Times New Roman" "Arial"; do
             installed "$family" || {
               echo "::error::MS Core Fonts install failed: $family is missing"
