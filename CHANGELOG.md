@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stroked shapes with a scaling transform no longer get an oversized stroke** (#468)
+  - They are emitted as `<path>` instead of a scaled live shape, which multiplied the stroke width.
+
 - **Artboard background color is now painted** (#467)
   - White, black and custom color backgrounds fill the artboard; transparent adds nothing.
 

@@ -195,3 +195,16 @@ def test_gradient_stops_keep_sub_percent_precision() -> None:
         {"offset": "89.67%", "stop-color": "#f70fff", "stop-opacity": "88.45%"},
         {"offset": "100%", "stop-color": "#f70fff", "stop-opacity": "100%"},
     ]
+
+
+def test_stroked_shape_with_scaling_transform_is_a_path() -> None:
+    """A scaled live shape would scale its stroke width, so it falls back to a path."""
+    psdimage = PSDImage.open(get_fixture("shapes/rectangle-7-scaled-stroke.psd"))
+    converter = Converter(psdimage)
+    converter.build()
+
+    assert converter.svg.findall(".//rect") == []
+    stroked = [n for n in converter.svg.iter("path") if "stroke" in n.attrib]
+    assert len(stroked) == 1
+    assert "transform" not in stroked[0].attrib
+    assert stroked[0].attrib["stroke-width"] == "6"
