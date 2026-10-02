@@ -68,6 +68,9 @@ class LayerConverter(ConverterProtocol):
         }
         # Default layer_fn is a plain pixel layer.
         layer_fn = registry.get(type(layer), self.add_pixel)
+        if isinstance(layer, layers.ShapeLayer) and not layer.has_vector_mask():
+            # A shape can retain raster content after its vector mask is deleted.
+            layer_fn = self.add_pixel
         return layer_fn(layer, depth=depth, **attrib)
 
     def add_artboard(
@@ -462,7 +465,11 @@ class LayerConverter(ConverterProtocol):
         """
         # NOTE: We decide between clip-path and mask based on content.
         # <clipPath> has bad interactions with <mask> in SVG renderers.
-        if isinstance(layer, layers.ShapeLayer) and not layer.has_mask():
+        if (
+            isinstance(layer, layers.ShapeLayer)
+            and layer.has_vector_mask()
+            and not layer.has_mask()
+        ):
             # NOTE: add_clip_path() builds the base with create_shape() instead
             # of re-entering add_layer(), so it has no depth to keep track of.
             with self.add_clip_path(layer) as clip_attrib:
