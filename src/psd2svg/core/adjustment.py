@@ -27,6 +27,7 @@ stacked use elements may not produce the intended visual result.
 import logging
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
+from typing import cast
 
 import numpy as np
 from psd_tools.api import adjustments, layers
@@ -522,7 +523,7 @@ class AdjustmentConverter(ConverterProtocol):
         """Add a curves adjustment layer to the svg document.
 
         Applies tonal curve adjustments using SVG feComponentTransfer filters
-        with lookup tables generated from control points. Supports both composite
+        with lookup tables from control points or legacy maps. Supports both composite
         (RGB) curves and per-channel (R/G/B) curves, matching Photoshop's curve
         application order.
 
@@ -544,7 +545,11 @@ class AdjustmentConverter(ConverterProtocol):
         # Check for identity curves (optimization)
         is_identity = True
         for item in layer.data.extra:  # type: ignore[attr-defined]
-            if len(item.points) != 2 or item.points != [(0, 0), (255, 255)]:
+            if layer.data.is_map:
+                item_is_identity = item.points == list(range(256))
+            else:
+                item_is_identity = item.points == [(0, 0), (255, 255)]
+            if not item_is_identity:
                 is_identity = False
                 break
 
@@ -909,8 +914,9 @@ class AdjustmentConverter(ConverterProtocol):
         Returns:
             Tuple of (lut_r, lut_g, lut_b) with 256 float values each in [0, 1].
         """
-        # Parse curves by channel ID
-        curves_by_channel: dict[int, list[tuple[int, int]]] = {}
+        # Parse curves by channel ID. Map curves contain 256 output values;
+        # point curves contain (output, input) pairs.
+        curves_by_channel: dict[int, list[int] | list[tuple[int, int]]] = {}
         for item in layer.data.extra:  # type: ignore[attr-defined]
             if 0 <= item.channel_id <= 3:
                 curves_by_channel[item.channel_id] = item.points
@@ -930,11 +936,10 @@ class AdjustmentConverter(ConverterProtocol):
         if 0 in curves_by_channel:
             logger.debug(
                 f"Curves adjustment '{layer.name}': "
-                f"Applying composite curve with {len(curves_by_channel[0])} points"
+                f"Applying composite curve with {len(curves_by_channel[0])} "
+                f"{'values' if layer.data.is_map else 'points'}"
             )
-            composite_lut_normalized = self._interpolate_curve(curves_by_channel[0])
-            # Convert back to 0-255 space for composition
-            composite_lut = np.array(composite_lut_normalized) * 255.0
+            composite_lut = self._curve_values(curves_by_channel[0], layer.data.is_map)
 
             # Apply composite to all channels
             r_vals = np.interp(r_vals, identity, composite_lut)
@@ -947,13 +952,12 @@ class AdjustmentConverter(ConverterProtocol):
                 logger.debug(
                     f"Curves adjustment '{layer.name}': "
                     f"Applying {channel_name} curve with "
-                    f"{len(curves_by_channel[channel_id])} points"
+                    f"{len(curves_by_channel[channel_id])} "
+                    f"{'values' if layer.data.is_map else 'points'}"
                 )
-                channel_lut_normalized = self._interpolate_curve(
-                    curves_by_channel[channel_id]
+                channel_lut = self._curve_values(
+                    curves_by_channel[channel_id], layer.data.is_map
                 )
-                # Convert back to 0-255 space
-                channel_lut = np.array(channel_lut_normalized) * 255.0
 
                 # Apply to the corresponding channel
                 if channel_id == 1:
@@ -969,6 +973,17 @@ class AdjustmentConverter(ConverterProtocol):
         b_lut = np.clip(b_vals, 0, 255) / 255.0
 
         return r_lut.tolist(), g_lut.tolist(), b_lut.tolist()
+
+    def _curve_values(
+        self, points: list[int] | list[tuple[int, int]], is_map: bool
+    ) -> np.ndarray:
+        """Return a curve's 256 output values in pixel space (0-255)."""
+        if is_map:
+            return np.asarray(points, dtype=float)
+        return (
+            np.asarray(self._interpolate_curve(cast(list[tuple[int, int]], points)))
+            * 255.0
+        )
 
     def _generate_levels_luts(
         self, layer: adjustments.Levels

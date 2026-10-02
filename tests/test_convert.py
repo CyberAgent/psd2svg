@@ -1,12 +1,14 @@
 import logging
 import os
 from pathlib import Path
+from typing import cast
 
 import pytest
 from psd_tools import PSDImage
-from psd_tools.api.adjustments import ColorBalance, Levels
+from psd_tools.api.adjustments import ColorBalance, Curves, Levels
+from psd_tools.psd.adjustments import CurvesExtraItem
 
-from psd2svg import convert
+from psd2svg import SVGDocument, convert
 from psd2svg.core.converter import Converter
 from psd2svg.eval import compute_conversion_quality
 from tests.conftest import get_fixture
@@ -733,6 +735,55 @@ def test_adjustment_colorbalance_noop() -> None:
 def test_adjustment_curves(psd_file: str, threshold: float) -> None:
     """Test conversion quality of curves adjustment layer."""
     evaluate_quality(psd_file, threshold)
+
+
+def test_adjustment_curves_legacy_map() -> None:
+    """A legacy map uses its 256 values directly as the SVG lookup table."""
+    psd = PSDImage.open(get_fixture("adjustments/curves-legacy-map.psd"))
+    layer = cast(
+        Curves, next(layer for layer in psd.descendants() if layer.kind == "curves")
+    )
+    extra = cast(list[CurvesExtraItem], layer.data.extra)
+    values = extra[0].points
+    expected = [value / 255 for value in values]
+
+    for lut in Converter(psd)._generate_curves_luts(layer):
+        assert lut == pytest.approx(expected)
+
+    document = SVGDocument.from_psd(psd)
+    functions = [
+        node
+        for node in document.svg.iter()
+        if node.tag.rpartition("}")[2] in {"feFuncR", "feFuncG", "feFuncB"}
+    ]
+    assert len(functions) == 3
+    for function in functions:
+        table = [float(value) for value in function.attrib["tableValues"].split()]
+        assert len(table) == 256
+        for index in (0, 32, 128, 255):
+            assert table[index] == pytest.approx(values[index] / 255, abs=0.005)
+
+
+def test_adjustment_curves_legacy_map_channel_composition() -> None:
+    """Per-channel maps apply after the composite map."""
+    psd = PSDImage.open(get_fixture("adjustments/curves-legacy-map.psd"))
+    layer = cast(
+        Curves, next(layer for layer in psd.descendants() if layer.kind == "curves")
+    )
+    extra = cast(list[CurvesExtraItem], layer.data.extra)
+    inverted = [0] * 256
+    for index in range(256):
+        inverted[index] = 255 - index
+    red_map = CurvesExtraItem(channel_id=1)
+    red_map.points = inverted
+    extra.append(red_map)
+
+    red, green, blue = Converter(psd)._generate_curves_luts(layer)
+    composite = extra[0].points
+    for index in (0, 32, 128, 255):
+        assert red[index] == pytest.approx(1 - composite[index] / 255)
+        assert green[index] == pytest.approx(composite[index] / 255)
+        assert blue[index] == pytest.approx(composite[index] / 255)
 
 
 @pytest.mark.parametrize(
