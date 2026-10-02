@@ -147,6 +147,31 @@ class TestClippingBase:
         assert list(masks[0].iter(f"{SVG_NS}image"))
         assert any(image.get("mask") for image in svg.iter(f"{SVG_NS}image"))
 
+    def test_shape_without_vector_mask_uses_raster_effects(self) -> None:
+        """Effects on a shape without a vector path render from its pixels."""
+        psdimage = PSDImage.open(
+            get_fixture("clipping/shape-mask-with-clip-stroke-effect.psd")
+        )
+        base = next(layer for layer in psdimage.descendants() if layer.clip_layers)
+        assert isinstance(base, layers.ShapeLayer)
+        for tag in (Tag.VECTOR_MASK_SETTING1, Tag.VECTOR_MASK_SETTING2):
+            base.tagged_blocks.pop(tag, None)
+        assert base.has_effects() and not base.has_vector_mask()
+
+        svg = ET.fromstring(SVGDocument.from_psd(psdimage).tostring(optimize=False))
+        images = {image.get("id") for image in svg.iter(f"{SVG_NS}image")}
+        uses = [
+            use
+            for use in svg.iter(f"{SVG_NS}use")
+            if use.get("href", "").removeprefix("#") in images
+        ]
+        assert uses
+        for use in uses:
+            assert use.get("fill") is None and use.get("stroke") is None
+        # The stroke effect is drawn with a raster filter inside and outside
+        # the clipping mask.
+        assert sum(1 for use in uses if use.get("filter")) == 2
+
     @staticmethod
     def split_fills(svg: ET.Element) -> tuple[list[ET.Element], list[ET.Element]]:
         """Return the main fills inside and outside the clipping mask.

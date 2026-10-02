@@ -11,7 +11,7 @@ from psd_tools.terminology import Enum, Key, Klass, Unit
 
 from psd2svg import svg_utils
 from psd2svg.core import color_utils
-from psd2svg.core.base import ConverterProtocol
+from psd2svg.core.base import ConverterProtocol, is_vector_shape
 from psd2svg.core.constants import FILTER_BLEND_MODES
 from psd2svg.core.gradient import GradientInterpolation
 
@@ -115,7 +115,7 @@ class EffectConverter(ConverterProtocol):
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.ColorOverlay)
 
-            if isinstance(layer, layers.ShapeLayer):
+            if is_vector_shape(layer):
                 use = self.add_vector_color_overlay_effect(effect, target)
             else:
                 use = self.add_raster_color_overlay_effect(effect, target)
@@ -164,7 +164,7 @@ class EffectConverter(ConverterProtocol):
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.Stroke)
 
-            if not isinstance(layer, layers.ShapeLayer) or "stroke" in target.attrib:
+            if not is_vector_shape(layer) or "stroke" in target.attrib:
                 # NOTE: If there is already a stroke, we need to stroke around
                 # the stroke. This case happens when there is a stroke-only shape layer.
                 use = self.add_raster_stroke_effect(layer, effect, target)
@@ -519,7 +519,7 @@ class EffectConverter(ConverterProtocol):
                 continue
             self.set_gradient_transform(layer, gradient, effect)
 
-            if isinstance(layer, layers.ShapeLayer):
+            if is_vector_shape(layer):
                 use = self.add_vector_gradient_overlay_effect(gradient, target, effect)
             else:
                 use = self.add_raster_gradient_overlay_effect(gradient, target, effect)
@@ -710,7 +710,7 @@ class EffectConverter(ConverterProtocol):
             reference = tuple(layer.tagged_blocks.get_data(Tag.REFERENCE_POINT, (0, 0)))
             self.set_pattern_effect_transform(pattern, effect, reference)
 
-            if isinstance(layer, layers.ShapeLayer):
+            if is_vector_shape(layer):
                 use = self.add_vector_pattern_overlay_effect(pattern, target, effect)
             else:
                 use = self.add_raster_pattern_overlay_effect(pattern, target, effect)

@@ -9,7 +9,7 @@ from psd_tools.api import adjustments, layers
 from psd_tools.constants import BlendMode, Tag
 
 from psd2svg import svg_utils
-from psd2svg.core.base import ConverterProtocol
+from psd2svg.core.base import ConverterProtocol, is_vector_shape
 from psd2svg.core.color_utils import rgb2hex
 from psd2svg.core.constants import BLEND_MODE, INACCURATE_BLEND_MODES
 
@@ -68,8 +68,7 @@ class LayerConverter(ConverterProtocol):
         }
         # Default layer_fn is a plain pixel layer.
         layer_fn = registry.get(type(layer), self.add_pixel)
-        if isinstance(layer, layers.ShapeLayer) and not layer.has_vector_mask():
-            # A shape can retain raster content after its vector mask is deleted.
+        if isinstance(layer, layers.ShapeLayer) and not is_vector_shape(layer):
             layer_fn = self.add_pixel
         return layer_fn(layer, depth=depth, **attrib)
 
@@ -465,11 +464,7 @@ class LayerConverter(ConverterProtocol):
         """
         # NOTE: We decide between clip-path and mask based on content.
         # <clipPath> has bad interactions with <mask> in SVG renderers.
-        if (
-            isinstance(layer, layers.ShapeLayer)
-            and layer.has_vector_mask()
-            and not layer.has_mask()
-        ):
+        if is_vector_shape(layer) and not layer.has_mask():
             # NOTE: add_clip_path() builds the base with create_shape() instead
             # of re-entering add_layer(), so it has no depth to keep track of.
             with self.add_clip_path(layer) as clip_attrib:
@@ -582,7 +577,7 @@ class LayerConverter(ConverterProtocol):
         if not self.has_separate_fill(layer):
             # The target itself carries the fill opacity and the blend mode.
             self.create_node("use", href=svg_utils.get_uri(target))
-        elif isinstance(layer, (layers.ShapeLayer, adjustments.FillLayer)):
+        elif is_vector_shape(layer) or isinstance(layer, adjustments.FillLayer):
             vector_base = layer
             self.apply_vector_fill(layer, target)
         else:
