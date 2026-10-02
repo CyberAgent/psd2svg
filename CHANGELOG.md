@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Clipping bases without a vector mask convert from their raster pixels** (#473)
+
 - **Playwright viewport follows inline SVG dimensions** (#436)
   - Supported absolute or unitless root `style` width and height now size the
     screenshot when they override the SVG presentation attributes.
