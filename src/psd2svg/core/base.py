@@ -1,6 +1,6 @@
 import contextlib
 import xml.etree.ElementTree as ET
-from typing import Any, Iterator, Protocol
+from typing import Any, Iterator, Protocol, TypeGuard
 
 from PIL import Image
 from psd_tools import PSDImage
@@ -9,6 +9,15 @@ from psd_tools.constants import BlendMode
 from psd_tools.psd.descriptor import Descriptor
 
 from psd2svg.resource_limits import ResourceLimits
+
+
+def is_vector_shape(layer: layers.Layer) -> TypeGuard[layers.ShapeLayer]:
+    """Whether the layer is a shape that converts from its vector path.
+
+    A shape can retain raster content after its vector mask is deleted; such
+    a shape converts as a pixel layer.
+    """
+    return isinstance(layer, layers.ShapeLayer) and layer.has_vector_mask()
 
 
 class ConverterProtocol(Protocol):
