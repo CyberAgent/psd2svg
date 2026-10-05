@@ -918,15 +918,20 @@ class TypeSetting:
 
     def __iter__(self) -> Iterator[Paragraph]:
         """Iterate over paragraph and style runs."""
-        paragraph_index = RunLengthIndex(self._paragraph_run["RunLengthArray"])
+        paragraph_run_lengths = [
+            int(length) for length in self._paragraph_run["RunLengthArray"]
+        ]
         style_run_lengths = [
             int(length) for length in self._style_run["RunLengthArray"]
         ]
-        text_end = max(len(self.text), paragraph_index.boundaries[-1])
-        style_end = sum(style_run_lengths)
-        if style_run_lengths and style_end < text_end:
-            # Keep the final style for text left uncovered by malformed StyleRun data.
-            style_run_lengths[-1] += text_end - style_end
+        text_end = max(
+            len(self.text), sum(paragraph_run_lengths), sum(style_run_lengths)
+        )
+        for run_lengths in (paragraph_run_lengths, style_run_lengths):
+            if run_lengths:
+                # Keep the final settings for text left uncovered by short runs.
+                run_lengths[-1] += text_end - sum(run_lengths)
+        paragraph_index = RunLengthIndex(paragraph_run_lengths)
         style_index = RunLengthIndex(style_run_lengths)
         stops = sorted(set(paragraph_index.boundaries) | set(style_index.boundaries))
         for index, group in groupby(

@@ -53,16 +53,24 @@ def _first_text_setting(psd_file: str) -> tuple[PSDImage, TypeSetting]:
     return psdimage, TypeSetting(layer._data)
 
 
-def test_short_style_run_uses_last_style_for_remaining_text() -> None:
+@pytest.mark.parametrize(
+    ("paragraph_length", "style_length", "paragraph_count"),
+    [(36, 5, 3), (5, 5, 1), (5, 36, 1)],
+)
+def test_short_runs_use_last_settings_for_remaining_text(
+    paragraph_length: int, style_length: int, paragraph_count: int
+) -> None:
     psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
     layer = next(
         layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
     )
-    layer.engine_dict["StyleRun"]["RunLengthArray"]._items[:] = [Integer(5)]
+    if paragraph_length == 5:
+        layer.engine_dict["ParagraphRun"]["RunLengthArray"]._items[:] = [Integer(5)]
+    layer.engine_dict["StyleRun"]["RunLengthArray"]._items[:] = [Integer(style_length)]
 
     text_setting = TypeSetting(layer._data)
     paragraphs = list(text_setting)
-    assert len(paragraphs) == 3
+    assert len(paragraphs) == paragraph_count
     remaining_text = "".join(
         span.text for paragraph in paragraphs for span in paragraph.spans
     )
