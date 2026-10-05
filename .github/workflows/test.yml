@@ -30,7 +30,7 @@ jobs:
       # The update-notifier downloader deletes each .exe after extraction, so
       # cache a separate copy of the original archives in the runner's temp dir.
       - name: Restore MS Core Fonts archives
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/mscorefonts-archives
           key: mscorefonts-${{ runner.os }}-${{ steps.core-fonts.outputs.version }}
