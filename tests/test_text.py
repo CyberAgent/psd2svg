@@ -9,6 +9,7 @@ import pytest
 from PIL import Image
 from psd_tools import PSDImage
 from psd_tools.api.layers import TypeLayer
+from psd_tools.psd.engine_data import Integer
 
 from psd2svg import SVGDocument
 from psd2svg.core.converter import Converter
@@ -50,6 +51,23 @@ def _first_text_setting(psd_file: str) -> tuple[PSDImage, TypeSetting]:
         layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
     )
     return psdimage, TypeSetting(layer._data)
+
+
+def test_short_style_run_uses_last_style_for_remaining_text() -> None:
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    layer = next(
+        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
+    )
+    layer.engine_dict["StyleRun"]["RunLengthArray"]._items[:] = [Integer(5)]
+
+    text_setting = TypeSetting(layer._data)
+    paragraphs = list(text_setting)
+    assert len(paragraphs) == 3
+    remaining_text = "".join(
+        span.text for paragraph in paragraphs for span in paragraph.spans
+    )
+    assert remaining_text == text_setting.text
+    assert SVGDocument.from_psd(psdimage) is not None
 
 
 def _font_feature_settings(svg: ET.Element) -> list[tuple[str | None, str]]:
