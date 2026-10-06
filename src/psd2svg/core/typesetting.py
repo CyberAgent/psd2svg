@@ -13,7 +13,7 @@ import logging
 import math
 from enum import IntEnum
 from itertools import groupby
-from typing import Any, Iterator, Literal
+from typing import Any, Iterable, Iterator, Literal, SupportsInt
 
 from psd_tools.psd.descriptor import Enumerated, RawData
 from psd_tools.psd.engine_data import DictElement, EngineData
@@ -573,13 +573,16 @@ class RunLengthIndex:
         rli(10) -> 2
     """
 
-    def __init__(self, run_length_array: list[int]):
-        self._run_length_array = run_length_array
+    def __init__(
+        self, run_length_array: Iterable[SupportsInt], total_length: int | None = None
+    ):
         self._cumulative_lengths = []
         cumulative = 0
         for length in run_length_array:
-            cumulative += length
+            cumulative += int(length)
             self._cumulative_lengths.append(cumulative)
+        if total_length is not None and self._cumulative_lengths:
+            self._cumulative_lengths[-1] = max(total_length, cumulative)
 
     @property
     def boundaries(self) -> list[int]:
@@ -918,21 +921,15 @@ class TypeSetting:
 
     def __iter__(self) -> Iterator[Paragraph]:
         """Iterate over paragraph and style runs."""
-        paragraph_run_lengths = [
-            int(length) for length in self._paragraph_run["RunLengthArray"]
-        ]
-        style_run_lengths = [
-            int(length) for length in self._style_run["RunLengthArray"]
-        ]
+        paragraph_run_lengths = self._paragraph_run["RunLengthArray"]
+        style_run_lengths = self._style_run["RunLengthArray"]
         text_end = max(
-            len(self.text), sum(paragraph_run_lengths), sum(style_run_lengths)
+            len(self.text),
+            sum(map(int, paragraph_run_lengths)),
+            sum(map(int, style_run_lengths)),
         )
-        for run_lengths in (paragraph_run_lengths, style_run_lengths):
-            if run_lengths:
-                # Keep the final settings for text left uncovered by short runs.
-                run_lengths[-1] += text_end - sum(run_lengths)
-        paragraph_index = RunLengthIndex(paragraph_run_lengths)
-        style_index = RunLengthIndex(style_run_lengths)
+        paragraph_index = RunLengthIndex(paragraph_run_lengths, total_length=text_end)
+        style_index = RunLengthIndex(style_run_lengths, total_length=text_end)
         stops = sorted(set(paragraph_index.boundaries) | set(style_index.boundaries))
         for index, group in groupby(
             zip([0] + stops, stops), key=lambda start_end: paragraph_index(start_end[0])

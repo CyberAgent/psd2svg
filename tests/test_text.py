@@ -25,6 +25,7 @@ from psd2svg.core.typesetting import (
     FontBaseline,
     Paragraph,
     ParagraphSheet,
+    RunLengthIndex,
     ShapeType,
     Span,
     StyleRunAlignment,
@@ -53,24 +54,36 @@ def _first_text_setting(psd_file: str) -> tuple[PSDImage, TypeSetting]:
     return psdimage, TypeSetting(layer._data)
 
 
-@pytest.mark.parametrize(
-    ("paragraph_length", "style_length", "paragraph_count"),
-    [(36, 5, 3), (5, 5, 1), (5, 36, 1)],
-)
-def test_short_runs_use_last_settings_for_remaining_text(
-    paragraph_length: int, style_length: int, paragraph_count: int
-) -> None:
+def test_run_length_index_extends_final_run() -> None:
+    run_lengths = [2, 3]
+    index = RunLengthIndex(run_lengths, total_length=10)
+    assert index.boundaries == [2, 10]
+    assert index(9) == 1
+    assert run_lengths == [2, 3]
+    with pytest.raises(IndexError, match="out of range"):
+        index(10)
+
+
+def test_run_length_index_preserves_longer_runs_and_strict_mode() -> None:
+    assert RunLengthIndex([Integer(2), Integer(3)], total_length=4).boundaries == [
+        2,
+        5,
+    ]
+    with pytest.raises(IndexError, match="out of range"):
+        RunLengthIndex([2, 3])(5)
+
+
+def test_short_runs_use_last_settings_for_remaining_text() -> None:
     psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
     layer = next(
         layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
     )
-    if paragraph_length == 5:
-        layer.engine_dict["ParagraphRun"]["RunLengthArray"]._items[:] = [Integer(5)]
-    layer.engine_dict["StyleRun"]["RunLengthArray"]._items[:] = [Integer(style_length)]
+    layer.engine_dict["ParagraphRun"]["RunLengthArray"]._items[:] = [Integer(5)]
+    layer.engine_dict["StyleRun"]["RunLengthArray"]._items[:] = [Integer(5)]
 
     text_setting = TypeSetting(layer._data)
     paragraphs = list(text_setting)
-    assert len(paragraphs) == paragraph_count
+    assert len(paragraphs) == 1
     remaining_text = "".join(
         span.text for paragraph in paragraphs for span in paragraph.spans
     )
