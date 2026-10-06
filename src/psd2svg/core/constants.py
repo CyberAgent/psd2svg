@@ -149,10 +149,10 @@ class FilterBlend(NamedTuple):
     offset: float = 0.0
 
 
-# Keyed by descriptor value, since only layer effects synthesise their blend layer.
-FILTER_BLEND_MODES: dict[bytes, FilterBlend] = {
-    b"blendDivide": FilterBlend(invert=True, css_mode="color-dodge"),
-    b"blendSubtraction": FilterBlend(invert=True, offset=-1.0),
-    b"linearBurn": FilterBlend(invert=False, offset=-1.0),
-    b"linearDodge": FilterBlend(invert=False),
+# Only layer effects synthesise their blend layer.
+FILTER_BLEND_MODES: dict[BlendMode, FilterBlend] = {
+    BlendMode.DIVIDE: FilterBlend(invert=True, css_mode="color-dodge"),
+    BlendMode.SUBTRACT: FilterBlend(invert=True, offset=-1.0),
+    BlendMode.LINEAR_BURN: FilterBlend(invert=False, offset=-1.0),
+    BlendMode.LINEAR_DODGE: FilterBlend(invert=False),
 }

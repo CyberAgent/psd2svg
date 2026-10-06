@@ -20,6 +20,7 @@ import numpy as np
 from psd_tools.api import layers
 from psd_tools.api.shape import Ellipse, Rectangle, RoundedRectangle
 from psd_tools.constants import Tag
+from psd_tools.psd.descriptor import Descriptor
 from psd_tools.psd.vector import Subpath
 
 from psd2svg import svg_utils
@@ -288,9 +289,12 @@ class ShapeConverter(ConverterProtocol):
                     origination, reference, **attrib
                 )
                 node = self.apply_origination_transform(layer, origination, node)
-            elif isinstance(origination, RoundedRectangle):
+            elif (
+                isinstance(origination, RoundedRectangle)
+                and origination.radii is not None
+            ):
                 node = self.create_origination_rounded_rectangle(
-                    origination, reference, **attrib
+                    origination, origination.radii, reference, **attrib
                 )
                 node = self.apply_origination_transform(layer, origination, node)
             elif isinstance(origination, Ellipse):
@@ -326,6 +330,7 @@ class ShapeConverter(ConverterProtocol):
     def create_origination_rounded_rectangle(
         self,
         origination: RoundedRectangle,
+        radii: Descriptor,
         reference: tuple[float, float],
         **attrib: Any,
     ) -> ET.Element:
@@ -333,22 +338,8 @@ class ShapeConverter(ConverterProtocol):
         bbox = get_origin_bbox(origination, reference)
         scales = get_origin_scale(origination)
         scale = (scales[0] + scales[1]) / 2
-        rx = (
-            (
-                float(origination.radii[b"topRight"])
-                + float(origination.radii[b"bottomRight"])
-            )
-            / 2
-            / scale
-        )
-        ry = (
-            (
-                float(origination.radii[b"topRight"])
-                + float(origination.radii[b"topLeft"])
-            )
-            / 2
-            / scale
-        )
+        rx = (float(radii[b"topRight"]) + float(radii[b"bottomRight"])) / 2 / scale
+        ry = (float(radii[b"topRight"]) + float(radii[b"topLeft"])) / 2 / scale
         return self.create_node(
             "rect",
             x=bbox[0],

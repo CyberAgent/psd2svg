@@ -5,7 +5,7 @@ from typing import cast
 
 from psd_tools import PSDImage
 from psd_tools.api import effects, layers
-from psd_tools.constants import Tag
+from psd_tools.constants import BlendMode, Tag
 from psd_tools.psd.descriptor import UnitFloat
 from psd_tools.terminology import Enum, Key, Klass, Unit
 
@@ -53,7 +53,7 @@ class EffectConverter(ConverterProtocol):
         self.apply_bevel_emboss_effect(layer, target)
 
     def composite_overlay_fill(
-        self, psd_mode: bytes, filter: ET.Element, use: ET.Element
+        self, psd_mode: BlendMode, filter: ET.Element, use: ET.Element
     ) -> None:
         """Composite a synthesised overlay fill onto the layer it decorates.
 
@@ -174,7 +174,7 @@ class EffectConverter(ConverterProtocol):
                 use = self.add_vector_stroke_effect(layer, effect, target)
                 # Vector stroke has stroke-opacity attribute. Skip setting opacity.
 
-            if effect.blend_mode != Enum.Normal:
+            if effect.blend_mode != BlendMode.NORMAL:
                 self.set_blend_mode(effect.blend_mode, use)
 
     def add_raster_stroke_effect(
@@ -376,7 +376,7 @@ class EffectConverter(ConverterProtocol):
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.DropShadow)
             use = self.add_raster_drop_shadow_effect(effect, target)
-            if effect.blend_mode != Enum.Normal:
+            if effect.blend_mode != BlendMode.NORMAL:
                 self.set_blend_mode(effect.blend_mode, use)
             if effect.opacity != 100.0:
                 self.set_opacity(effect.opacity / 100.0, use)
@@ -446,7 +446,7 @@ class EffectConverter(ConverterProtocol):
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.OuterGlow)
             use = self.add_raster_outer_glow_effect(effect, target)
-            if effect.blend_mode != Enum.Normal:
+            if effect.blend_mode != BlendMode.NORMAL:
                 self.set_blend_mode(effect.blend_mode, use)
             if effect.opacity != 100.0:
                 self.set_opacity(effect.opacity / 100.0, use)
@@ -840,7 +840,7 @@ class EffectConverter(ConverterProtocol):
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.InnerShadow)
             use = self.add_raster_inner_shadow_effect(effect, target)
-            if effect.blend_mode != Enum.Normal:
+            if effect.blend_mode != BlendMode.NORMAL:
                 self.set_blend_mode(effect.blend_mode, use)
             if effect.opacity != 100.0:
                 self.set_opacity(effect.opacity / 100.0, use)
@@ -902,7 +902,7 @@ class EffectConverter(ConverterProtocol):
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.InnerGlow)
             use = self.add_raster_inner_glow_effect(effect, target)
-            if effect.blend_mode != Enum.Normal:
+            if effect.blend_mode != BlendMode.NORMAL:
                 self.set_blend_mode(effect.blend_mode, use)
             if effect.opacity != 100.0:
                 self.set_opacity(effect.opacity / 100.0, use)

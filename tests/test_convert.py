@@ -743,11 +743,12 @@ def test_adjustment_curves_legacy_map() -> None:
     layer = cast(
         Curves, next(layer for layer in psd.descendants() if layer.kind == "curves")
     )
+    assert layer.data is not None
     extra = cast(list[CurvesExtraItem], layer.data.extra)
     values = extra[0].points
     expected = [value / 255 for value in values]
 
-    for lut in Converter(psd)._generate_curves_luts(layer):
+    for lut in Converter(psd)._generate_curves_luts(layer, layer.data):
         assert lut == pytest.approx(expected)
 
     document = SVGDocument.from_psd(psd)
@@ -770,6 +771,7 @@ def test_adjustment_curves_legacy_map_channel_composition() -> None:
     layer = cast(
         Curves, next(layer for layer in psd.descendants() if layer.kind == "curves")
     )
+    assert layer.data is not None
     extra = cast(list[CurvesExtraItem], layer.data.extra)
     inverted = [0] * 256
     for index in range(256):
@@ -778,7 +780,7 @@ def test_adjustment_curves_legacy_map_channel_composition() -> None:
     red_map.points = inverted
     extra.append(red_map)
 
-    red, green, blue = Converter(psd)._generate_curves_luts(layer)
+    red, green, blue = Converter(psd)._generate_curves_luts(layer, layer.data)
     composite = extra[0].points
     for index in (0, 32, 128, 255):
         assert red[index] == pytest.approx(1 - composite[index] / 255)
@@ -824,6 +826,7 @@ def test_adjustment_levels_noop() -> None:
     assert isinstance(levels_layer, Levels)
 
     # Verify parameters are identity
+    assert levels_layer.data is not None
     for i in range(4):
         record = levels_layer.data[i]
         assert record.input_floor == 0
