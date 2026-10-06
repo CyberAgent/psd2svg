@@ -192,6 +192,7 @@ class TestCropLayersToCanvasOption:
         )
 
         with converter.add_clipping_target(layer) as clip_attrib:
+            assert clip_attrib is not None
             assert "mask" in clip_attrib
 
         # The in-memory tree uses bare tag names; the SVG namespace is only

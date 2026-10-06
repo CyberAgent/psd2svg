@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Clipping bases without a vector mask convert from their raster pixels** (#473)
 
+- **Empty clipping bases no longer abort conversion** (#479)
+  - Clipped layers are skipped when their base has no content.
+
 - **Playwright viewport follows inline SVG dimensions** (#436)
   - Supported absolute or unitless root `style` width and height now size the
     screenshot when they override the SVG presentation attributes.

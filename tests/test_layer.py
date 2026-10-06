@@ -172,6 +172,21 @@ class TestClippingBase:
         # the clipping mask.
         assert sum(1 for use in uses if use.get("filter")) == 2
 
+    @pytest.mark.parametrize("optimize", [False, True])
+    def test_empty_pixel_base_skips_clipped_layers(
+        self, monkeypatch: pytest.MonkeyPatch, optimize: bool
+    ) -> None:
+        """An empty base and its clips paint nothing; other layers still convert."""
+        psdimage = PSDImage.open(get_fixture("clipping/pixel-with-blend.psd"))
+        base = next(layer for layer in psdimage if layer.clip_layers)
+        monkeypatch.setattr(base, "has_pixels", lambda: False)
+
+        svg = ET.fromstring(SVGDocument.from_psd(psdimage).tostring(optimize=optimize))
+
+        assert len(list(svg.iter(f"{SVG_NS}image"))) == 1  # Background only.
+        assert not list(svg.iter(f"{SVG_NS}mask"))
+        assert not list(svg.iter(f"{SVG_NS}defs"))
+
     @staticmethod
     def split_fills(svg: ET.Element) -> tuple[list[ET.Element], list[ET.Element]]:
         """Return the main fills inside and outside the clipping mask.

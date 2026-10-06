@@ -222,8 +222,9 @@ class LayerConverter(ConverterProtocol):
 
             if layer.has_clip_layers(visible=not self.include_hidden_layers):
                 with self.add_clipping_target(layer, depth=depth) as attrib:
-                    for clip_layer in layer.clip_layers:
-                        self.add_layer(clip_layer, depth=depth + 1, **attrib)
+                    if attrib is not None:
+                        for clip_layer in layer.clip_layers:
+                            self.add_layer(clip_layer, depth=depth + 1, **attrib)
             else:
                 # Regular layer.
                 self.add_layer(layer, depth=depth)
@@ -451,7 +452,7 @@ class LayerConverter(ConverterProtocol):
     @contextlib.contextmanager
     def add_clipping_target(
         self, layer: layers.Layer | layers.Group, depth: int = 0
-    ) -> Iterator[dict]:
+    ) -> Iterator[dict | None]:
         """Context manager to handle clipping target.
 
         Args:
@@ -460,7 +461,8 @@ class LayerConverter(ConverterProtocol):
                 layer itself rather than of the clip layers it carries.
 
         Yields:
-            Dictionary with the attribute to apply to the clipped elements.
+            Dictionary with the attribute to apply to the clipped elements, or
+            None when the base has no content.
         """
         # NOTE: We decide between clip-path and mask based on content.
         # <clipPath> has bad interactions with <mask> in SVG renderers.
@@ -526,7 +528,7 @@ class LayerConverter(ConverterProtocol):
     @contextlib.contextmanager
     def add_clip_mask(
         self, layer: layers.Layer | layers.Group, depth: int = 0
-    ) -> Iterator[dict]:
+    ) -> Iterator[dict | None]:
         """Add a clipping mask and associated elements.
 
         Usage::
@@ -543,10 +545,12 @@ class LayerConverter(ConverterProtocol):
                 plain sibling would be.
 
         Yields:
-            Dictionary with mask attribute to apply to clipped elements.
+            Dictionary with mask attribute to apply to clipped elements, or
+            None when the base has no content.
         """
 
         # Create a clipping mask definition.
+        parent = self.current
         defs = self.create_node("defs")
         with self.set_current(defs):
             mask = self.create_node(
@@ -558,9 +562,13 @@ class LayerConverter(ConverterProtocol):
         with self.set_current(mask):
             target = self.add_layer(layer, depth=depth)
             if target is None:
-                raise ValueError(
-                    f"Failed to create clipping target for layer: '{layer.name}'"
+                parent.remove(defs)
+                logger.warning(
+                    "Clipping base has no content, skipping clipped layers: "
+                    f"'{layer.name}' ({layer.kind})."
                 )
+                yield None
+                return
             # NOTE: Maybe move clip-path or mask out of the outer mask container?
 
         if self.enable_class:
