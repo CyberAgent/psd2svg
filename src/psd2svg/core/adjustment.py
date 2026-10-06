@@ -31,7 +31,9 @@ from typing import cast
 
 import numpy as np
 from psd_tools.api import adjustments, layers
-from psd_tools.psd.adjustments import LevelRecord
+from psd_tools.psd.adjustments import Curves as CurvesData
+from psd_tools.psd.adjustments import CurvesExtraItem, LevelRecord
+from psd_tools.psd.adjustments import Levels as LevelsData
 
 from psd2svg import svg_utils
 from psd2svg.core.base import ConverterProtocol
@@ -63,6 +65,11 @@ class AdjustmentConverter(ConverterProtocol):
         """Add a posterize adjustment layer to the svg document."""
         # Validate and clamp levels to valid range
         levels = layer.posterize
+        if levels is None:
+            logger.warning(
+                f"Posterize adjustment '{layer.name}' has no levels, skipping"
+            )
+            return None
         if levels < 2:
             logger.warning(
                 f"Posterize levels {levels} is below minimum (2), clamping to 2"
@@ -115,6 +122,11 @@ class AdjustmentConverter(ConverterProtocol):
         """
         # Extract threshold value (0-255)
         threshold = layer.threshold
+        if threshold is None:
+            logger.warning(
+                f"Threshold adjustment '{layer.name}' has no threshold, skipping"
+            )
+            return None
 
         # Log for debugging
         logger.debug(f"Threshold adjustment '{layer.name}': threshold={threshold}")
@@ -173,7 +185,14 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Per-range color adjustments (layer.data) are not yet supported.
         """
         # Extract adjustment parameters
-        hue, saturation, lightness = layer.master
+        master = layer.master
+        if master is None:
+            logger.warning(
+                f"HueSaturation adjustment '{layer.name}' has no master values, "
+                "skipping"
+            )
+            return None
+        hue, saturation, lightness = master
         enable_colorization = layer.enable_colorization
 
         # Check if this is a no-op adjustment
@@ -183,13 +202,21 @@ class AdjustmentConverter(ConverterProtocol):
             )
             return None
 
+        colorization = layer.colorization
+        if enable_colorization == 1 and colorization is None:
+            logger.warning(
+                f"HueSaturation adjustment '{layer.name}' has no colorization "
+                "values, skipping"
+            )
+            return None
+
         # Create filter structure
         filter, use = self._create_filter(layer, name="huesaturation", **attrib)
 
         with self.set_current(filter):
-            if enable_colorization == 1:
+            if enable_colorization == 1 and colorization is not None:
                 # Colorize mode: desaturate, then apply colorization
-                self._apply_colorize_mode(layer)
+                self._apply_colorize_mode(*colorization)
             else:
                 # Normal mode: apply master adjustments
                 self._apply_normal_huesaturation(hue, saturation, lightness)
@@ -218,10 +245,10 @@ class AdjustmentConverter(ConverterProtocol):
         Returns:
             The SVG use element with the filter applied, or None if no-op.
         """
-        # Extract parameters
-        exposure = layer.exposure
-        offset = layer.exposure_offset
-        gamma = layer.gamma
+        # Extract parameters; a missing value is the neutral one.
+        exposure = layer.exposure if layer.exposure is not None else 0.0
+        offset = layer.exposure_offset if layer.exposure_offset is not None else 0.0
+        gamma = layer.gamma if layer.gamma is not None else 1.0
 
         # Log parameters for debugging
         logger.debug(
@@ -405,6 +432,11 @@ class AdjustmentConverter(ConverterProtocol):
         shadows = layer.shadows
         midtones = layer.midtones
         highlights = layer.highlights
+        if shadows is None or midtones is None or highlights is None:
+            logger.warning(
+                f"ColorBalance adjustment '{layer.name}' has incomplete data, skipping"
+            )
+            return None
         preserve_luminosity = layer.luminosity == 1  # 1=enabled, 0=disabled
 
         # Log parameters
@@ -536,7 +568,8 @@ class AdjustmentConverter(ConverterProtocol):
             The SVG use element with the filter applied, or None if identity.
         """
         # Validate curve data
-        if not hasattr(layer.data, "extra") or not layer.data.extra:
+        data = layer.data
+        if data is None or not data.extra:
             logger.warning(
                 f"Curves adjustment '{layer.name}' has no curve data, skipping"
             )
@@ -544,8 +577,8 @@ class AdjustmentConverter(ConverterProtocol):
 
         # Check for identity curves (optimization)
         is_identity = True
-        for item in layer.data.extra:  # type: ignore[attr-defined]
-            if layer.data.is_map:
+        for item in cast(list[CurvesExtraItem], data.extra):
+            if data.is_map:
                 item_is_identity = item.points == list(range(256))
             else:
                 item_is_identity = item.points == [(0, 0), (255, 255)]
@@ -560,11 +593,11 @@ class AdjustmentConverter(ConverterProtocol):
         # Log curve info for debugging
         logger.debug(
             f"Curves adjustment '{layer.name}': "
-            f"Processing {len(layer.data.extra)} curve(s)"  # type: ignore[arg-type]
+            f"Processing {len(cast(list[CurvesExtraItem], data.extra))} curve(s)"
         )
 
         # Generate lookup tables
-        lut_r, lut_g, lut_b = self._generate_curves_luts(layer)
+        lut_r, lut_g, lut_b = self._generate_curves_luts(layer, data)
 
         # Convert to SVG format
         lut_r_str = svg_utils.seq2str(lut_r, sep=" ")
@@ -619,7 +652,8 @@ class AdjustmentConverter(ConverterProtocol):
             The SVG use element with the filter applied, or None if identity.
         """
         # Validate data structure
-        if not hasattr(layer, "data") or len(layer.data) < 4:
+        data = layer.data
+        if data is None or len(data) < 4:
             logger.warning(
                 f"Levels adjustment '{layer.name}' has insufficient data, skipping"
             )
@@ -628,7 +662,7 @@ class AdjustmentConverter(ConverterProtocol):
         # Check for identity (optimization)
         is_identity = True
         for i in range(4):
-            record = layer.data[i]
+            record = data[i]
             if not (
                 record.input_floor == 0
                 and record.input_ceiling == 255
@@ -650,7 +684,7 @@ class AdjustmentConverter(ConverterProtocol):
         )
 
         # Generate lookup tables
-        lut_r, lut_g, lut_b = self._generate_levels_luts(layer)
+        lut_r, lut_g, lut_b = self._generate_levels_luts(layer, data)
 
         # Convert to SVG format
         lut_r_str = svg_utils.seq2str(lut_r, sep=" ")
@@ -899,7 +933,7 @@ class AdjustmentConverter(ConverterProtocol):
         return lut.tolist()
 
     def _generate_curves_luts(
-        self, layer: adjustments.Curves
+        self, layer: adjustments.Curves, data: CurvesData
     ) -> tuple[list[float], list[float], list[float]]:
         """Generate RGB lookup tables from Curves layer.
 
@@ -917,7 +951,7 @@ class AdjustmentConverter(ConverterProtocol):
         # Parse curves by channel ID. Map curves contain 256 output values;
         # point curves contain (output, input) pairs.
         curves_by_channel: dict[int, list[int] | list[tuple[int, int]]] = {}
-        for item in layer.data.extra:  # type: ignore[attr-defined]
+        for item in cast(list[CurvesExtraItem], data.extra):
             if 0 <= item.channel_id <= 3:
                 curves_by_channel[item.channel_id] = item.points
             else:
@@ -937,9 +971,9 @@ class AdjustmentConverter(ConverterProtocol):
             logger.debug(
                 f"Curves adjustment '{layer.name}': "
                 f"Applying composite curve with {len(curves_by_channel[0])} "
-                f"{'values' if layer.data.is_map else 'points'}"
+                f"{'values' if data.is_map else 'points'}"
             )
-            composite_lut = self._curve_values(curves_by_channel[0], layer.data.is_map)
+            composite_lut = self._curve_values(curves_by_channel[0], data.is_map)
 
             # Apply composite to all channels
             r_vals = np.interp(r_vals, identity, composite_lut)
@@ -953,10 +987,10 @@ class AdjustmentConverter(ConverterProtocol):
                     f"Curves adjustment '{layer.name}': "
                     f"Applying {channel_name} curve with "
                     f"{len(curves_by_channel[channel_id])} "
-                    f"{'values' if layer.data.is_map else 'points'}"
+                    f"{'values' if data.is_map else 'points'}"
                 )
                 channel_lut = self._curve_values(
-                    curves_by_channel[channel_id], layer.data.is_map
+                    curves_by_channel[channel_id], data.is_map
                 )
 
                 # Apply to the corresponding channel
@@ -986,7 +1020,7 @@ class AdjustmentConverter(ConverterProtocol):
         )
 
     def _generate_levels_luts(
-        self, layer: adjustments.Levels
+        self, layer: adjustments.Levels, data: LevelsData
     ) -> tuple[list[float], list[float], list[float]]:
         """Generate RGB lookup tables from Levels layer.
 
@@ -1008,7 +1042,7 @@ class AdjustmentConverter(ConverterProtocol):
         b_vals = identity.copy()
 
         # Apply composite RGB adjustment (record 0) to all channels first
-        composite_record = layer.data[0]
+        composite_record = data[0]
         composite_lut = self._apply_levels_to_lut(
             identity, composite_record, channel_name="RGB"
         )
@@ -1020,7 +1054,7 @@ class AdjustmentConverter(ConverterProtocol):
 
         # Apply per-channel adjustments on top
         for channel_id, channel_name in [(1, "Red"), (2, "Green"), (3, "Blue")]:
-            record = layer.data[channel_id]
+            record = data[channel_id]
 
             # Check if this channel has non-identity adjustment
             if (
@@ -1145,10 +1179,8 @@ class AdjustmentConverter(ConverterProtocol):
         if lightness > 0:
             self._apply_lightness_adjustment(lightness)
 
-    def _apply_colorize_mode(self, layer: adjustments.HueSaturation) -> None:
+    def _apply_colorize_mode(self, hue: int, saturation: int, lightness: int) -> None:
         """Apply colorize mode adjustments."""
-        hue, saturation, lightness = layer.colorization
-
         # Step 1: Desaturate completely
         self.create_node(
             "feColorMatrix",

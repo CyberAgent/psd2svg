@@ -23,7 +23,7 @@ import xml.etree.ElementTree as ET
 from psd_tools import PSDImage
 from psd_tools.api import adjustments, layers, pil_io
 from psd_tools.api.shape import Stroke
-from psd_tools.constants import Tag
+from psd_tools.constants import BlendMode, Tag
 from psd_tools.psd.descriptor import Descriptor, UnitFloat
 from psd_tools.terminology import Enum, Key, Klass, Unit
 
@@ -94,8 +94,9 @@ class PaintConverter(ConverterProtocol):
             class_="stroke",
         )
         self.set_stroke(layer, use)
-        if layer.stroke.blend_mode != Enum.Normal:
-            self.set_blend_mode(layer.stroke.blend_mode, use)
+        blend_mode = layer.stroke.blend_mode
+        if blend_mode is not None and blend_mode != BlendMode.NORMAL:
+            self.set_blend_mode(blend_mode, use)
 
     def set_fill(
         self, layer: layers.ShapeLayer | adjustments.FillLayer, node: ET.Element
@@ -187,41 +188,38 @@ class PaintConverter(ConverterProtocol):
         if stroke.line_width != 1.0:
             svg_utils.set_attribute(node, "stroke-width", stroke.line_width)
 
-        if stroke.content.classID == b"patternLayer":
-            if Enum.Pattern not in stroke.content:
-                raise ValueError(
-                    f"No pattern found in stroke content: {stroke.content}."
-                )
-            pattern = self.add_pattern(self.psd, stroke.content[Enum.Pattern])
+        content = stroke.content
+        if content is None:
+            logger.warning("Stroke has no content: %s", layer.name)
+        elif content.classID == b"patternLayer":
+            if Enum.Pattern not in content:
+                raise ValueError(f"No pattern found in stroke content: {content}.")
+            pattern = self.add_pattern(self.psd, content[Enum.Pattern])
             if pattern is not None:
-                self.set_pattern_transform(layer, stroke.content, pattern)
+                self.set_pattern_transform(layer, content, pattern)
                 svg_utils.set_attribute(node, "stroke", svg_utils.get_funciri(pattern))
-        elif stroke.content.classID == b"gradientLayer":
-            gradient = self.add_gradient_definition(layer, stroke.content)
+        elif content.classID == b"gradientLayer":
+            gradient = self.add_gradient_definition(layer, content)
             if gradient is not None:
                 svg_utils.set_attribute(node, "stroke", svg_utils.get_funciri(gradient))
-        elif stroke.content.classID == b"solidColorLayer":
-            color = color_utils.descriptor2hex(stroke.content[Klass.Color])
+        elif content.classID == b"solidColorLayer":
+            color = color_utils.descriptor2hex(content[Klass.Color])
             svg_utils.set_attribute(node, "stroke", color)
         else:
-            logger.warning(f"Unsupported stroke content: {stroke.content}")
+            logger.warning(f"Unsupported stroke content: {content}")
 
         if not stroke.fill_enabled:
             svg_utils.set_attribute(node, "fill", "none")
 
-        if stroke.opacity.value < 100:
-            svg_utils.set_attribute(
-                node, "stroke-opacity", stroke.opacity.value / 100.0
-            )
+        if stroke.opacity is not None and stroke.opacity < 100:
+            svg_utils.set_attribute(node, "stroke-opacity", stroke.opacity / 100.0)
 
         if stroke.line_cap_type != "butt":
             svg_utils.set_attribute(node, "stroke-linecap", stroke.line_cap_type)
         if stroke.line_join_type != "miter":
             svg_utils.set_attribute(node, "stroke-linejoin", stroke.line_join_type)
         if stroke.line_dash_set:
-            line_dash_set = [
-                float(x.value) * stroke.line_width for x in stroke.line_dash_set
-            ]
+            line_dash_set = [float(x) * stroke.line_width for x in stroke.line_dash_set]
             svg_utils.set_attribute(node, "stroke-dasharray", line_dash_set)
             svg_utils.set_attribute(
                 node, "stroke-dashoffset", get_dash_offset_in_pixels(stroke)
