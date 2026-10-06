@@ -199,8 +199,8 @@ def test_rasterizer_dpi_scales_without_viewbox() -> None:
 @pytest.mark.parametrize(
     ("root_size", "expected_96", "expected_192"),
     [
-        ('width="200"', (200, 100), (400, 200)),
-        ('height="200"', (100, 200), (200, 400)),
+        ('width="200"', (200, 200), (400, 400)),
+        ('height="200"', (200, 200), (400, 400)),
         ('width="50%" height="50%"', (50, 50), (100, 100)),
         ('width="200" height="50%"', (200, 50), (400, 100)),
     ],
@@ -210,8 +210,8 @@ def test_rasterizer_dpi_scales_partially_sized_root(
 ) -> None:
     """Test that DPI scales a root that sizes only one axis, or sizes it relatively.
 
-    Each axis resolves on its own, so the scale stays dpi / 96 rather than
-    being skewed by the viewBox of the axis that is left out.
+    An axis left out follows the viewBox aspect ratio, as resvg resolves it, so
+    the scale stays dpi / 96 whichever axis is sized.
     """
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" {root_size}'
