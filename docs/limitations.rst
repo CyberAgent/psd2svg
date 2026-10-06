@@ -719,7 +719,7 @@ Rasterizer Stability
 resvg-py Error Handling
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-As of resvg-py 0.2.5 (required by psd2svg), the library properly handles edge cases:
+psd2svg requires resvg-py 0.5.0 or newer, which properly handles edge cases:
 
 **Exception Handling:**
 

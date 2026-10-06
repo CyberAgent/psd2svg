@@ -167,6 +167,27 @@ class BaseRasterizer(ABC):
         return None if width is None or height is None else (width, height)
 
     @classmethod
+    def _intrinsic_dimensions(cls, root: ET.Element) -> tuple[float, float] | None:
+        """Read the size of a root ``<svg>`` the way resvg resolves it.
+
+        Unlike :meth:`_root_dimensions`, an axis left out next to a sized one
+        follows the viewBox aspect ratio rather than the viewBox length.
+        """
+        dimensions = cls._root_dimensions(root)
+        viewbox = cls._parse_viewbox(root.get("viewBox", ""))
+        if dimensions is None or viewbox is None:
+            return dimensions
+        sized = [
+            (cls._parse_length(root.get(axis, ""), percent_of=reference) or 0) > 0
+            for axis, reference in (("width", viewbox[0]), ("height", viewbox[1]))
+        ]
+        if sized == [True, False]:
+            return dimensions[0], dimensions[0] * viewbox[1] / viewbox[0]
+        if sized == [False, True]:
+            return dimensions[1] * viewbox[0] / viewbox[1], dimensions[1]
+        return dimensions
+
+    @classmethod
     def _axis_length(cls, value: str, viewbox_length: float | None) -> float | None:
         """Resolve one axis of a root ``<svg>`` size against its viewBox."""
         length = cls._parse_length(value, percent_of=viewbox_length)
@@ -197,18 +218,26 @@ class BaseRasterizer(ABC):
         )
 
     @classmethod
-    def _svg_dimensions(cls, svg_content: str) -> tuple[float, float] | None:
+    def _svg_dimensions(
+        cls, svg_content: str, intrinsic: bool = False
+    ) -> tuple[float, float] | None:
         """CSS pixel width and height of an SVG document.
 
         Args:
             svg_content: SVG content as string.
+            intrinsic: Resolve a half-sized root as resvg does; see
+                :meth:`_intrinsic_dimensions`.
 
         Returns:
             (width, height) in CSS pixels, or None when neither the root
             width/height nor the viewBox gives an absolute size.
         """
         root = cls._svg_root(svg_content)
-        return None if root is None else cls._root_dimensions(root)
+        if root is None:
+            return None
+        return (
+            cls._intrinsic_dimensions(root) if intrinsic else cls._root_dimensions(root)
+        )
 
     @classmethod
     def _root_keeps_own_size(cls, root: ET.Element) -> bool:
@@ -234,13 +263,17 @@ class BaseRasterizer(ABC):
         )
 
     @classmethod
-    def _svg_file_dimensions(cls, filepath: str) -> tuple[float, float] | None:
+    def _svg_file_dimensions(
+        cls, filepath: str, intrinsic: bool = False
+    ) -> tuple[float, float] | None:
         """CSS pixel width and height of an SVG file.
 
         Only the head of the file is read.
 
         Args:
             filepath: Path to the SVG file.
+            intrinsic: Resolve a half-sized root as resvg does; see
+                :meth:`_intrinsic_dimensions`.
 
         Returns:
             (width, height) in CSS pixels, or None when the file cannot be
@@ -253,7 +286,11 @@ class BaseRasterizer(ABC):
                 root = cls._parse_svg_root(iter(lambda: f.read(_CHUNK_SIZE), b""))
         except OSError:
             return None
-        return None if root is None else cls._root_dimensions(root)
+        if root is None:
+            return None
+        return (
+            cls._intrinsic_dimensions(root) if intrinsic else cls._root_dimensions(root)
+        )
 
     def _composite_background(self, image: Image.Image) -> Image.Image:
         """Composite image onto a transparent background to normalize alpha.

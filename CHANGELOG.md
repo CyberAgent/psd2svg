@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     layer with a non-normal blend mode, cropping has been observed to
     shift resvg's already-approximate mix-blend-mode rendering.
 
+### Changed
+
+- **`ResvgRasterizer` sizes a root with only `width` or `height` from the viewBox aspect ratio** (#478)
+  - Requires `resvg-py>=0.5.0`; `PlaywrightRasterizer` keeps its per-axis size.
+
 ### Fixed
 
 - **Clipping bases without a vector mask convert from their raster pixels** (#473)

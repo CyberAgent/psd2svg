@@ -163,7 +163,9 @@ class ResvgRasterizer(BaseRasterizer):
             png_bytes = resvg_py.svg_to_bytes(
                 svg_path=filepath,
                 dpi=DEFAULT_DPI,
-                width=self._render_width(self._svg_file_dimensions(filepath)),
+                width=self._render_width(
+                    self._svg_file_dimensions(filepath, intrinsic=True)
+                ),
                 font_files=font_files,
             )
             image = Image.open(BytesIO(png_bytes))
@@ -211,7 +213,9 @@ class ResvgRasterizer(BaseRasterizer):
             png_bytes = resvg_py.svg_to_bytes(
                 svg_string=svg_string,
                 dpi=DEFAULT_DPI,
-                width=self._render_width(self._svg_dimensions(svg_string)),
+                width=self._render_width(
+                    self._svg_dimensions(svg_string, intrinsic=True)
+                ),
                 font_files=font_files,
             )
             image = Image.open(BytesIO(png_bytes))

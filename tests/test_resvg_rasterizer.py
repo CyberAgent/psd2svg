@@ -197,25 +197,30 @@ def test_rasterizer_dpi_scales_without_viewbox() -> None:
 
 
 @pytest.mark.parametrize(
-    ("root_size", "expected_96", "expected_192"),
+    ("root_size", "view_box", "expected_96", "expected_192"),
     [
-        ('width="200"', (200, 100), (400, 200)),
-        ('height="200"', (100, 200), (200, 400)),
-        ('width="50%" height="50%"', (50, 50), (100, 100)),
-        ('width="200" height="50%"', (200, 50), (400, 100)),
+        ('width="200"', "0 0 100 100", (200, 200), (400, 400)),
+        ('height="200"', "0 0 100 100", (200, 200), (400, 400)),
+        ('width="200"', "0 0 100 50", (200, 100), (400, 200)),
+        ('height="200"', "0 0 100 50", (400, 200), (800, 400)),
+        ('width="50%" height="50%"', "0 0 100 100", (50, 50), (100, 100)),
+        ('width="200" height="50%"', "0 0 100 100", (200, 50), (400, 100)),
     ],
 )
 def test_rasterizer_dpi_scales_partially_sized_root(
-    root_size: str, expected_96: tuple[int, int], expected_192: tuple[int, int]
+    root_size: str,
+    view_box: str,
+    expected_96: tuple[int, int],
+    expected_192: tuple[int, int],
 ) -> None:
     """Test that DPI scales a root that sizes only one axis, or sizes it relatively.
 
-    Each axis resolves on its own, so the scale stays dpi / 96 rather than
-    being skewed by the viewBox of the axis that is left out.
+    An axis left out follows the viewBox aspect ratio, as resvg resolves it, so
+    the scale stays dpi / 96 whichever axis is sized.
     """
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" {root_size}'
-        ' viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>'
+        f' viewBox="{view_box}"><rect width="100" height="50" fill="red"/></svg>'
     )
 
     assert ResvgRasterizer(dpi=96).from_string(svg).size == expected_96
