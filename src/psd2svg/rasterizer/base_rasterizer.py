@@ -133,7 +133,7 @@ class BaseRasterizer(ABC):
                 return element
             return None
 
-        parser = ET.XMLPullParser(["start"])
+        parser: ET.XMLPullParser = ET.XMLPullParser(["start"])
         try:
             for chunk in chunks:
                 parser.feed(chunk)
