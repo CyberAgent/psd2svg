@@ -9,6 +9,7 @@ import pytest
 from PIL import Image
 from psd_tools import PSDImage
 from psd_tools.api.layers import TypeLayer
+from psd_tools.psd.engine_data import Integer
 
 from psd2svg import SVGDocument
 from psd2svg.core.converter import Converter
@@ -24,6 +25,7 @@ from psd2svg.core.typesetting import (
     FontBaseline,
     Paragraph,
     ParagraphSheet,
+    RunLengthIndex,
     ShapeType,
     Span,
     StyleRunAlignment,
@@ -50,6 +52,43 @@ def _first_text_setting(psd_file: str) -> tuple[PSDImage, TypeSetting]:
         layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
     )
     return psdimage, TypeSetting(layer._data)
+
+
+def test_run_length_index_extends_final_run() -> None:
+    run_lengths = [2, 3]
+    index = RunLengthIndex(run_lengths, total_length=10)
+    assert index.boundaries == [2, 10]
+    assert index(9) == 1
+    assert run_lengths == [2, 3]
+    with pytest.raises(IndexError, match="out of range"):
+        index(10)
+
+
+def test_run_length_index_preserves_longer_runs_and_strict_mode() -> None:
+    assert RunLengthIndex([Integer(2), Integer(3)], total_length=4).boundaries == [
+        2,
+        5,
+    ]
+    with pytest.raises(IndexError, match="out of range"):
+        RunLengthIndex([2, 3])(5)
+
+
+def test_short_runs_use_last_settings_for_remaining_text() -> None:
+    psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    layer = next(
+        layer for layer in psdimage.descendants() if isinstance(layer, TypeLayer)
+    )
+    layer.engine_dict["ParagraphRun"]["RunLengthArray"]._items[:] = [Integer(5)]
+    layer.engine_dict["StyleRun"]["RunLengthArray"]._items[:] = [Integer(5)]
+
+    text_setting = TypeSetting(layer._data)
+    paragraphs = list(text_setting)
+    assert len(paragraphs) == 1
+    remaining_text = "".join(
+        span.text for paragraph in paragraphs for span in paragraph.spans
+    )
+    assert remaining_text == text_setting.text
+    assert SVGDocument.from_psd(psdimage) is not None
 
 
 def _font_feature_settings(svg: ET.Element) -> list[tuple[str | None, str]]:
