@@ -4,6 +4,7 @@ import logging
 import re
 import unicodedata
 import xml.etree.ElementTree as ET
+from bisect import bisect_right
 from re import Pattern
 from typing import Any, Optional, Sequence, SupportsFloat
 
@@ -376,7 +377,8 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
     Note:
         - Handles multiple foreignObject elements, but not nested foreignObject tags
         - Works with any namespace prefix (html, ns0, ns1, etc.)
-        - Only modifies XHTML elements (div, p, span)
+        - Only modifies XHTML elements (div, p, span) inside foreignObject
+        - Keeps declarations used by prefixed content outside foreignObject
         - Adds xmlns declaration to first XHTML element in each foreignObject
     """
     # XHTML namespace URL - escaped for use in regex patterns
@@ -387,6 +389,43 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
     prefixes = {match.group(1) for match in declarations}
     if not prefixes:
         return svg_string
+
+    foreign_objects = list(
+        re.finditer(
+            r"<foreignObject\b[^>]*>.*?</foreignObject>",
+            svg_string,
+            flags=re.DOTALL,
+        )
+    )
+    foreign_object_starts = [match.start() for match in foreign_objects]
+    foreign_object_ends = [match.end() for match in foreign_objects]
+
+    def inside_foreign_object(position: int) -> bool:
+        index = bisect_right(foreign_object_starts, position) - 1
+        return index >= 0 and position < foreign_object_ends[index]
+
+    def prefix_used_outside(prefix: str) -> bool:
+        needle = f"{prefix}:"
+        position = svg_string.find(needle)
+        while position >= 0:
+            preceding = svg_string[position - 1] if position else ""
+            is_name = (
+                preceding == "<"
+                or preceding.isspace()
+                or (
+                    preceding == "/"
+                    and position >= 2
+                    and svg_string[position - 2] == "<"
+                )
+            )
+            if is_name and not inside_foreign_object(position):
+                return True
+            position = svg_string.find(needle, position + len(needle))
+        return False
+
+    prefixes_used_outside = {
+        prefix for prefix in prefixes if prefix_used_outside(prefix)
+    }
 
     def add_xmlns_to_first_element(match: re.Match[str]) -> str:
         """Add xmlns declaration to first XHTML element."""
@@ -435,18 +474,18 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
     # Find spans without copying the image payload. The namespace declaration
     # can live on the root or inside foreignObject, so skip declaration edits
     # that are already covered by a rewritten foreignObject.
-    edits = [(match.start(), match.end(), "") for match in declarations]
+    edits = [
+        (match.start(), match.end(), "")
+        for match in declarations
+        if match.group(1) not in prefixes_used_outside
+    ]
     edits.extend(
         (
             match.start(),
             match.end(),
             rewrite_foreign_object(match.group()),
         )
-        for match in re.finditer(
-            r"<foreignObject\b[^>]*>.*?</foreignObject>",
-            svg_string,
-            flags=re.DOTALL,
-        )
+        for match in foreign_objects
     )
     edits.sort(key=lambda edit: edit[0])
 
