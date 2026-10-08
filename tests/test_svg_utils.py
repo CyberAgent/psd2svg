@@ -1886,6 +1886,48 @@ def test_write_matches_tostring() -> None:
     assert f'<div xmlns="{svg_utils.XHTML_NAMESPACE}">' in expected, expected
 
 
+def test_xhtml_prefix_fixup_only_rewrites_foreign_objects() -> None:
+    namespace = svg_utils.XHTML_NAMESPACE
+    payload = "a" * 100_000
+    serialized = (
+        "<!-- leading comment with > -->"
+        f'<svg xmlns:html="{namespace}">'
+        f'<image href="data:image/png;base64,{payload}" />'
+        "<foreignObject><html:div><html:p><html:span>one</html:span>"
+        "</html:p></html:div></foreignObject>"
+        '<foreignObject><html:div class="second">two</html:div></foreignObject>'
+        "</svg>"
+    )
+
+    result = svg_utils._fix_xhtml_namespace_prefixes(serialized)
+
+    assert f'<image href="data:image/png;base64,{payload}" />' in result
+    assert result.startswith("<!-- leading comment with > --><svg>")
+    assert result.count(f'xmlns="{namespace}"') == 2
+    assert '<div xmlns="http://www.w3.org/1999/xhtml"><p><span>one' in result
+    assert '<div xmlns="http://www.w3.org/1999/xhtml" class="second">two' in result
+    assert "html:" not in result
+
+
+def test_xhtml_prefix_fixup_without_xhtml_returns_original() -> None:
+    serialized = '<svg><image href="data:image/png;base64,abc" /></svg>'
+
+    assert svg_utils._fix_xhtml_namespace_prefixes(serialized) is serialized
+
+
+def test_xhtml_prefix_fixup_with_declaration_on_foreign_object() -> None:
+    serialized = (
+        '<svg><foreignObject xmlns:ns0="http://www.w3.org/1999/xhtml">'
+        "<ns0:div><ns0:p>text</ns0:p></ns0:div>"
+        "</foreignObject></svg>"
+    )
+
+    assert svg_utils._fix_xhtml_namespace_prefixes(serialized) == (
+        '<svg><foreignObject><div xmlns="http://www.w3.org/1999/xhtml">'
+        "<p>text</p></div></foreignObject></svg>"
+    )
+
+
 def test_write_accepts_a_path(tmp_path: Path) -> None:
     """A filename is opened as UTF-8 text, as an open file object would be."""
     svg, paragraph = _xhtml_tree()

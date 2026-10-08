@@ -374,7 +374,7 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
         SVG string with XHTML namespace prefixes removed.
 
     Note:
-        - Handles multiple foreignObject elements
+        - Handles multiple foreignObject elements, but not nested foreignObject tags
         - Works with any namespace prefix (html, ns0, ns1, etc.)
         - Only modifies XHTML elements (div, p, span)
         - Adds xmlns declaration to first XHTML element in each foreignObject
@@ -382,42 +382,12 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
     # XHTML namespace URL - escaped for use in regex patterns
     xhtml_ns_escaped = re.escape(XHTML_NAMESPACE)
 
-    # Pattern to match XHTML namespace declarations with any prefix
     ns_decl_pattern = f' xmlns:([a-zA-Z0-9]+)="{xhtml_ns_escaped}"'
-
-    # Find all prefixes used for XHTML namespace
-    matches = re.findall(ns_decl_pattern, svg_string)
-    if not matches:
-        # No XHTML namespace found, return unchanged
+    declarations = list(re.finditer(ns_decl_pattern, svg_string))
+    prefixes = {match.group(1) for match in declarations}
+    if not prefixes:
         return svg_string
 
-    result = svg_string
-
-    # Process each prefix (usually just one, but handle multiple)
-    for prefix in set(matches):  # Use set to avoid duplicates
-        # Remove the namespace declaration
-        result = re.sub(
-            f' xmlns:{re.escape(prefix)}="{xhtml_ns_escaped}"',
-            "",
-            result,
-        )
-
-        # Replace prefixed tags with unprefixed versions
-        # Opening tags: <prefix:tag> or <prefix:tag attr="...">
-        result = re.sub(
-            f"<{re.escape(prefix)}:(div|p|span)",
-            r"<\1",
-            result,
-        )
-        # Closing tags: </prefix:tag>
-        result = re.sub(
-            f"</{re.escape(prefix)}:(div|p|span)>",
-            r"</\1>",
-            result,
-        )
-
-    # Add xmlns attribute to first XHTML element after each foreignObject
-    # Use negative lookahead to ensure we stay within foreignObject boundaries
     def add_xmlns_to_first_element(match: re.Match[str]) -> str:
         """Add xmlns declaration to first XHTML element."""
         # Everything up to and including <foreignObject...> and content before tag
@@ -443,16 +413,52 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
 
         return f"{foreign_obj_part}<{tag_name}{new_attrs}{end_bracket}"
 
-    # Apply xmlns addition to first XHTML element in each foreignObject
-    # Use negative lookahead (?!</foreignObject) to stay within boundaries
-    result = re.sub(
-        r"(<foreignObject[^>]*>(?:(?!</foreignObject).)*?)<(div|p|span)([^>]*)(>)",
-        add_xmlns_to_first_element,
-        result,
-        flags=re.DOTALL,
-    )
+    def rewrite_foreign_object(fragment: str) -> str:
+        for prefix in prefixes:
+            fragment = re.sub(
+                f' xmlns:{re.escape(prefix)}="{xhtml_ns_escaped}"',
+                "",
+                fragment,
+            )
+            fragment = re.sub(f"<{re.escape(prefix)}:(div|p|span)", r"<\1", fragment)
+            fragment = re.sub(
+                f"</{re.escape(prefix)}:(div|p|span)>", r"</\1>", fragment
+            )
 
-    return result
+        return re.sub(
+            r"(<foreignObject[^>]*>(?:(?!</foreignObject).)*?)<(div|p|span)([^>]*)(>)",
+            add_xmlns_to_first_element,
+            fragment,
+            flags=re.DOTALL,
+        )
+
+    # Find spans without copying the image payload. The namespace declaration
+    # can live on the root or inside foreignObject, so skip declaration edits
+    # that are already covered by a rewritten foreignObject.
+    edits = [(match.start(), match.end(), "") for match in declarations]
+    edits.extend(
+        (
+            match.start(),
+            match.end(),
+            rewrite_foreign_object(match.group()),
+        )
+        for match in re.finditer(
+            r"<foreignObject\b[^>]*>.*?</foreignObject>",
+            svg_string,
+            flags=re.DOTALL,
+        )
+    )
+    edits.sort(key=lambda edit: edit[0])
+
+    parts: list[str] = []
+    end = 0
+    for start, stop, replacement in edits:
+        if start < end:
+            continue
+        parts.extend((svg_string[end:start], replacement))
+        end = stop
+    parts.append(svg_string[end:])
+    return "".join(parts)
 
 
 def tostring(node: ET.Element, indent: str = "  ") -> str:
