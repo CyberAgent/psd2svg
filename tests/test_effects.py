@@ -1,10 +1,14 @@
 """Tests for layer effect conversion."""
 
+import logging
+
+import pytest
 from psd_tools import PSDImage
-from psd_tools.api.effects import Stroke
+from psd_tools.api.effects import GradientOverlay, Stroke
 from psd_tools.api.layers import ShapeLayer
 from psd_tools.terminology import Enum, Key
 
+from psd2svg import SVGDocument
 from psd2svg.core.converter import Converter
 from psd2svg.core.effects import stroke_position
 from tests.conftest import get_fixture
@@ -15,6 +19,29 @@ def _build(psd_file: str) -> tuple[PSDImage, Converter]:
     converter = Converter(psdimage)
     converter.build()
     return psdimage, converter
+
+
+def test_noise_gradient_overlay_is_skipped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A noise gradient has no color or transparency stops."""
+    psdimage = PSDImage.open(get_fixture("effects/noise-gradient-overlay.psd"))
+    layer = next(layer for layer in psdimage.descendants() if layer.effects)
+    effect = next(iter(layer.effects.find("gradientoverlay", enabled=True)))
+    assert isinstance(effect, GradientOverlay)
+    gradient = effect.gradient
+    assert gradient[b"GrdF"].enum == Enum.ColorNoise
+    assert Key.Colors not in gradient
+    assert Key.Transparency not in gradient
+
+    with caplog.at_level(logging.WARNING, logger="psd2svg.core.effects"):
+        document = SVGDocument.from_psd(psdimage)
+
+    assert "Noise gradient overlay is not supported; skipping effect" in caplog.text
+    assert not any(
+        node.get("class") == "gradient-overlay-effect" for node in document.svg.iter()
+    )
+    assert any(node.tag == "image" for node in document.svg.iter())
 
 
 def test_vector_stroke_effect_opacity_is_normalized() -> None:
