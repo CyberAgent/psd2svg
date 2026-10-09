@@ -502,6 +502,13 @@ class EffectConverter(ConverterProtocol):
         effect_list = list(layer.effects.find("gradientoverlay", enabled=True))
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.GradientOverlay)
+            gradient_form = effect.gradient.get(b"GrdF")
+            if gradient_form is not None and gradient_form.enum == Enum.ColorNoise:
+                logger.warning(
+                    "Noise gradient overlay is not supported; skipping effect: "
+                    f"'{layer.name}' ({layer.kind})"
+                )
+                continue
             if effect.type == Enum.Linear:
                 gradient = self.add_linear_gradient(effect.gradient)
             elif effect.type == Enum.Radial:

@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Noise gradient overlays are skipped with a warning instead of aborting conversion** (#481)
+
 - **Short text style runs retain their final style through the remaining text** (#474)
 
 - **Clipping bases without a vector mask convert from their raster pixels** (#473)
