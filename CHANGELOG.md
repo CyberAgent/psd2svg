@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **XHTML serialization avoids repeated full-document copies** (#480)
+- **XHTML serialization avoids repeated full-document copies and preserves prefixed content outside `foreignObject`** (#480)
 
 - **Short text style runs retain their final style through the remaining text** (#474)
 

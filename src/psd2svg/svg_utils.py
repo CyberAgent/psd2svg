@@ -392,7 +392,7 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
 
     foreign_objects = list(
         re.finditer(
-            r"<foreignObject\b[^>]*>.*?</foreignObject>",
+            r"<foreignObject\b[^>]*(?<!/)>.*?</foreignObject>",
             svg_string,
             flags=re.DOTALL,
         )
@@ -471,13 +471,13 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
             flags=re.DOTALL,
         )
 
-    # Find spans without copying the image payload. The namespace declaration
-    # can live on the root or inside foreignObject, so skip declaration edits
-    # that are already covered by a rewritten foreignObject.
+    # Find spans without copying the image payload. Declarations inside a
+    # foreignObject are handled when that whole fragment is rewritten.
     edits = [
         (match.start(), match.end(), "")
         for match in declarations
         if match.group(1) not in prefixes_used_outside
+        and not inside_foreign_object(match.start())
     ]
     edits.extend(
         (
@@ -492,8 +492,6 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
     parts: list[str] = []
     end = 0
     for start, stop, replacement in edits:
-        if start < end:
-            continue
         parts.extend((svg_string[end:start], replacement))
         end = stop
     parts.append(svg_string[end:])

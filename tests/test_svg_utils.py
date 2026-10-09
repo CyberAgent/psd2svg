@@ -1963,6 +1963,28 @@ def test_xhtml_prefix_fixup_keeps_declaration_used_by_outside_attribute() -> Non
     ET.fromstring(result)
 
 
+def test_xhtml_prefix_fixup_ignores_self_closing_foreign_object() -> None:
+    namespace = svg_utils.XHTML_NAMESPACE
+    serialized = (
+        f'<svg xmlns:html="{namespace}">'
+        '<foreignObject x="0" />'
+        '<g html:data="outside" />'
+        "<foreignObject><html:div>inside</html:div></foreignObject>"
+        "</svg>"
+    )
+
+    result = svg_utils._fix_xhtml_namespace_prefixes(serialized)
+
+    assert result == (
+        f'<svg xmlns:html="{namespace}">'
+        '<foreignObject x="0" />'
+        '<g html:data="outside" />'
+        f'<foreignObject><div xmlns="{namespace}">inside</div></foreignObject>'
+        "</svg>"
+    )
+    ET.fromstring(result)
+
+
 def test_write_accepts_a_path(tmp_path: Path) -> None:
     """A filename is opened as UTF-8 text, as an open file object would be."""
     svg, paragraph = _xhtml_tree()
