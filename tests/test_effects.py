@@ -37,11 +37,35 @@ def test_noise_gradient_overlay_is_skipped(
     with caplog.at_level(logging.WARNING, logger="psd2svg.core.effects"):
         document = SVGDocument.from_psd(psdimage)
 
-    assert "Noise gradient overlay is not supported; skipping effect" in caplog.text
+    assert "Noise gradient is not supported; skipping gradient" in caplog.text
     assert not any(
         node.get("class") == "gradient-overlay-effect" for node in document.svg.iter()
     )
     assert any(node.tag == "image" for node in document.svg.iter())
+
+
+@pytest.mark.parametrize(
+    "fixture", ["stroke-1-vector-gradient.psd", "stroke-1-raster-gradient.psd"]
+)
+def test_noise_gradient_stroke_is_skipped(
+    fixture: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    noise_psd = PSDImage.open(get_fixture("effects/noise-gradient-overlay.psd"))
+    noise_layer = next(layer for layer in noise_psd.descendants() if layer.effects)
+    noise_effect = next(iter(noise_layer.effects.find("gradientoverlay")))
+    assert isinstance(noise_effect, GradientOverlay)
+
+    psdimage = PSDImage.open(get_fixture(f"effects/{fixture}"))
+    layer = next(layer for layer in psdimage.descendants() if layer.effects)
+    effect = next(iter(layer.effects.find("stroke")))
+    assert isinstance(effect, Stroke)
+    effect.descriptor[Key.Gradient] = noise_effect.gradient
+
+    with caplog.at_level(logging.WARNING, logger="psd2svg.core.effects"):
+        document = SVGDocument.from_psd(psdimage)
+
+    assert "Noise gradient stroke is not supported; skipping effect" in caplog.text
+    assert not any(node.get("class") == "stroke-effect" for node in document.svg.iter())
 
 
 def test_vector_stroke_effect_opacity_is_normalized() -> None:

@@ -30,7 +30,7 @@ from psd_tools.terminology import Enum, Key, Klass, Unit
 from psd2svg import svg_utils
 from psd2svg.core import color_utils
 from psd2svg.core.base import ConverterProtocol
-from psd2svg.core.gradient import GradientInterpolation
+from psd2svg.core.gradient import GradientInterpolation, is_noise_gradient
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +133,8 @@ class PaintConverter(ConverterProtocol):
             gradient = self.add_gradient_definition(layer, content_data)
             if gradient is not None:
                 svg_utils.set_attribute(node, "fill", svg_utils.get_funciri(gradient))
+            else:
+                svg_utils.set_attribute(node, "fill", "none")
         elif Enum.Pattern in content_data:
             pattern = self.add_pattern(self.psd, content_data[Enum.Pattern])
             if pattern is not None:
@@ -165,6 +167,8 @@ class PaintConverter(ConverterProtocol):
             gradient = self.add_gradient_definition(layer, setting)
             if gradient is not None:
                 svg_utils.set_attribute(node, "fill", svg_utils.get_funciri(gradient))
+            else:
+                svg_utils.set_attribute(node, "fill", "none")
         else:
             logger.debug(f"No fill information found: {layer}.")
         self.set_fill_opacity(layer, node)
@@ -243,17 +247,25 @@ class PaintConverter(ConverterProtocol):
         else:
             logger.warning("Only linear and radial gradients are supported yet.")
             return None
+        if node is None:
+            return None
         self.set_gradient_attributes(layer, descriptor, node)
         return node
 
-    def add_linear_gradient(self, gradient: Descriptor) -> ET.Element:
+    def add_linear_gradient(self, gradient: Descriptor) -> ET.Element | None:
         """Add linear gradient definition to the SVG document."""
+        if is_noise_gradient(gradient):
+            logger.warning("Noise gradient is not supported; skipping gradient")
+            return None
         node = self.create_node("linearGradient", id=self.auto_id("gradient"))
         self.set_gradient_stops(gradient, node)
         return node
 
-    def add_radial_gradient(self, gradient: Descriptor) -> ET.Element:
+    def add_radial_gradient(self, gradient: Descriptor) -> ET.Element | None:
         """Add radial gradient definition to the SVG document."""
+        if is_noise_gradient(gradient):
+            logger.warning("Noise gradient is not supported; skipping gradient")
+            return None
         node = self.create_node("radialGradient", id=self.auto_id("gradient"))
         self.set_gradient_stops(gradient, node)
         return node

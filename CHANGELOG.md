@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Noise gradient overlays are skipped with a warning instead of aborting conversion** (#481)
+- **Noise gradients in overlays, strokes, and fills are skipped with a warning instead of aborting conversion** (#481)
 
 - **Short text style runs retain their final style through the remaining text** (#474)
 

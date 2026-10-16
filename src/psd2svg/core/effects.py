@@ -13,7 +13,7 @@ from psd2svg import svg_utils
 from psd2svg.core import color_utils
 from psd2svg.core.base import ConverterProtocol, is_vector_shape
 from psd2svg.core.constants import FILTER_BLEND_MODES
-from psd2svg.core.gradient import GradientInterpolation
+from psd2svg.core.gradient import GradientInterpolation, is_noise_gradient
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +163,13 @@ class EffectConverter(ConverterProtocol):
         effect_list = list(layer.effects.find("stroke", enabled=True))
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.Stroke)
+            if effect.fill_type == Enum.GradientFill and effect.gradient is not None:
+                if is_noise_gradient(effect.gradient):
+                    logger.warning(
+                        "Noise gradient stroke is not supported; skipping effect: "
+                        f"'{layer.name}' ({layer.kind})"
+                    )
+                    continue
 
             if not is_vector_shape(layer) or "stroke" in target.attrib:
                 # NOTE: If there is already a stroke, we need to stroke around
@@ -346,6 +353,8 @@ class EffectConverter(ConverterProtocol):
                     f"Only linear and radial gradient strokes are supported: {effect}"
                 )
                 return use
+            if gradient is None:
+                return use
             self.set_gradient_transform(layer, gradient, effect)
             svg_utils.set_attribute(use, "stroke", svg_utils.get_funciri(gradient))
 
@@ -502,13 +511,6 @@ class EffectConverter(ConverterProtocol):
         effect_list = list(layer.effects.find("gradientoverlay", enabled=True))
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.GradientOverlay)
-            gradient_form = effect.gradient.get(b"GrdF")
-            if gradient_form is not None and gradient_form.enum == Enum.ColorNoise:
-                logger.warning(
-                    "Noise gradient overlay is not supported; skipping effect: "
-                    f"'{layer.name}' ({layer.kind})"
-                )
-                continue
             if effect.type == Enum.Linear:
                 gradient = self.add_linear_gradient(effect.gradient)
             elif effect.type == Enum.Radial:
@@ -523,6 +525,8 @@ class EffectConverter(ConverterProtocol):
                     "Only linear and radial gradient overlay are supported: "
                     f"{effect_type_str}: '{layer.name}' ({layer.kind})"
                 )
+                continue
+            if gradient is None:
                 continue
             self.set_gradient_transform(layer, gradient, effect)
 
