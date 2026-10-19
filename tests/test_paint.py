@@ -7,6 +7,7 @@ from xml.etree import ElementTree as ET
 
 import pytest
 from psd_tools import PSDImage
+from psd_tools.api.effects import GradientOverlay
 from psd_tools.api.layers import Layer
 from psd_tools.constants import Tag
 from psd_tools.psd import descriptor
@@ -102,6 +103,38 @@ def test_grayscale_solid_fill_colors() -> None:
     # so these are the naive conversions.
     fills = [node.attrib.get("fill") for node in converter.svg.findall(".//rect")]
     assert fills == ["#000000", "#bfbfbf"]
+
+
+@pytest.mark.parametrize(
+    "fixture, tag",
+    [
+        ("layer-types/gradient-fill.psd", Tag.GRADIENT_FILL_SETTING),
+        ("paint/linear-gradient-1.psd", Tag.VECTOR_STROKE_CONTENT_DATA),
+        ("paint/radial-gradient-1.psd", Tag.VECTOR_STROKE_CONTENT_DATA),
+    ],
+)
+def test_noise_gradient_fill_is_skipped(
+    fixture: str, tag: Tag, caplog: pytest.LogCaptureFixture
+) -> None:
+    noise_psd = PSDImage.open(get_fixture("effects/noise-gradient-overlay.psd"))
+    noise_layer = next(layer for layer in noise_psd.descendants() if layer.effects)
+    noise_effect = next(iter(noise_layer.effects.find("gradientoverlay")))
+    assert isinstance(noise_effect, GradientOverlay)
+
+    psdimage = PSDImage.open(get_fixture(fixture))
+    layer = next(
+        layer for layer in psdimage.descendants() if tag in layer.tagged_blocks
+    )
+    setting = layer.tagged_blocks.get_data(tag)
+    setting[Key.Gradient] = noise_effect.gradient
+
+    with caplog.at_level(logging.WARNING, logger="psd2svg.core.paint"):
+        converter = Converter(psdimage)
+        converter.build()
+
+    assert "Noise gradient is not supported; skipping gradient" in caplog.text
+    assert not any(node.tag.endswith("Gradient") for node in converter.svg.iter())
+    assert any(node.get("fill") == "none" for node in converter.svg.iter())
 
 
 def test_dashed_stroke_is_converted() -> None:

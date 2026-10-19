@@ -9,6 +9,12 @@ from psd2svg.core import color_utils
 logger = logging.getLogger(__name__)
 
 
+def is_noise_gradient(descriptor: Descriptor) -> bool:
+    """Whether a gradient uses Photoshop's unsupported noise form."""
+    form = descriptor.get(b"GrdF")
+    return form is not None and form.enum == Enum.ColorNoise
+
+
 class GradientInterpolation:
     """Helper to handle gradient interpolation from a PSD Descriptor.
 
