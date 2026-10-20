@@ -12,9 +12,11 @@ from psd_tools.api.layers import TypeLayer
 from psd_tools.psd.engine_data import Integer
 
 from psd2svg import SVGDocument
+from psd2svg.core import text as text_module
 from psd2svg.core.converter import Converter
 from psd2svg.core.text import (
     EM_BOX_DESCENT_RATIO,
+    TextConverter,
     TextWrappingMode,
     _alignment_em_fraction,
     _common_span_scale,
@@ -25,14 +27,17 @@ from psd2svg.core.typesetting import (
     FontBaseline,
     Paragraph,
     ParagraphSheet,
+    Rectangle,
     RunLengthIndex,
     ShapeType,
     Span,
     StyleRunAlignment,
     StyleSheet,
+    Transform,
     TypeSetting,
     WritingDirection,
 )
+from psd2svg.eval import compare_raster_images
 from psd2svg.rasterizer import PlaywrightRasterizer, ResvgRasterizer
 from tests.conftest import get_fixture, requires_playwright
 
@@ -43,6 +48,264 @@ def convert_psd_to_svg(psd_file: str) -> ET.Element:
     converter = Converter(psdimage)
     converter.build()
     return converter.svg
+
+
+@pytest.mark.parametrize(
+    "rasterizer_factory",
+    [
+        pytest.param(ResvgRasterizer, id="resvg"),
+        pytest.param(PlaywrightRasterizer, id="chromium", marks=requires_playwright),
+    ],
+)
+def test_uniform_layer_scale_is_folded_into_text_metrics(
+    rasterizer_factory: type,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A uniform layer scale moves into text metrics without changing pixels."""
+    fixture = "texts/style-scale-combination-with-transform.psd"
+    with monkeypatch.context() as patch:
+        patch.setattr(text_module, "_uniform_layer_scale", lambda transform: None)
+        original = convert_psd_to_svg(fixture)
+    svg = convert_psd_to_svg(fixture)
+    text = svg.find(".//text")
+    assert text is not None
+    assert text.attrib["transform"] == "translate(60.7,62)"
+    assert [span.attrib.get("font-size") for span in text.findall("tspan")] == [
+        "41.6",
+        "20.8",
+        "20.8",
+    ]
+    assert text.findall("tspan")[-1].attrib["dy"] == "24.96"
+
+    old_text = original.find(".//text")
+    assert old_text is not None
+    assert old_text.attrib["transform"].startswith("matrix(")
+    rasterizer = rasterizer_factory()
+    try:
+        before = rasterizer.from_string(ET.tostring(original, encoding="unicode"))
+        after = rasterizer.from_string(ET.tostring(svg, encoding="unicode"))
+    finally:
+        if isinstance(rasterizer, PlaywrightRasterizer):
+            rasterizer.close()
+    assert compare_raster_images(after, before, "MSE") < 1e-4
+
+
+def test_uniform_layer_scale_foreign_object_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scaled box scales its HTML layout lengths as well as its viewport."""
+    fixture = "texts/paragraph-space-after.psd"
+    unscaled = SVGDocument.from_psd(
+        PSDImage.open(get_fixture(fixture)),
+        text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT,
+    ).svg.find(".//foreignObject")
+    assert unscaled is not None
+    _, setting = _first_text_setting("texts/paragraph-space-after.psd")
+    original_transform = setting.transform
+    monkeypatch.setattr(
+        TypeSetting,
+        "transform",
+        property(
+            lambda self: Transform(
+                0.5, 0, 0, 0.5, original_transform.tx, original_transform.ty
+            )
+        ),
+    )
+    psdimage = PSDImage.open(get_fixture(fixture))
+    svg = SVGDocument.from_psd(
+        psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
+    ).svg
+    foreign_object = svg.find(".//foreignObject")
+    assert foreign_object is not None
+    assert foreign_object.attrib["transform"].startswith("translate(")
+    for name in ("x", "y", "width", "height"):
+        assert float(foreign_object.attrib[name]) == pytest.approx(
+            float(unscaled.attrib[name]) * 0.5, abs=0.01
+        )
+    assert all("matrix(" not in node.attrib.get("transform", "") for node in svg.iter())
+    scaled_sizes = [
+        float(value[:-2])
+        for node in foreign_object.iter()
+        if (value := _parse_style_string(node.attrib.get("style", "")).get("font-size"))
+    ]
+    original_sizes = [
+        float(value[:-2])
+        for node in unscaled.iter()
+        if (value := _parse_style_string(node.attrib.get("style", "")).get("font-size"))
+    ]
+    assert scaled_sizes == pytest.approx([size * 0.5 for size in original_sizes])
+
+
+@pytest.mark.parametrize(
+    "property_name,value,folded",
+    [
+        ("padding-top", "6px", True),
+        ("padding-bottom", "6px", True),
+        ("margin-inline", "6px", True),
+        ("margin-top", "6px", True),
+        ("margin-bottom", "6px", True),
+        ("word-spacing", "6px", True),
+        ("text-underline-offset", "6px", True),
+        ("padding-inline-start", "6px", False),
+        ("padding-top", "calc(6px + 1em)", False),
+    ],
+)
+def test_uniform_layer_scale_css_length_coverage(
+    monkeypatch: pytest.MonkeyPatch, property_name: str, value: str, folded: bool
+) -> None:
+    """Supported CSS lengths scale; unknown lengths retain the layer matrix."""
+    fixture = "texts/paragraph-space-after.psd"
+    _, setting = _first_text_setting(fixture)
+    original_transform = setting.transform
+    monkeypatch.setattr(
+        TypeSetting,
+        "transform",
+        property(
+            lambda self: Transform(
+                0.5, 0, 0, 0.5, original_transform.tx, original_transform.ty
+            )
+        ),
+    )
+    original_styles = TextConverter._get_foreign_object_container_styles
+
+    def add_length(
+        self: TextConverter, text_setting: TypeSetting, bounds: Rectangle
+    ) -> dict[str, str]:
+        styles = original_styles(self, text_setting, bounds)
+        styles[property_name] = value
+        return styles
+
+    monkeypatch.setattr(
+        TextConverter, "_get_foreign_object_container_styles", add_length
+    )
+    svg = SVGDocument.from_psd(
+        PSDImage.open(get_fixture(fixture)),
+        text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT,
+    ).svg
+    foreign_object = svg.find(".//foreignObject")
+    assert foreign_object is not None
+    assert foreign_object.attrib["transform"].startswith(
+        "translate(" if folded else "matrix("
+    )
+    div = next(iter(foreign_object))
+    assert _parse_style_string(div.attrib["style"])[property_name] == (
+        "3px" if folded else value
+    )
+
+
+def test_tiny_uniform_layer_scale_keeps_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scale rounded to zero cannot be folded into text lengths."""
+    monkeypatch.setattr(
+        TypeSetting,
+        "transform",
+        property(lambda self: Transform(0.00001, 0, 0, 0.00001, 4, 5)),
+    )
+    svg = convert_psd_to_svg("texts/style-scale-combination-with-transform.psd")
+    text = svg.find(".//text")
+    assert text is not None
+    assert text.attrib["transform"].startswith("matrix(0,0,0,0,")
+    assert text.findall("tspan")[0].attrib["font-size"] == "64"
+
+
+def test_uniform_layer_scale_scales_warp_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = "texts/text-warp-arc-h+50.psd"
+    unscaled = convert_psd_to_svg(fixture)
+    old_path = unscaled.find(".//path[@id]")
+    assert old_path is not None
+    _, setting = _first_text_setting(fixture)
+    original_transform = setting.transform
+    monkeypatch.setattr(
+        TypeSetting,
+        "transform",
+        property(
+            lambda self: Transform(
+                0.5, 0, 0, 0.5, original_transform.tx, original_transform.ty
+            )
+        ),
+    )
+    scaled = convert_psd_to_svg(fixture)
+    path = scaled.find(".//path[@id]")
+    text = scaled.find(".//text")
+    assert path is not None and text is not None
+    assert "matrix(" not in text.attrib["transform"]
+    # Arc rotation and flags stay intact while both radii and endpoints scale.
+    assert " 0 0 1 " in path.attrib["d"]
+    old_numbers = re.findall(r"-?\d+(?:\.\d+)?", old_path.attrib["d"])
+    new_numbers = re.findall(r"-?\d+(?:\.\d+)?", path.attrib["d"])
+    for index in (0, 1, 2, 3, 7, 8):
+        assert float(new_numbers[index]) == pytest.approx(
+            float(old_numbers[index]) * 0.5, abs=0.01
+        )
+
+
+def test_uniform_layer_scale_scales_absolute_letter_spacing() -> None:
+    psdimage = PSDImage.open(
+        get_fixture("texts/style-scale-combination-with-transform.psd")
+    )
+    svg = SVGDocument.from_psd(psdimage, text_letter_spacing_offset=1.0).svg
+    text = svg.find(".//text")
+    assert text is not None
+    assert "matrix(" not in text.attrib["transform"]
+    assert float(text.attrib["letter-spacing"]) == pytest.approx(0.65)
+
+
+def test_uniform_layer_scale_scales_faux_bold_stroke(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = "texts/style-faux-bold.psd"
+    unscaled = convert_psd_to_svg(fixture)
+    original_strokes = [
+        float(node.attrib["stroke-width"])
+        for node in unscaled.iter()
+        if "stroke-width" in node.attrib
+    ]
+    assert original_strokes
+    _, setting = _first_text_setting(fixture)
+    original_transform = setting.transform
+    monkeypatch.setattr(
+        TypeSetting,
+        "transform",
+        property(
+            lambda self: Transform(
+                0.5, 0, 0, 0.5, original_transform.tx, original_transform.ty
+            )
+        ),
+    )
+    scaled = convert_psd_to_svg(fixture)
+    scaled_strokes = [
+        float(node.attrib["stroke-width"])
+        for node in scaled.iter()
+        if "stroke-width" in node.attrib
+    ]
+    assert scaled_strokes == pytest.approx([width * 0.5 for width in original_strokes])
+
+
+@pytest.mark.parametrize(
+    "xx,yy,xy,yx",
+    [
+        (-1, -1, 0, 0),
+        (1, 1, 0.2, 0),
+        (1, 1, 0, 0.2),
+        # Within the tolerance, but 0.65 and 0.66 after SVG serialization.
+        (0.6549998, 0.6550002, 0, 0),
+    ],
+)
+def test_non_uniform_layer_transform_keeps_matrix(
+    monkeypatch: pytest.MonkeyPatch, xx: float, yy: float, xy: float, yx: float
+) -> None:
+    monkeypatch.setattr(
+        TypeSetting, "transform", property(lambda self: Transform(xx, yx, xy, yy, 4, 5))
+    )
+    svg = convert_psd_to_svg("texts/style-scale-combination-with-transform.psd")
+    text = svg.find(".//text")
+    assert text is not None
+    assert text.attrib["transform"].startswith("matrix(")
+    if xx == 0.6549998:
+        assert text.attrib["transform"].startswith("matrix(0.65,0,0,0.66,")
 
 
 def _first_text_setting(psd_file: str) -> tuple[PSDImage, TypeSetting]:

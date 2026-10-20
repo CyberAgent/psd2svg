@@ -25,6 +25,7 @@ Note: This module re-exports TypeSetting and TextWrappingMode for backward
 """
 
 import logging
+import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from typing import NamedTuple
@@ -43,6 +44,7 @@ from psd2svg.core.typesetting import (
     Span,
     StyleRunAlignment,
     TextWrappingMode,
+    Transform,
     TypeSetting,
     WritingDirection,
 )
@@ -236,6 +238,165 @@ def _scale_about(scale: tuple[float, float], origin: tuple[float, float]) -> str
         return scale_str
     translate_str = f"translate({svg_utils.num2str(tx)},{svg_utils.num2str(ty)})"
     return f"{translate_str} {scale_str}"
+
+
+_SCALED_SVG_LENGTHS = {
+    "x",
+    "y",
+    "dx",
+    "dy",
+    "width",
+    "height",
+    "font-size",
+    "letter-spacing",
+    "baseline-shift",
+    "stroke-width",
+    "textLength",
+}
+_SCALED_CSS_LENGTHS = {
+    "width",
+    "height",
+    "font-size",
+    "line-height",
+    "letter-spacing",
+    "text-indent",
+    "padding",
+    "padding-left",
+    "padding-right",
+    "padding-top",
+    "padding-bottom",
+    "margin",
+    "margin-block-start",
+    "margin-inline",
+    "margin-top",
+    "margin-bottom",
+    "inset-block-start",
+    "word-spacing",
+    "text-underline-offset",
+    "-webkit-text-stroke",
+}
+_CSS_LENGTH = re.compile(r"(?<![\w.-])(-?(?:\d+(?:\.\d*)?|\.\d+))px\b")
+_CSS_ANY_LENGTH = re.compile(r"(?<![\w.#-])-?(?:\d+(?:\.\d*)?|\.\d+)([a-zA-Z]+)\b")
+_SVG_NUMBER = re.compile(r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:px)?")
+_SVG_TRANSLATE = re.compile(r"translate\((-?[\d.]+),(-?[\d.]+)\)")
+_NON_LENGTH_SVG_NUMBERS = {"opacity", "fill-opacity", "stroke-opacity", "font-weight"}
+
+
+def _uniform_layer_scale(transform: Transform) -> float | None:
+    """Return the scale emitted by to_svg_matrix for a positive uniform scale."""
+    x_scale = svg_utils.num2str(transform.xx)
+    y_scale = svg_utils.num2str(transform.yy)
+    if (
+        transform.xx > 0
+        and abs(transform.xx - transform.yy) < SCALE_TOLERANCE
+        and x_scale == y_scale
+        and abs(transform.xy) < SCALE_TOLERANCE
+        and abs(transform.yx) < SCALE_TOLERANCE
+        and not transform.is_translation_only()
+    ):
+        # Text lengths must use the same rounded scale as the SVG matrix.
+        rounded_scale = float(x_scale)
+        return rounded_scale if rounded_scale > 0 else None
+    return None
+
+
+def _scale_svg_length(value: str, scale: float) -> str:
+    """Scale an SVG numeric length, leaving percentages and keywords alone."""
+    if value.endswith("px"):
+        return svg_utils.num2str(float(value[:-2]) * scale) + "px"
+    try:
+        return svg_utils.num2str(float(value) * scale)
+    except ValueError:
+        return value
+
+
+def _unsupported_text_length(node: ET.Element) -> str | None:
+    """Find a length that cannot be folded into text metrics."""
+    for child in node.iter():
+        for name, value in child.attrib.items():
+            if name == "style":
+                for declaration in value.split(";"):
+                    property_name, separator, css_value = declaration.partition(":")
+                    if not separator:
+                        continue
+                    property_name = property_name.strip()
+                    if property_name in _SCALED_CSS_LENGTHS:
+                        if any(
+                            match[1] != "px"
+                            for match in _CSS_ANY_LENGTH.finditer(css_value)
+                        ):
+                            return property_name
+                    elif _CSS_ANY_LENGTH.search(css_value):
+                        return property_name
+            elif name in _SCALED_SVG_LENGTHS:
+                if not _SVG_NUMBER.fullmatch(value) and not value.endswith("%"):
+                    return name
+            elif name != "transform" and name not in _NON_LENGTH_SVG_NUMBERS:
+                if _SVG_NUMBER.fullmatch(value) or _CSS_ANY_LENGTH.search(value):
+                    return name
+    return None
+
+
+def _scale_translates(transform: str, scale: float, skip_first: bool = False) -> str:
+    """Scale translation distances, optionally retaining the layer offset."""
+    first = True
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal first
+        if first and skip_first:
+            first = False
+            return match[0]
+        first = False
+        return "translate({},{})".format(
+            _scale_svg_length(match[1], scale),
+            _scale_svg_length(match[2], scale),
+        )
+
+    return _SVG_TRANSLATE.sub(replace, transform)
+
+
+def _scale_text_tree(node: ET.Element, scale: float) -> None:
+    """Move a uniform parent scale into text geometry and CSS pixel lengths."""
+    for child in node.iter():
+        for name in _SCALED_SVG_LENGTHS & child.attrib.keys():
+            child.set(name, _scale_svg_length(child.attrib[name], scale))
+        if "style" in child.attrib:
+            declarations = []
+            for declaration in child.attrib["style"].split(";"):
+                property_name, separator, value = declaration.partition(":")
+                if separator and property_name.strip() in _SCALED_CSS_LENGTHS:
+                    value = _CSS_LENGTH.sub(
+                        lambda match: svg_utils.num2str(float(match[1]) * scale) + "px",
+                        value,
+                    )
+                declarations.append(property_name + separator + value)
+            child.set("style", ";".join(declarations))
+        # The first root translation is the layer's output-space position.
+        if "transform" in child.attrib:
+            child.set(
+                "transform",
+                _scale_translates(child.attrib["transform"], scale, child is node),
+            )
+
+
+def _fold_uniform_text_scale(
+    node: ET.Element, transform: Transform, scale: float
+) -> bool:
+    """Fold a layer scale only when every emitted text length is supported."""
+    unsupported = _unsupported_text_length(node)
+    if unsupported is not None:
+        logger.warning("Keeping text matrix for unsupported length: %s", unsupported)
+        return False
+    matrix = transform.to_svg_matrix()
+    assert matrix is not None
+    current = node.attrib["transform"]
+    assert current.startswith(matrix)
+    translation = "translate({})".format(
+        svg_utils.seq2str((transform.tx, transform.ty))
+    )
+    node.set("transform", translation + current[len(matrix) :])
+    _scale_text_tree(node, scale)
+    return True
 
 
 def _paragraph_spacing(previous: Paragraph, paragraph: Paragraph) -> float:
@@ -544,7 +705,7 @@ class TextConverter(ConverterProtocol):
 
     def _create_text_path_node(
         self, text_setting: TypeSetting, text_node: ET.Element
-    ) -> ET.Element:
+    ) -> tuple[ET.Element, ET.Element]:
         """Create SVG textPath element from a TypeLayer."""
         defs = self.create_node("defs")
         warp_path = self.create_node(
@@ -570,7 +731,7 @@ class TextConverter(ConverterProtocol):
             method="stretch",
             textLength=text_length,
         )
-        return text_path_node
+        return text_path_node, warp_path
 
     def _create_native_svg_text(self, text_setting: TypeSetting) -> ET.Element:
         """Create native SVG <text> element (current implementation).
@@ -583,6 +744,7 @@ class TextConverter(ConverterProtocol):
         """
         # Use native x, y attributes for translation-only transforms
         transform = text_setting.transform
+        layer_scale = _uniform_layer_scale(transform)
         uses_native_positioning = (
             transform.is_translation_only() and not text_setting.has_warp()
         )
@@ -619,8 +781,11 @@ class TextConverter(ConverterProtocol):
         )
 
         container_node = text_node
+        warp_path = None
         if text_setting.has_warp():
-            container_node = self._create_text_path_node(text_setting, text_node)
+            container_node, warp_path = self._create_text_path_node(
+                text_setting, text_node
+            )
 
         # Paragraph baselines advance along the block axis. Keep the absolute offset
         # so per-span transforms can be anchored at the rendered paragraph origin.
@@ -719,6 +884,10 @@ class TextConverter(ConverterProtocol):
                 text_node, pinned_attributes=_TSPAN_PINNED_ATTRIBUTES
             )
             svg_utils.merge_attribute_less_children(text_node)
+        if layer_scale is not None:
+            if _fold_uniform_text_scale(text_node, transform, layer_scale):
+                if warp_path is not None:
+                    warp_path.set("d", text_setting.get_warp_path(layer_scale))
         return text_node
 
     def _apply_text_element_scaling(
@@ -827,6 +996,7 @@ class TextConverter(ConverterProtocol):
         """
         bounds = text_setting.box_bounds
         transform = text_setting.transform
+        layer_scale = _uniform_layer_scale(transform)
 
         # Create foreignObject element with bounding box dimensions
         foreign_obj = self.create_node(
@@ -877,6 +1047,8 @@ class TextConverter(ConverterProtocol):
                 spacing=spacing,
             )
 
+        if layer_scale is not None:
+            _fold_uniform_text_scale(foreign_obj, transform, layer_scale)
         return foreign_obj
 
     def _add_paragraph(
