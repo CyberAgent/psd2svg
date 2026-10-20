@@ -274,16 +274,19 @@ _SVG_TRANSLATE = re.compile(r"translate\((-?[\d.]+),(-?[\d.]+)\)")
 
 def _uniform_layer_scale(transform: Transform) -> float | None:
     """Return the scale emitted by to_svg_matrix for a positive uniform scale."""
+    x_scale = svg_utils.num2str(transform.xx)
+    y_scale = svg_utils.num2str(transform.yy)
     if (
         transform.xx > 0
         and abs(transform.xx - transform.yy) < SCALE_TOLERANCE
+        and x_scale == y_scale
         and abs(transform.xy) < SCALE_TOLERANCE
         and abs(transform.yx) < SCALE_TOLERANCE
         and not transform.is_translation_only()
     ):
         # The former matrix used the serialized value, so folding that same
         # value preserves its rasterization even when the PSD stores more digits.
-        return float(svg_utils.num2str(transform.xx))
+        return float(x_scale)
     return None
 
 

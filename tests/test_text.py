@@ -212,7 +212,14 @@ def test_uniform_layer_scale_scales_faux_bold_stroke(
 
 
 @pytest.mark.parametrize(
-    "xx,yy,xy,yx", [(-1, -1, 0, 0), (1, 1, 0.2, 0), (1, 1, 0, 0.2)]
+    "xx,yy,xy,yx",
+    [
+        (-1, -1, 0, 0),
+        (1, 1, 0.2, 0),
+        (1, 1, 0, 0.2),
+        # Within the tolerance, but 0.65 and 0.66 after SVG serialization.
+        (0.6549998, 0.6550002, 0, 0),
+    ],
 )
 def test_non_uniform_layer_transform_keeps_matrix(
     monkeypatch: pytest.MonkeyPatch, xx: float, yy: float, xy: float, yx: float
@@ -224,6 +231,8 @@ def test_non_uniform_layer_transform_keeps_matrix(
     text = svg.find(".//text")
     assert text is not None
     assert text.attrib["transform"].startswith("matrix(")
+    if xx == 0.6549998:
+        assert text.attrib["transform"].startswith("matrix(0.65,0,0,0.66,")
 
 
 def _first_text_setting(psd_file: str) -> tuple[PSDImage, TypeSetting]:
