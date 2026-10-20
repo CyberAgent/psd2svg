@@ -38,7 +38,7 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = [
-    "playwright>=1.40.0",
+    "playwright>=1.58.0",
 ]
 
 [dependency-groups]

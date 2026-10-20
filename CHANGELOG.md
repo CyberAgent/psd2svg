@@ -26,9 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ResvgRasterizer` sizes a root with only `width` or `height` from the viewBox aspect ratio** (#478)
   - Requires `resvg-py>=0.5.0`; `PlaywrightRasterizer` keeps its per-axis size.
 
+- **The `browser` extra requires `playwright>=1.58.0`** (#483)
+
 ### Fixed
 
-- **Uniform text-layer scales are folded into SVG text and layout lengths** (#485)
+- **Uniform text-layer scales are folded into SVG text and layout lengths** (#487)
+
+- **XHTML serialization avoids repeated full-document copies and preserves prefixed content outside `foreignObject`** (#480)
 
 - **Noise gradients in overlays, strokes, and fills are skipped with a warning instead of aborting conversion** (#481)
 
