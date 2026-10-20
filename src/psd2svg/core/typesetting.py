@@ -1021,8 +1021,15 @@ class TypeSetting:
         """Check if the text has a warp effect applied."""
         return self.warp_style is not None and self.warp_style != "warpNone"
 
-    def get_warp_path(self) -> str:
-        """Generate SVG path data for the warp effect."""
+    def get_warp_path(self, layer_scale: float = 1.0) -> str:
+        """Generate SVG path data for the warp effect at the emitted layer scale."""
+
+        def point(x: float, y: float) -> str:
+            # Scale the SVG coordinates after their usual two-decimal rounding.
+            return svg_utils.seq2str(
+                tuple(float(svg_utils.num2str(value)) * layer_scale for value in (x, y))
+            )
+
         if self.warp_style != "warpArc":
             logger.debug("Warp style not supported for path generation.")
             return ""
@@ -1032,8 +1039,8 @@ class TypeSetting:
                 "falling back to straight line."
             )
             return "M%s L%s" % (
-                svg_utils.seq2str((self.bounding_box.left, self.bounding_box.bottom)),
-                svg_utils.seq2str((self.bounding_box.right, self.bounding_box.bottom)),
+                point(self.bounding_box.left, self.bounding_box.bottom),
+                point(self.bounding_box.right, self.bounding_box.bottom),
             )
 
         # NOTE: warp_value 100 = 180 degrees arc
@@ -1043,38 +1050,32 @@ class TypeSetting:
         if self.warp_value == 0:
             # No warp, straight line.
             return "M%s L%s" % (
-                svg_utils.seq2str((self.bounding_box.left, self.bounding_box.bottom)),
-                svg_utils.seq2str((self.bounding_box.right, self.bounding_box.bottom)),
+                point(self.bounding_box.left, self.bounding_box.bottom),
+                point(self.bounding_box.right, self.bounding_box.bottom),
             )
 
         # We have a warp, compute the arc parameters.
-        scale = math.sin(math.pi / 2 * abs(self.warp_value) / 100)
-        radius = (self.bounding_box.width + self.bounding_box.height) / 2 / scale
+        arc_scale = math.sin(math.pi / 2 * abs(self.warp_value) / 100)
+        radius = (self.bounding_box.width + self.bounding_box.height) / 2 / arc_scale
         commands = []
         if self.warp_value > 0:
             # Positive warp, arc bulging upwards.
             x1 = self.bounding_box.left - self.bounding_box.height / 2
             y1 = self.bounding_box.bottom
-            commands.append("M%s" % svg_utils.seq2str((x1, y1)))
+            commands.append("M%s" % point(x1, y1))
             x2 = self.bounding_box.right + self.bounding_box.height / 2
             y2 = self.bounding_box.bottom
-            commands.append(
-                "A%s 0 0 1 %s"
-                % (svg_utils.seq2str((radius, radius)), svg_utils.seq2str((x2, y2)))
-            )
+            commands.append("A%s 0 0 1 %s" % (point(radius, radius), point(x2, y2)))
         else:
             # Negative warp, arc bulging downwards.
             # NOTE: Height adjustment should be the baseline height, not the
             # half box height.
             x1 = self.bounding_box.left - self.bounding_box.height / 2
             y1 = self.bounding_box.top + self.bounding_box.height / 2
-            commands.append("M%s" % svg_utils.seq2str((x1, y1)))
+            commands.append("M%s" % point(x1, y1))
             x2 = self.bounding_box.right + self.bounding_box.height / 2
             y2 = self.bounding_box.top + self.bounding_box.height / 2
-            commands.append(
-                "A%s 0 0 0 %s"
-                % (svg_utils.seq2str((radius, radius)), svg_utils.seq2str((x2, y2)))
-            )
+            commands.append("A%s 0 0 0 %s" % (point(radius, radius), point(x2, y2)))
         return " ".join(commands)
 
 

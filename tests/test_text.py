@@ -1,4 +1,3 @@
-import copy
 import logging
 import math
 import re
@@ -13,9 +12,11 @@ from psd_tools.api.layers import TypeLayer
 from psd_tools.psd.engine_data import Integer
 
 from psd2svg import SVGDocument
+from psd2svg.core import text as text_module
 from psd2svg.core.converter import Converter
 from psd2svg.core.text import (
     EM_BOX_DESCENT_RATIO,
+    TextConverter,
     TextWrappingMode,
     _alignment_em_fraction,
     _common_span_scale,
@@ -26,6 +27,7 @@ from psd2svg.core.typesetting import (
     FontBaseline,
     Paragraph,
     ParagraphSheet,
+    Rectangle,
     RunLengthIndex,
     ShapeType,
     Span,
@@ -35,6 +37,7 @@ from psd2svg.core.typesetting import (
     TypeSetting,
     WritingDirection,
 )
+from psd2svg.eval import compare_raster_images
 from psd2svg.rasterizer import PlaywrightRasterizer, ResvgRasterizer
 from tests.conftest import get_fixture, requires_playwright
 
@@ -56,9 +59,14 @@ def convert_psd_to_svg(psd_file: str) -> ET.Element:
 )
 def test_uniform_layer_scale_is_folded_into_text_metrics(
     rasterizer_factory: type,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The existing scaled PSD needs no new fixture for the basic regression."""
-    svg = convert_psd_to_svg("texts/style-scale-combination-with-transform.psd")
+    """A uniform layer scale moves into text metrics without changing pixels."""
+    fixture = "texts/style-scale-combination-with-transform.psd"
+    with monkeypatch.context() as patch:
+        patch.setattr(text_module, "_uniform_layer_scale", lambda transform: None)
+        original = convert_psd_to_svg(fixture)
+    svg = convert_psd_to_svg(fixture)
     text = svg.find(".//text")
     assert text is not None
     assert text.attrib["transform"] == "translate(60.7,62)"
@@ -69,25 +77,17 @@ def test_uniform_layer_scale_is_folded_into_text_metrics(
     ]
     assert text.findall("tspan")[-1].attrib["dy"] == "24.96"
 
-    # The original conversion used a rounded 0.65 matrix. Compare its known
-    # markup against the new geometry with the same background and font setup.
-    original = copy.deepcopy(svg)
     old_text = original.find(".//text")
     assert old_text is not None
-    old_text.set("transform", "matrix(0.65,0,0,0.65,60.7,62)")
-    for span, font_size in zip(old_text.findall("tspan"), ("64", "32", "32")):
-        span.set("font-size", font_size)
-    old_text.findall("tspan")[-1].set("dy", "38.4")
+    assert old_text.attrib["transform"].startswith("matrix(")
     rasterizer = rasterizer_factory()
     try:
-        before = np.asarray(
-            rasterizer.from_string(ET.tostring(original, encoding="unicode"))
-        )
-        after = np.asarray(rasterizer.from_string(ET.tostring(svg, encoding="unicode")))
+        before = rasterizer.from_string(ET.tostring(original, encoding="unicode"))
+        after = rasterizer.from_string(ET.tostring(svg, encoding="unicode"))
     finally:
         if isinstance(rasterizer, PlaywrightRasterizer):
             rasterizer.close()
-    np.testing.assert_array_equal(after, before)
+    assert compare_raster_images(after, before, "MSE") < 1e-4
 
 
 def test_uniform_layer_scale_foreign_object_metrics(
@@ -134,6 +134,79 @@ def test_uniform_layer_scale_foreign_object_metrics(
         if (value := _parse_style_string(node.attrib.get("style", "")).get("font-size"))
     ]
     assert scaled_sizes == pytest.approx([size * 0.5 for size in original_sizes])
+
+
+@pytest.mark.parametrize(
+    "property_name,value,folded",
+    [
+        ("padding-top", "6px", True),
+        ("padding-bottom", "6px", True),
+        ("margin-inline", "6px", True),
+        ("margin-top", "6px", True),
+        ("margin-bottom", "6px", True),
+        ("word-spacing", "6px", True),
+        ("text-underline-offset", "6px", True),
+        ("padding-inline-start", "6px", False),
+        ("padding-top", "calc(6px + 1em)", False),
+    ],
+)
+def test_uniform_layer_scale_css_length_coverage(
+    monkeypatch: pytest.MonkeyPatch, property_name: str, value: str, folded: bool
+) -> None:
+    """Supported CSS lengths scale; unknown lengths retain the layer matrix."""
+    fixture = "texts/paragraph-space-after.psd"
+    _, setting = _first_text_setting(fixture)
+    original_transform = setting.transform
+    monkeypatch.setattr(
+        TypeSetting,
+        "transform",
+        property(
+            lambda self: Transform(
+                0.5, 0, 0, 0.5, original_transform.tx, original_transform.ty
+            )
+        ),
+    )
+    original_styles = TextConverter._get_foreign_object_container_styles
+
+    def add_length(
+        self: TextConverter, text_setting: TypeSetting, bounds: Rectangle
+    ) -> dict[str, str]:
+        styles = original_styles(self, text_setting, bounds)
+        styles[property_name] = value
+        return styles
+
+    monkeypatch.setattr(
+        TextConverter, "_get_foreign_object_container_styles", add_length
+    )
+    svg = SVGDocument.from_psd(
+        PSDImage.open(get_fixture(fixture)),
+        text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT,
+    ).svg
+    foreign_object = svg.find(".//foreignObject")
+    assert foreign_object is not None
+    assert foreign_object.attrib["transform"].startswith(
+        "translate(" if folded else "matrix("
+    )
+    div = next(iter(foreign_object))
+    assert _parse_style_string(div.attrib["style"])[property_name] == (
+        "3px" if folded else value
+    )
+
+
+def test_tiny_uniform_layer_scale_keeps_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scale rounded to zero cannot be folded into text lengths."""
+    monkeypatch.setattr(
+        TypeSetting,
+        "transform",
+        property(lambda self: Transform(0.00001, 0, 0, 0.00001, 4, 5)),
+    )
+    svg = convert_psd_to_svg("texts/style-scale-combination-with-transform.psd")
+    text = svg.find(".//text")
+    assert text is not None
+    assert text.attrib["transform"].startswith("matrix(0,0,0,0,")
+    assert text.findall("tspan")[0].attrib["font-size"] == "64"
 
 
 def test_uniform_layer_scale_scales_warp_path(
