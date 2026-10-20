@@ -25,6 +25,7 @@ Note: This module re-exports TypeSetting and TextWrappingMode for backward
 """
 
 import logging
+import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from typing import NamedTuple
@@ -43,6 +44,7 @@ from psd2svg.core.typesetting import (
     Span,
     StyleRunAlignment,
     TextWrappingMode,
+    Transform,
     TypeSetting,
     WritingDirection,
 )
@@ -236,6 +238,137 @@ def _scale_about(scale: tuple[float, float], origin: tuple[float, float]) -> str
         return scale_str
     translate_str = f"translate({svg_utils.num2str(tx)},{svg_utils.num2str(ty)})"
     return f"{translate_str} {scale_str}"
+
+
+_SCALED_SVG_LENGTHS = {
+    "x",
+    "y",
+    "dx",
+    "dy",
+    "width",
+    "height",
+    "font-size",
+    "letter-spacing",
+    "baseline-shift",
+    "stroke-width",
+    "textLength",
+}
+_SCALED_CSS_LENGTHS = {
+    "width",
+    "height",
+    "font-size",
+    "line-height",
+    "letter-spacing",
+    "text-indent",
+    "padding",
+    "padding-left",
+    "padding-right",
+    "margin",
+    "margin-block-start",
+    "inset-block-start",
+    "-webkit-text-stroke",
+}
+_CSS_LENGTH = re.compile(r"(?<![\w.-])(-?(?:\d+(?:\.\d*)?|\.\d+))px\b")
+_SVG_TRANSLATE = re.compile(r"translate\((-?[\d.]+),(-?[\d.]+)\)")
+
+
+def _uniform_layer_scale(transform: Transform) -> float | None:
+    """Return the scale emitted by to_svg_matrix for a positive uniform scale."""
+    if (
+        transform.xx > 0
+        and abs(transform.xx - transform.yy) < SCALE_TOLERANCE
+        and abs(transform.xy) < SCALE_TOLERANCE
+        and abs(transform.yx) < SCALE_TOLERANCE
+        and not transform.is_translation_only()
+    ):
+        # The former matrix used the serialized value, so folding that same
+        # value preserves its rasterization even when the PSD stores more digits.
+        return float(svg_utils.num2str(transform.xx))
+    return None
+
+
+def _scale_svg_length(value: str, scale: float) -> str:
+    """Scale an SVG numeric length, leaving percentages and keywords alone."""
+    try:
+        return svg_utils.num2str(float(value) * scale)
+    except ValueError:
+        return value
+
+
+def _scale_text_tree(node: ET.Element, scale: float) -> None:
+    """Move a uniform parent scale into text geometry and CSS pixel lengths."""
+    for child in node.iter():
+        for name in _SCALED_SVG_LENGTHS & child.attrib.keys():
+            child.set(name, _scale_svg_length(child.attrib[name], scale))
+        if "style" in child.attrib:
+            declarations = []
+            for declaration in child.attrib["style"].split(";"):
+                property_name, separator, value = declaration.partition(":")
+                if separator and property_name.strip() in _SCALED_CSS_LENGTHS:
+                    value = _CSS_LENGTH.sub(
+                        lambda match: svg_utils.num2str(float(match[1]) * scale) + "px",
+                        value,
+                    )
+                declarations.append(property_name + separator + value)
+            child.set("style", ";".join(declarations))
+        # Uniform scaling commutes with a child's own scale. Its translation,
+        # which anchors a non-uniform character scale, is a length as well.
+        if child is node:
+            # The first translation is the layer's output-space tx/ty. Any
+            # following translation anchors character scaling in local units.
+            if "transform" in child.attrib:
+                transform = child.attrib["transform"]
+                first = _SVG_TRANSLATE.search(transform)
+                if first is not None:
+                    child.set(
+                        "transform",
+                        transform[: first.end()]
+                        + _SVG_TRANSLATE.sub(
+                            lambda match: "translate({},{})".format(
+                                _scale_svg_length(match[1], scale),
+                                _scale_svg_length(match[2], scale),
+                            ),
+                            transform[first.end() :],
+                        ),
+                    )
+        elif "transform" in child.attrib:
+            child.set(
+                "transform",
+                _SVG_TRANSLATE.sub(
+                    lambda match: "translate({},{})".format(
+                        _scale_svg_length(match[1], scale),
+                        _scale_svg_length(match[2], scale),
+                    ),
+                    child.attrib["transform"],
+                ),
+            )
+
+
+def _scale_warp_path(path: str, scale: float) -> str:
+    """Scale coordinates in the M/L/A commands produced by get_warp_path."""
+    commands = []
+    for command in path.split(" "):
+        if command.startswith(("M", "L")):
+            numbers = command[1:].split(",")
+            commands.append(
+                command[0] + ",".join(_scale_svg_length(n, scale) for n in numbers)
+            )
+        elif command.startswith("A"):
+            numbers = command[1:].split(",")
+            commands.append(
+                "A" + ",".join(_scale_svg_length(n, scale) for n in numbers)
+            )
+        else:
+            commands.append(command)
+    # Arc commands include rotation and flags separated by spaces. They must
+    # remain unchanged; only their final endpoint pair is a length.
+    for index, command in enumerate(commands):
+        if command.startswith("A") and index + 4 < len(commands):
+            endpoint = commands[index + 4].split(",")
+            commands[index + 4] = ",".join(
+                _scale_svg_length(n, scale) for n in endpoint
+            )
+    return " ".join(commands)
 
 
 def _paragraph_spacing(previous: Paragraph, paragraph: Paragraph) -> float:
@@ -543,14 +676,14 @@ class TextConverter(ConverterProtocol):
             return self._create_native_svg_text(text_setting)
 
     def _create_text_path_node(
-        self, text_setting: TypeSetting, text_node: ET.Element
+        self, text_setting: TypeSetting, text_node: ET.Element, layer_scale: float = 1.0
     ) -> ET.Element:
         """Create SVG textPath element from a TypeLayer."""
         defs = self.create_node("defs")
         warp_path = self.create_node(
             "path",
             parent=defs,
-            d=text_setting.get_warp_path(),
+            d=_scale_warp_path(text_setting.get_warp_path(), layer_scale),
             id=self.auto_id("warp-path"),
         )
         # NOTE: Due to browser inconsistencies with textLength on textPath,
@@ -583,6 +716,7 @@ class TextConverter(ConverterProtocol):
         """
         # Use native x, y attributes for translation-only transforms
         transform = text_setting.transform
+        layer_scale = _uniform_layer_scale(transform)
         uses_native_positioning = (
             transform.is_translation_only() and not text_setting.has_warp()
         )
@@ -605,7 +739,13 @@ class TextConverter(ConverterProtocol):
             # Use transform for non-translation transforms
             text_node = self.create_node(
                 "text",
-                transform=transform.to_svg_matrix(),
+                transform=(
+                    "translate({})".format(
+                        svg_utils.seq2str((transform.tx, transform.ty))
+                    )
+                    if layer_scale is not None
+                    else transform.to_svg_matrix()
+                ),
                 xml_space="preserve" if needs_preserve else None,
             )
 
@@ -620,7 +760,9 @@ class TextConverter(ConverterProtocol):
 
         container_node = text_node
         if text_setting.has_warp():
-            container_node = self._create_text_path_node(text_setting, text_node)
+            container_node = self._create_text_path_node(
+                text_setting, text_node, layer_scale or 1.0
+            )
 
         # Paragraph baselines advance along the block axis. Keep the absolute offset
         # so per-span transforms can be anchored at the rendered paragraph origin.
@@ -719,6 +861,8 @@ class TextConverter(ConverterProtocol):
                 text_node, pinned_attributes=_TSPAN_PINNED_ATTRIBUTES
             )
             svg_utils.merge_attribute_less_children(text_node)
+        if layer_scale is not None:
+            _scale_text_tree(text_node, layer_scale)
         return text_node
 
     def _apply_text_element_scaling(
@@ -827,6 +971,7 @@ class TextConverter(ConverterProtocol):
         """
         bounds = text_setting.box_bounds
         transform = text_setting.transform
+        layer_scale = _uniform_layer_scale(transform)
 
         # Create foreignObject element with bounding box dimensions
         foreign_obj = self.create_node(
@@ -842,7 +987,13 @@ class TextConverter(ConverterProtocol):
         )
 
         # Apply non-translation transform if needed
-        if not transform.is_translation_only():
+        if layer_scale is not None:
+            svg_utils.set_attribute(
+                foreign_obj,
+                "transform",
+                "translate({})".format(svg_utils.seq2str((transform.tx, transform.ty))),
+            )
+        elif not transform.is_translation_only():
             svg_utils.set_attribute(foreign_obj, "transform", transform.to_svg_matrix())
 
         # Check if any paragraph has auto hyphenation enabled
@@ -877,6 +1028,8 @@ class TextConverter(ConverterProtocol):
                 spacing=spacing,
             )
 
+        if layer_scale is not None:
+            _scale_text_tree(foreign_obj, layer_scale)
         return foreign_obj
 
     def _add_paragraph(
