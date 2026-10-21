@@ -505,7 +505,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not supported. Photoshop's per-hue-range weighting has no SVG
         filter equivalent, so the layer is omitted from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Black and White adjustment layer is not supported and is omitted "
             f"from the output: '{layer.name}' ({layer.kind}). Photoshop weights "
             f"each pixel by which of six color ranges its hue falls into, which "
@@ -522,7 +522,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not yet implemented, tracked by issue #369. The layer is omitted
         from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Channel Mixer adjustment layer is not yet implemented and is "
             f"omitted from the output: '{layer.name}' ({layer.kind}). "
             f"See https://github.com/CyberAgent/psd2svg/issues/369."
@@ -537,7 +537,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not supported. A 3D LUT has no SVG filter primitive and psd-tools
         does not expose the data, so the layer is omitted from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Color Lookup adjustment layer is not supported and is omitted "
             f"from the output: '{layer.name}' ({layer.kind}). A 3D LUT has no "
             f"SVG filter primitive, and psd-tools does not expose the lookup "
@@ -625,7 +625,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not yet implemented, tracked by issue #368. The layer is omitted
         from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Gradient Map adjustment layer is not yet implemented and is "
             f"omitted from the output: '{layer.name}' ({layer.kind}). "
             f"See https://github.com/CyberAgent/psd2svg/issues/368."
@@ -712,7 +712,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not yet implemented, tracked by issue #370. The layer is omitted
         from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Photo Filter adjustment layer is not yet implemented and is "
             f"omitted from the output: '{layer.name}' ({layer.kind}). "
             f"See https://github.com/CyberAgent/psd2svg/issues/370."
@@ -727,7 +727,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not supported. Photoshop's per-hue-range adjustment has no SVG
         filter equivalent, so the layer is omitted from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Selective Color adjustment layer is not supported and is omitted "
             f"from the output: '{layer.name}' ({layer.kind}). Photoshop adjusts "
             f"each pixel by which color range its hue falls into, which SVG "
@@ -744,7 +744,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not supported. The adjustment is nonlinear in each pixel's
         existing saturation, so the layer is omitted from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Vibrance adjustment layer is not supported and is omitted from "
             f"the output: '{layer.name}' ({layer.kind}). The adjustment is "
             f"nonlinear in each pixel's existing saturation, which is not a "
