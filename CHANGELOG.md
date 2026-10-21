@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-21
+
 ### Added
 
 - **`PlaywrightRasterizer` launch options, timeout, and `restart()`** (#458)
@@ -30,7 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Uniform text-layer scales are folded into SVG text and layout lengths** (#487)
+- **Uniform text-layer scales are folded into SVG text and layout lengths** (#487, #489)
+  - When the emitted transform does not match the scale, conversion warns and keeps the original transform instead of aborting.
 
 - **XHTML serialization avoids repeated full-document copies and preserves prefixed content outside `foreignObject`** (#480)
 
@@ -59,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **numpy has a minimum version for each supported Python** (#460)
   - `numpy>=1.26.0` below Python 3.13, `>=2.1.0` on 3.13, `>=2.3.2` on 3.14
+
+### Dependencies
+
+- psd-tools 1.23.1 is now the minimum (#477); lock file refreshes and CI action bumps (actions/cache, github/codeql-action)
 
 ## [0.13.0] - 2026-09-28
 
@@ -576,7 +583,8 @@ See [limitations.rst](https://psd2svg.readthedocs.io/en/latest/limitations.html)
 
 Previous releases - see git history for details.
 
-[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/CyberAgent/psd2svg/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/CyberAgent/psd2svg/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/CyberAgent/psd2svg/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/CyberAgent/psd2svg/compare/v0.11.0...v0.12.0
