@@ -193,6 +193,46 @@ def test_uniform_layer_scale_css_length_coverage(
     )
 
 
+@pytest.mark.parametrize("emitted_transform", ["translate(4,5)", None])
+def test_uniform_layer_scale_keeps_text_when_matrix_mismatches(
+    emitted_transform: str | None, caplog: pytest.LogCaptureFixture
+) -> None:
+    node = ET.Element("text")
+    if emitted_transform is not None:
+        node.set("transform", emitted_transform)
+    span = ET.SubElement(node, "tspan", {"font-size": "10"})
+
+    with caplog.at_level(logging.WARNING):
+        assert not text_module._fold_uniform_text_scale(
+            node, Transform(0.5, 0, 0, 0.5, 4, 5), 0.5
+        )
+
+    assert node.get("transform") == emitted_transform
+    assert span.attrib["font-size"] == "10"
+    assert "does not start with 'matrix(0.5,0,0,0.5,4,5)'" in caplog.text
+
+
+def test_uniform_layer_scale_fallback_keeps_native_text_geometry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = "texts/style-scale-combination-with-transform.psd"
+    with monkeypatch.context() as patch:
+        patch.setattr(text_module, "_uniform_layer_scale", lambda transform: None)
+        baseline = convert_psd_to_svg(fixture).find(".//text")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            text_module,
+            "_fold_uniform_text_scale",
+            lambda node, transform, scale: False,
+        )
+        fallback = convert_psd_to_svg(fixture).find(".//text")
+
+    assert baseline is not None and fallback is not None
+    assert baseline.attrib["transform"].startswith("matrix(")
+    assert ET.tostring(fallback) == ET.tostring(baseline)
+
+
 def test_tiny_uniform_layer_scale_keeps_matrix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
