@@ -100,7 +100,7 @@ class WindowsFontResolver:
             - Sets _initialized flag to prevent rebuilding
         """
         if not HAS_WINREG:
-            logger.warning(
+            logger.info(
                 "Windows registry (winreg) not available. "
                 "Windows font resolution disabled."
             )
@@ -417,7 +417,7 @@ class WindowsFontResolver:
             )
 
             if coverage < min_coverage:
-                logger.info(
+                logger.debug(
                     f"Font '{postscript_name}' has insufficient charset coverage "
                     f"({coverage:.1%}), rejecting (minimum: {min_coverage:.0%})"
                 )

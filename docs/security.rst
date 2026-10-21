@@ -53,7 +53,7 @@ Font File Validation
 When extracting font files from SVG ``@font-face`` rules (used by ResvgRasterizer), psd2svg validates:
 
 1. **File extensions**: Only valid font formats are accepted (``.ttf``, ``.otf``, ``.woff``, ``.woff2``, ``.ttc``)
-2. **File existence**: Non-existent files are skipped with a warning
+2. **File existence**: Non-existent files are skipped and logged at ``INFO``
 
 .. code-block:: python
 

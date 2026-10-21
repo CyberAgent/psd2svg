@@ -128,7 +128,7 @@ def test_noise_gradient_fill_is_skipped(
     setting = layer.tagged_blocks.get_data(tag)
     setting[Key.Gradient] = noise_effect.gradient
 
-    with caplog.at_level(logging.WARNING, logger="psd2svg.core.paint"):
+    with caplog.at_level(logging.DEBUG, logger="psd2svg.core.paint"):
         converter = Converter(psdimage)
         converter.build()
 
@@ -202,7 +202,7 @@ def test_dash_offset_in_pixels_honors_the_stored_unit(
     stroke._data[b"strokeStyleLineDashOffset"] = UnitFloat(
         unit=Unit.Millimeters, value=7.0
     )
-    with caplog.at_level(logging.WARNING, logger="psd2svg.core.paint"):
+    with caplog.at_level(logging.DEBUG, logger="psd2svg.core.paint"):
         assert get_dash_offset_in_pixels(stroke) == 7.0
     assert "Unsupported dash offset unit" in caplog.text
 

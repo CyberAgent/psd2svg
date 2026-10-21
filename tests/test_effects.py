@@ -34,7 +34,7 @@ def test_noise_gradient_overlay_is_skipped(
     assert Key.Colors not in gradient
     assert Key.Transparency not in gradient
 
-    with caplog.at_level(logging.WARNING, logger="psd2svg.core.effects"):
+    with caplog.at_level(logging.DEBUG, logger="psd2svg"):
         document = SVGDocument.from_psd(psdimage)
 
     assert "Noise gradient is not supported; skipping gradient" in caplog.text
@@ -61,7 +61,7 @@ def test_noise_gradient_stroke_is_skipped(
     assert isinstance(effect, Stroke)
     effect.descriptor[Key.Gradient] = noise_effect.gradient
 
-    with caplog.at_level(logging.WARNING, logger="psd2svg.core.effects"):
+    with caplog.at_level(logging.DEBUG, logger="psd2svg"):
         document = SVGDocument.from_psd(psdimage)
 
     assert "Noise gradient stroke is not supported; skipping effect" in caplog.text

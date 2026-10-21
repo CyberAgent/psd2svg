@@ -140,7 +140,7 @@ def descriptor2hex(desc: Descriptor | None, fallback: str = "none") -> str:
         gray = float2uint8(1.0 - float(desc.get(Enum.Gray, 0)) / 100.0)
         return f"#{gray:02x}{gray:02x}{gray:02x}"
 
-    logger.warning("Unsupported color mode: %s", desc.classID)
+    logger.debug("Unsupported color mode: %s", desc.classID)
     return fallback
 
 

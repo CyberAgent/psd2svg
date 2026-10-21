@@ -51,7 +51,7 @@ def get_dash_offset_in_pixels(stroke: Stroke) -> float:
     )
     if offset.unit is not Unit.Points:
         if offset.unit is not Unit.Pixels:
-            logger.warning(f"Unsupported dash offset unit: {offset.unit}")
+            logger.debug(f"Unsupported dash offset unit: {offset.unit}")
         return float(offset)
     resolution = float(stroke._data.get(b"strokeStyleResolution", POINTS_PER_INCH))
     return float(offset) * resolution / POINTS_PER_INCH
@@ -141,7 +141,7 @@ class PaintConverter(ConverterProtocol):
                 self.set_pattern_transform(layer, content_data, pattern)
                 svg_utils.set_attribute(node, "fill", svg_utils.get_funciri(pattern))
         else:
-            logger.warning(f"Unsupported fill content: {content_data}")
+            logger.debug(f"Unsupported fill content: {content_data}")
         self.set_fill_opacity(layer, node)
 
     def set_fill_setting(
@@ -187,14 +187,14 @@ class PaintConverter(ConverterProtocol):
 
         stroke = layer.stroke
         if stroke.line_alignment != "center":
-            logger.warning("Inner or outer stroke is not supported yet.")
+            logger.debug("Inner or outer stroke is not supported yet.")
             # TODO: Perhaps use clipPath to simulate this.
         if stroke.line_width != 1.0:
             svg_utils.set_attribute(node, "stroke-width", stroke.line_width)
 
         content = stroke.content
         if content is None:
-            logger.warning("Stroke has no content: %s", layer.name)
+            logger.debug("Stroke has no content: %s", layer.name)
         elif content.classID == b"patternLayer":
             if Enum.Pattern not in content:
                 raise ValueError(f"No pattern found in stroke content: {content}.")
@@ -210,7 +210,7 @@ class PaintConverter(ConverterProtocol):
             color = color_utils.descriptor2hex(content[Klass.Color])
             svg_utils.set_attribute(node, "stroke", color)
         else:
-            logger.warning(f"Unsupported stroke content: {content}")
+            logger.debug(f"Unsupported stroke content: {content}")
 
         if not stroke.fill_enabled:
             svg_utils.set_attribute(node, "fill", "none")
@@ -245,7 +245,7 @@ class PaintConverter(ConverterProtocol):
         elif descriptor[Key.Type].enum == Enum.Radial:
             node = self.add_radial_gradient(descriptor[Key.Gradient])
         else:
-            logger.warning("Only linear and radial gradients are supported yet.")
+            logger.debug("Only linear and radial gradients are supported yet.")
             return None
         if node is None:
             return None
@@ -255,7 +255,7 @@ class PaintConverter(ConverterProtocol):
     def add_linear_gradient(self, gradient: Descriptor) -> ET.Element | None:
         """Add linear gradient definition to the SVG document."""
         if is_noise_gradient(gradient):
-            logger.warning("Noise gradient is not supported; skipping gradient")
+            logger.debug("Noise gradient is not supported; skipping gradient")
             return None
         node = self.create_node("linearGradient", id=self.auto_id("gradient"))
         self.set_gradient_stops(gradient, node)
@@ -264,7 +264,7 @@ class PaintConverter(ConverterProtocol):
     def add_radial_gradient(self, gradient: Descriptor) -> ET.Element | None:
         """Add radial gradient definition to the SVG document."""
         if is_noise_gradient(gradient):
-            logger.warning("Noise gradient is not supported; skipping gradient")
+            logger.debug("Noise gradient is not supported; skipping gradient")
             return None
         node = self.create_node("radialGradient", id=self.auto_id("gradient"))
         self.set_gradient_stops(gradient, node)
@@ -383,15 +383,15 @@ class PaintConverter(ConverterProtocol):
         if b"gradientsInterpolationMethod" in setting:
             method = setting[b"gradientsInterpolationMethod"]
             if method.enum == Enum.Perceptual:
-                logger.info("Perceptual gradient interpolation is not accurate.")
+                logger.debug("Perceptual gradient interpolation is not accurate.")
             elif method.enum == Enum.Linear:
-                logger.info("Linear gradient interpolation is not accurate.")
+                logger.debug("Linear gradient interpolation is not accurate.")
             elif method.enum == b"GIMs":  # Stripes
-                logger.warning("Stripes gradient interpolation is not supported yet.")
+                logger.debug("Stripes gradient interpolation is not supported yet.")
             elif method.enum == b"Gcls":  # Classic
                 pass  # Default is classic
             elif method.enum == Key.Smooth:  # Smooth
-                logger.info("Smooth gradient interpolation is not accurate.")
+                logger.debug("Smooth gradient interpolation is not accurate.")
 
     def add_pattern(self, psdimage: PSDImage, descriptor: Descriptor) -> ET.Element:
         """Add pattern definition to the SVG document."""

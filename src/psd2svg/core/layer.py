@@ -234,7 +234,7 @@ class LayerConverter(ConverterProtocol):
     ) -> ET.Element | None:
         """Add a general pixel-based layer to the svg document."""
         if not layer.has_pixels():
-            logger.warning(
+            logger.debug(
                 f"Layer has no pixels, skipping: '{layer.name}' ({layer.kind})."
             )
             return None
@@ -248,7 +248,7 @@ class LayerConverter(ConverterProtocol):
         # We will later fill in the href attribute when embedding images.
         image = layer.topil()
         if image is None:
-            logger.warning(
+            logger.debug(
                 f"Layer has no image data, skipping: '{layer.name}' ({layer.kind})."
             )
             return None
@@ -563,7 +563,7 @@ class LayerConverter(ConverterProtocol):
             target = self.add_layer(layer, depth=depth)
             if target is None:
                 parent.remove(defs)
-                logger.warning(
+                logger.debug(
                     "Clipping base has no content, skipping clipped layers: "
                     f"'{layer.name}' ({layer.kind})."
                 )
@@ -720,7 +720,7 @@ class LayerConverter(ConverterProtocol):
                 if isinstance(psd_mode, bytes)
                 else str(psd_mode)
             )
-            logger.warning(
+            logger.debug(
                 f"Blend mode '{mode_name}' is not accurately supported in SVG. "
                 f"Using approximation '{blend_mode}' instead."
             )

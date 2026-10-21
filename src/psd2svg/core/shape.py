@@ -60,7 +60,7 @@ class ShapeConverter(ConverterProtocol):
         for path in layer.vector_mask.paths:
             if path.operation == -1:  # Even-odd fill rule
                 if len(subpaths) == 0:
-                    logger.warning("Even-odd fill rule without preceding path")
+                    logger.debug("Even-odd fill rule without preceding path")
                     subpaths.append([path])
                 else:
                     subpaths[-1].append(path)
@@ -271,7 +271,7 @@ class ShapeConverter(ConverterProtocol):
             raise ValueError("Layer has no vector mask: %s", layer.name)
 
         if layer.vector_mask.initial_fill_rule:
-            logger.warning("Initial fill rule (inverted mask) is not supported yet.")
+            logger.debug("Initial fill rule (inverted mask) is not supported yet.")
 
         if self.enable_live_shapes and layer.has_origination():
             origination = layer.origination[path.index]
@@ -443,7 +443,7 @@ class ShapeConverter(ConverterProtocol):
                 id=self.auto_id("use"),
             )
             if "style" in node.attrib and "mix-blend-mode" in node.attrib["style"]:
-                logger.warning(
+                logger.debug(
                     "Mix-blend-mode may not work correctly with transformed "
                     "shapes using clip-path or mask."
                 )

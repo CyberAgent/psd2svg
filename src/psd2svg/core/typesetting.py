@@ -1111,7 +1111,7 @@ def _color_to_argb(
             a, c, m, y, k = values
             r, g, b = color_utils.cmyk2rgb_float((c, m, y, k))
             return (a, r, g, b)
-    logger.warning(
+    logger.debug(
         "Unsupported text color, falling back to %s: %s", fallback, dict(color)
     )
     return fallback

@@ -940,7 +940,7 @@ class FontInfo:
 
         # 3. Not found
         if not HAS_FONTCONFIG and not HAS_WINDOWS_FONTS:
-            logger.warning(
+            logger.debug(
                 f"Font '{postscriptname}' not found: "
                 "platform-specific font resolution not available. "
                 "Consider providing a custom font mapping "
@@ -948,7 +948,7 @@ class FontInfo:
             )
         else:
             platform_name = "fontconfig" if HAS_FONTCONFIG else "Windows registry"
-            logger.warning(
+            logger.debug(
                 f"Font '{postscriptname}' not found via {platform_name}. "
                 "Make sure the font is installed on your system, or provide a custom "
                 "font mapping via the font_mapping parameter."

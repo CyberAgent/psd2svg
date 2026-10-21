@@ -559,6 +559,30 @@ class TestSVGDocumentEmbedFonts:
         mock_encode.assert_called_once()
 
     @patch("psd2svg.core.font_utils.FontInfo.resolve")
+    def test_embed_fonts_warns_once_per_missing_font(
+        self, mock_resolve: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A font that cannot be resolved produces a single warning."""
+        mock_resolve.return_value = None
+
+        svg_elem = ET.Element("svg")
+        for _ in range(3):
+            text_elem = ET.SubElement(svg_elem, "text")
+            text_elem.set("font-family", "MissingFont")
+            text_elem.text = "Test"
+
+        document = SVGDocument(svg=svg_elem, images={})
+        with caplog.at_level(logging.DEBUG):
+            document.tostring(embed_images=True, embed_fonts=True, subset_fonts=False)
+
+        warnings = [
+            r
+            for r in caplog.records
+            if r.levelno >= logging.WARNING and "MissingFont" in r.message
+        ]
+        assert len(warnings) == 1
+
+    @patch("psd2svg.core.font_utils.FontInfo.resolve")
     def test_embed_fonts_handles_missing_font_gracefully(
         self, mock_resolve: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -573,14 +597,15 @@ class TestSVGDocumentEmbedFonts:
         text_elem.text = "Test"
 
         document = SVGDocument(svg=svg_elem, images={})
-        result = document.tostring(
-            embed_images=True, embed_fonts=True, subset_fonts=False
-        )
+        with caplog.at_level(logging.DEBUG):
+            result = document.tostring(
+                embed_images=True, embed_fonts=True, subset_fonts=False
+            )
 
         # Should not raise exception
         assert "<style>" not in result
 
-        # Should log warning about no fonts embedded (font resolution returned None)
+        # Should log that no fonts were embedded (font resolution returned None)
         assert "No resolved fonts found; skipping font embedding" in caplog.text
 
     @patch("psd2svg.core.font_utils.encode_font_data_uri")
