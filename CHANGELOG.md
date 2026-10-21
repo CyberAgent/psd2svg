@@ -30,8 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Text scale folding keeps the existing transform when its matrix is unavailable or does not match** (#489)
-
 - **Uniform text-layer scales are folded into SVG text and layout lengths** (#487)
 
 - **XHTML serialization avoids repeated full-document copies and preserves prefixed content outside `foreignObject`** (#480)

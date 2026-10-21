@@ -193,22 +193,6 @@ def test_uniform_layer_scale_css_length_coverage(
     )
 
 
-def test_uniform_layer_scale_keeps_text_when_matrix_unavailable(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    node = ET.Element("text", transform="matrix(0.5,0,0,0.5,4,5)")
-    span = ET.SubElement(node, "tspan", {"font-size": "10"})
-    transform = Transform(0.5, 0, 0, 0.5, 4, 5)
-    monkeypatch.setattr(Transform, "to_svg_matrix", lambda self: None)
-
-    with caplog.at_level(logging.WARNING):
-        assert not text_module._fold_uniform_text_scale(node, transform, 0.5)
-
-    assert node.attrib["transform"] == "matrix(0.5,0,0,0.5,4,5)"
-    assert span.attrib["font-size"] == "10"
-    assert "transform matrix is unavailable" in caplog.text
-
-
 @pytest.mark.parametrize("emitted_transform", ["translate(4,5)", None])
 def test_uniform_layer_scale_keeps_text_when_matrix_mismatches(
     emitted_transform: str | None, caplog: pytest.LogCaptureFixture
@@ -225,7 +209,28 @@ def test_uniform_layer_scale_keeps_text_when_matrix_mismatches(
 
     assert node.get("transform") == emitted_transform
     assert span.attrib["font-size"] == "10"
-    assert "emitted transform does not match matrix" in caplog.text
+    assert "does not start with 'matrix(0.5,0,0,0.5,4,5)'" in caplog.text
+
+
+def test_uniform_layer_scale_fallback_keeps_native_text_geometry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = "texts/style-scale-combination-with-transform.psd"
+    with monkeypatch.context() as patch:
+        patch.setattr(text_module, "_uniform_layer_scale", lambda transform: None)
+        baseline = convert_psd_to_svg(fixture).find(".//text")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            text_module,
+            "_fold_uniform_text_scale",
+            lambda node, transform, scale: False,
+        )
+        fallback = convert_psd_to_svg(fixture).find(".//text")
+
+    assert baseline is not None and fallback is not None
+    assert baseline.attrib["transform"].startswith("matrix(")
+    assert ET.tostring(fallback) == ET.tostring(baseline)
 
 
 def test_tiny_uniform_layer_scale_keeps_matrix(

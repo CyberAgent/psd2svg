@@ -388,13 +388,13 @@ def _fold_uniform_text_scale(
         logger.warning("Keeping text matrix for unsupported length: %s", unsupported)
         return False
     matrix = transform.to_svg_matrix()
-    if matrix is None:
-        logger.warning("Skipping text scale folding: transform matrix is unavailable")
-        return False
+    assert matrix is not None
     current = node.get("transform", "")
     if not current.startswith(matrix):
         logger.warning(
-            "Skipping text scale folding: emitted transform does not match matrix"
+            "Skipping text scale folding: emitted transform %r does not start with %r",
+            current,
+            matrix,
         )
         return False
     translation = "translate({})".format(
