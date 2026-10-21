@@ -198,7 +198,7 @@ neither primitive can express, so there is no faithful conversion to implement:
 
 Layers of these four types are **omitted from the output**: the rest of the
 document converts normally, but the adjustment is not applied. The converter logs
-a warning naming the layer. Flatten these adjustments in Photoshop before
+the layer at DEBUG (``-vv``). Flatten these adjustments in Photoshop before
 conversion, or export a flattened version.
 
 **Technical Limitations:**
