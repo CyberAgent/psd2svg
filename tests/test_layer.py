@@ -452,3 +452,77 @@ class TestClippingBaseDepth:
             psdimage, resource_limits=ResourceLimits(max_layer_depth=5)
         )
         assert document.tostring()
+
+
+def backdrop_references(svg: ET.Element) -> dict[str, int]:
+    """Count the <use> references to each backdrop symbol."""
+    nodes = [(node.tag.rpartition("}")[2], node) for node in svg.iter()]
+    counts = {node.get("id", ""): 0 for tag, node in nodes if tag == "symbol"}
+    for tag, node in nodes:
+        target = node.get("href", "").removeprefix("#")
+        if tag == "use" and target in counts:
+            counts[target] += 1
+    return counts
+
+
+class TestAdjustmentBackdrop:
+    """Test how often an adjustment references the backdrop it filters."""
+
+    @pytest.mark.parametrize("optimize", [False, True])
+    def test_opaque_adjustment_references_backdrop_once(self, optimize: bool) -> None:
+        """Test that an unmasked, opaque, normal adjustment drops the plain copy."""
+        svg = build_svg("adjustments/posterize-levels4.psd", optimize)
+        assert list(backdrop_references(svg).values()) == [1]
+
+    def test_stacked_adjustments_reference_each_backdrop_once(self) -> None:
+        """Test that a stack of adjustments keeps the render tree linear."""
+        psdimage = PSDImage.open(get_fixture("adjustments/posterize-levels4.psd"))
+        adjustment = next(
+            layer
+            for layer in psdimage.descendants()
+            if isinstance(layer, layers.AdjustmentLayer)
+        )
+        converter = Converter(psdimage)
+        converter.build()
+        with converter.set_current(converter.svg):
+            for _ in range(3):
+                converter.add_layer(adjustment)
+        assert list(backdrop_references(converter.svg).values()) == [1] * 4
+
+    @pytest.mark.parametrize(
+        "psd_file",
+        ["adjustments/invert-mask.psd", "adjustments/invert-clipping-mask.psd"],
+    )
+    @pytest.mark.parametrize("optimize", [False, True])
+    def test_masked_adjustment_keeps_backdrop(
+        self, psd_file: str, optimize: bool
+    ) -> None:
+        """Test that the backdrop shows through where the adjustment is masked."""
+        svg = build_svg(psd_file, optimize)
+        assert list(backdrop_references(svg).values()) == [2]
+
+    @pytest.mark.parametrize(
+        "attribute, value",
+        [("opacity", 128), ("blend_mode", BlendMode.MULTIPLY)],
+    )
+    def test_translucent_adjustment_keeps_backdrop(
+        self, attribute: str, value: object
+    ) -> None:
+        """Test that the backdrop shows through a translucent or blended adjustment."""
+        psdimage = PSDImage.open(get_fixture("adjustments/posterize-levels4.psd"))
+        for layer in psdimage.descendants():
+            if isinstance(layer, layers.AdjustmentLayer):
+                setattr(layer, attribute, value)
+        svg = ET.fromstring(SVGDocument.from_psd(psdimage).tostring())
+        assert list(backdrop_references(svg).values()) == [2]
+
+    def test_filter_region_covers_canvas(self) -> None:
+        """Test that strokes and effects outside the backdrop bbox stay visible."""
+        svg = build_svg("adjustments/posterize-levels4.psd")
+        filter = next(svg.iter(f"{SVG_NS}filter"))
+        assert filter.get("filterUnits") == "userSpaceOnUse"
+        assert (filter.get("x"), filter.get("y")) == ("0", "0")
+        assert (filter.get("width"), filter.get("height")) == (
+            svg.get("width"),
+            svg.get("height"),
+        )
