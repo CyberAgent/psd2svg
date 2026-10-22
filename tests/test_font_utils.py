@@ -368,7 +368,7 @@ class TestFontInfoResolve:
         """Test resolve method when font is not found."""
         mock_match.return_value = None
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             font = FontInfo.resolve("NonExistentFont")
 
         assert font is None
@@ -383,7 +383,7 @@ class TestFontInfoResolve:
         """Test resolve method with empty match result."""
         mock_match.return_value = {}
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             font = FontInfo.resolve("EmptyFont")
 
         assert font is None

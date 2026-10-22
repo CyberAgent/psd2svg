@@ -114,11 +114,25 @@ def parse_args() -> tuple[argparse.Namespace, argparse.ArgumentParser]:
             "bounding box text; point text always uses native SVG <text> elements."
         ),
     )
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase logging detail: -v for INFO, -vv for DEBUG",
+    )
+    verbosity.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Log errors only (ERROR level)",
+    )
     parser.add_argument(
         "--loglevel",
         metavar="LEVEL",
-        default="WARNING",
-        help="Logging level, default WARNING",
+        default=None,
+        help="Logging level; overrides -v and -q. Default WARNING",
     )
     # Resource limit arguments
     parser.add_argument(
@@ -175,10 +189,24 @@ def parse_args() -> tuple[argparse.Namespace, argparse.ArgumentParser]:
     return parser.parse_args(), parser
 
 
+def resolve_log_level(args: argparse.Namespace) -> int:
+    """Resolve the logging level; an explicit ``--loglevel`` wins over -v/-q."""
+    if args.loglevel is not None:
+        level = getattr(logging, args.loglevel.upper(), logging.WARNING)
+        return level if isinstance(level, int) else logging.WARNING
+    if args.quiet:
+        return logging.ERROR
+    if args.verbose >= 2:
+        return logging.DEBUG
+    if args.verbose == 1:
+        return logging.INFO
+    return logging.WARNING
+
+
 def main() -> None:
     """Main function to convert PSD to SVG or raster image."""
     args, parser = parse_args()
-    logging.basicConfig(level=getattr(logging, args.loglevel.upper(), "WARNING"))
+    logging.basicConfig(level=resolve_log_level(args))
 
     # Create ResourceLimits from CLI args with proper precedence
     try:

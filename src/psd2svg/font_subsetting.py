@@ -142,9 +142,7 @@ def subset_font(
         )
 
     if not unicode_codepoints:
-        logger.warning(
-            "No Unicode codepoints provided for subsetting, using all glyphs"
-        )
+        logger.debug("No Unicode codepoints provided for subsetting, using all glyphs")
 
     # Convert to sorted list for fontTools
     unicodes = sorted(unicode_codepoints)

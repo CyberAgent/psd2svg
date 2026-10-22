@@ -165,7 +165,7 @@ class EffectConverter(ConverterProtocol):
             assert isinstance(effect, effects.Stroke)
             if effect.fill_type == Enum.GradientFill and effect.gradient is not None:
                 if is_noise_gradient(effect.gradient):
-                    logger.warning(
+                    logger.debug(
                         "Noise gradient stroke is not supported; skipping effect: "
                         f"'{layer.name}' ({layer.kind})"
                     )
@@ -279,7 +279,7 @@ class EffectConverter(ConverterProtocol):
                 elif effect.type == Enum.Radial:
                     gradient = self.add_radial_gradient(effect.gradient)
                 else:
-                    logger.warning(
+                    logger.debug(
                         "Only linear and radial gradient strokes are supported: "
                         f"{effect}"
                     )
@@ -349,7 +349,7 @@ class EffectConverter(ConverterProtocol):
             elif effect.type == Enum.Radial:
                 gradient = self.add_radial_gradient(effect.gradient)
             else:
-                logger.warning(
+                logger.debug(
                     f"Only linear and radial gradient strokes are supported: {effect}"
                 )
                 return use
@@ -521,7 +521,7 @@ class EffectConverter(ConverterProtocol):
                     if isinstance(effect.type, bytes)
                     else str(effect.type)
                 )
-                logger.warning(
+                logger.debug(
                     "Only linear and radial gradient overlay are supported: "
                     f"{effect_type_str}: '{layer.name}' ({layer.kind})"
                 )
@@ -701,15 +701,15 @@ class EffectConverter(ConverterProtocol):
         if b"gs99" in effect.descriptor:
             method = effect.descriptor[b"gs99"]
             if method.enum == Enum.Perceptual:
-                logger.info("Perceptual gradient interpolation is not accurate.")
+                logger.debug("Perceptual gradient interpolation is not accurate.")
             elif method.enum == Enum.Linear:
-                logger.info("Linear gradient interpolation is not accurate.")
+                logger.debug("Linear gradient interpolation is not accurate.")
             elif method.enum == b"GIMs":  # Stripes
-                logger.warning("Stripes gradient interpolation is not supported yet.")
+                logger.debug("Stripes gradient interpolation is not supported yet.")
             elif method.enum == b"Gcls":  # Classic
                 pass  # Default is classic
             elif method.enum == Key.Smooth:  # Smooth
-                logger.info("Smooth gradient interpolation is not accurate.")
+                logger.debug("Smooth gradient interpolation is not accurate.")
 
     def apply_pattern_overlay_effect(
         self, layer: layers.Layer, target: ET.Element
@@ -929,7 +929,7 @@ class EffectConverter(ConverterProtocol):
                 if isinstance(effect.glow_type, bytes)
                 else str(effect.glow_type)
             )
-            logger.warning(f"Only softer inner glow is supported: {glow_type_str}")
+            logger.debug(f"Only softer inner glow is supported: {glow_type_str}")
         choke = float(effect.choke)
         size = float(effect.size)
 
@@ -941,7 +941,7 @@ class EffectConverter(ConverterProtocol):
         elif effect.gradient is not None:
             # Gradient-based glow: use first color stop as approximation
             # TODO: Support full gradient rendering for inner glow
-            logger.warning(
+            logger.debug(
                 "Gradient-based inner glow is approximated using first color stop"
             )
             try:
@@ -997,7 +997,7 @@ class EffectConverter(ConverterProtocol):
         effect_list = list(layer.effects.find("satin", enabled=True))
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.Satin)
-            logger.warning(
+            logger.debug(
                 f"Satin effect is not supported yet: '{layer.name}' ({layer.kind})"
             )
 
@@ -1007,7 +1007,7 @@ class EffectConverter(ConverterProtocol):
         effect_list = list(layer.effects.find("bevelemboss", enabled=True))
         for effect in reversed(effect_list):
             assert isinstance(effect, effects.BevelEmboss)
-            logger.warning(
+            logger.debug(
                 f"Bevel emboss effect is not supported yet: "
                 f"'{layer.name}' ({layer.kind})"
             )

@@ -137,7 +137,7 @@ class ResvgRasterizer(BaseRasterizer):
 
             # Validate file existence
             if not os.path.isfile(font_path):
-                logger.warning(f"Skipping non-existent font file: {font_path}")
+                logger.info(f"Skipping non-existent font file: {font_path}")
                 continue
 
             font_files.append(font_path)

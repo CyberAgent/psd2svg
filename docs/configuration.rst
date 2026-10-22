@@ -317,14 +317,16 @@ Error Handling
 
 **Common exceptions:** ``FileNotFoundError``, ``ValueError`` (invalid PSD), ``PermissionError``, ``OSError``
 
-**Debug logging:**
+**Logging:**
+
+The library logs through ``logging.getLogger("psd2svg")`` and never configures handlers. Expected limitations and approximations log at ``DEBUG``, notable decisions at ``INFO``, and likely-wrong output at ``WARNING``.
 
 .. code-block:: python
 
    import logging
    logging.basicConfig(level=logging.DEBUG)
 
-Prints detailed info: layer processing, font resolution, rasterization decisions
+On the command line, use ``-v`` (``INFO``), ``-vv`` (``DEBUG``), ``-q`` (``ERROR``) or ``--loglevel``.
 
 Environment Variables
 ----------------------

@@ -154,6 +154,25 @@ Control text wrapping mode for bounding box text layers. Supported modes:
 
 See :ref:`configuration-text-wrapping-mode` for detailed SVG output examples and configuration file options.
 
+Logging
+~~~~~~~
+
+**-v, --verbose**
+
+Log at ``INFO`` (``-v``) or ``DEBUG`` (``-vv``). ``DEBUG`` includes every expected limitation and approximation. The default is ``WARNING``.
+
+**-q, --quiet**
+
+Log errors only. Cannot be combined with ``-v``.
+
+**--loglevel LEVEL**
+
+Set the level by name (for example ``DEBUG``). Overrides ``-v`` and ``-q``.
+
+.. code-block:: bash
+
+   psd2svg input.psd output.svg -vv
+
 Generating Font Mappings
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

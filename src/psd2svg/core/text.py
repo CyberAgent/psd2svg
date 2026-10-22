@@ -141,6 +141,13 @@ class TextScaling(NamedTuple):
     transform_scale: tuple[float, float] | None
 
 
+def _log_faux_bold_skipped() -> None:
+    logger.debug(
+        "Faux bold is not applied to a span that also has a character stroke; "
+        "the stroke is emitted alone."
+    )
+
+
 def _alignment_em_fraction(
     alignment: StyleRunAlignment, writing_direction: WritingDirection
 ) -> float | None:
@@ -385,13 +392,13 @@ def _fold_uniform_text_scale(
     """Fold a layer scale only when every emitted text length is supported."""
     unsupported = _unsupported_text_length(node)
     if unsupported is not None:
-        logger.warning("Keeping text matrix for unsupported length: %s", unsupported)
+        logger.debug("Keeping text matrix for unsupported length: %s", unsupported)
         return False
     matrix = transform.to_svg_matrix()
     assert matrix is not None
     current = node.get("transform", "")
     if not current.startswith(matrix):
-        logger.warning(
+        logger.debug(
             "Skipping text scale folding: emitted transform %r does not start with %r",
             current,
             matrix,
@@ -1219,7 +1226,7 @@ class TextConverter(ConverterProtocol):
             text_setting: Type setting object containing bounds information.
         """
         if paragraph.justification == Justification.JUSTIFY_ALL:
-            logger.info("Justify All is not fully supported in SVG.")
+            logger.debug("Justify All is not fully supported in SVG.")
             svg_utils.set_attribute(
                 paragraph_node,
                 "textLength",
@@ -1302,10 +1309,7 @@ class TextConverter(ConverterProtocol):
             if style.stroke_flag and stroke != "none":
                 # stroke/stroke-width are already taken by the PSD character
                 # stroke, whose own width psd2svg does not read yet.
-                logger.warning(
-                    "Faux bold is not applied to a span that also has a "
-                    "character stroke; the stroke is emitted alone."
-                )
+                _log_faux_bold_skipped()
             elif fill_color != "none":
                 # Thicken the glyph in the colour it is painted in.
                 # get_fill_color() returns None both for SVG's default black and
@@ -1448,7 +1452,7 @@ class TextConverter(ConverterProtocol):
         # and it could not be applied to the <text> element.
         # (Uniform scaling is already handled via scaled_font_size above.)
         if scaling.transform_scale is not None:
-            logger.warning(
+            logger.info(
                 "Non-uniform text scaling on individual spans is not supported by "
                 "SVG renderers, which ignore transform on <tspan>. Advance widths "
                 "and text positions are preserved, but the glyphs will not be "
@@ -1530,7 +1534,7 @@ class TextConverter(ConverterProtocol):
 
         # Validate scale values and determine approach
         if vertical_scale <= 0 or horizontal_scale <= 0:
-            logger.warning(
+            logger.debug(
                 f"Invalid scale values: horizontal={horizontal_scale}, "
                 f"vertical={vertical_scale}. Using original font-size."
             )
@@ -1687,7 +1691,7 @@ class TextConverter(ConverterProtocol):
             box_extent = bounds.height
 
         if minimum_extent > box_extent:
-            logger.warning(
+            logger.info(
                 "Text layer '%s' needs at least %.2fpx of its %.2fpx box and "
                 "overflows it; the overflow renders outside the box instead of "
                 "being clipped.",
@@ -2172,10 +2176,7 @@ class TextConverter(ConverterProtocol):
         if style.faux_bold:
             fill_color = style.get_fill_color()
             if style.stroke_flag and stroke_color != "none":
-                logger.warning(
-                    "Faux bold is not applied to a span that also has a "
-                    "character stroke; the stroke is emitted alone."
-                )
+                _log_faux_bold_skipped()
             elif fill_color != "none":
                 em = self._foreign_object_font_size(span, text_setting)
                 width = svg_utils.num2str_with_unit(FAUX_BOLD_STROKE_RATIO * em)

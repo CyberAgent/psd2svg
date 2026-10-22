@@ -37,7 +37,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that dissolve blend mode triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.DISSOLVE, node)
 
         assert len(caplog.records) == 1
@@ -49,7 +49,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that linear burn blend mode triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.LINEAR_BURN, node)
 
         assert len(caplog.records) == 1
@@ -61,7 +61,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that linear dodge blend mode triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.LINEAR_DODGE, node)
 
         assert len(caplog.records) == 1
@@ -73,7 +73,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that bytes linearBurn also triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.LINEAR_BURN, node)
 
         assert len(caplog.records) == 1
@@ -84,7 +84,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that bytes linearDodge also triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.LINEAR_DODGE, node)
 
         assert len(caplog.records) == 1
@@ -95,7 +95,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that pin light blend mode triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.PIN_LIGHT, node)
 
         assert len(caplog.records) == 1
@@ -106,7 +106,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that hard mix blend mode triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.HARD_MIX, node)
 
         assert len(caplog.records) == 1
@@ -117,7 +117,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that darker color blend mode triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.DARKER_COLOR, node)
 
         assert len(caplog.records) == 1
@@ -128,7 +128,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that lighter color blend mode triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.LIGHTER_COLOR, node)
 
         assert len(caplog.records) == 1
@@ -139,7 +139,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that vivid light blend mode triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.VIVID_LIGHT, node)
 
         assert len(caplog.records) == 1
@@ -150,7 +150,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that linear light blend mode triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.LINEAR_LIGHT, node)
 
         assert len(caplog.records) == 1
@@ -161,7 +161,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that subtract blend mode triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.SUBTRACT, node)
 
         assert len(caplog.records) == 1
@@ -172,7 +172,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that divide blend mode triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.DIVIDE, node)
 
         assert len(caplog.records) == 1
@@ -183,7 +183,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that Enum.Dissolve also triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(Enum.Dissolve, node)
 
         assert len(caplog.records) == 1
@@ -194,7 +194,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that bytes blend mode also triggers a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(b"vividLight", node)
 
         assert len(caplog.records) == 1
@@ -205,7 +205,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that accurate blend modes don't trigger warnings."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.MULTIPLY, node)
 
         # Should have no warnings
@@ -215,7 +215,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that normal blend mode doesn't trigger a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.NORMAL, node)
 
         assert len(caplog.records) == 0
@@ -224,7 +224,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that screen blend mode doesn't trigger a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.SCREEN, node)
 
         assert len(caplog.records) == 0
@@ -233,7 +233,7 @@ class TestBlendModeWarnings:
         self, converter: Any, node: Any, caplog: Any
     ) -> None:
         """Test that overlay blend mode doesn't trigger a warning."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             converter.set_blend_mode(BlendMode.OVERLAY, node)
 
         assert len(caplog.records) == 0
@@ -397,7 +397,7 @@ class TestFilterBlendModes:
     )
     def test_no_approximation_warning(self, psd_file: str, caplog: Any) -> None:
         """Test that the exact route does not warn about an approximation."""
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             SVGDocument.from_psd(PSDImage.open(get_fixture(psd_file)))
 
         assert not [

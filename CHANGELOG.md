@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CLI `-v`/`-vv`/`-q` verbosity flags** (#494)
+  - `-v` logs INFO, `-vv` DEBUG, `-q` errors only; `--loglevel` overrides them.
+
+### Changed
+
+- **Expected limitations no longer log warnings by default** (#494)
+  - Unsupported blend modes, approximated effects, and repaired values now log at DEBUG; the missing-font warning appears once per font.
+
 ## [0.14.0] - 2026-10-21
 
 ### Added

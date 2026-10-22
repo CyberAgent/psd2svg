@@ -102,7 +102,7 @@ SVG filter and so can be rewritten there.
 
 Everywhere else -- as a layer blending mode, or on a shape layer's overlay effect,
 which paints a plain ``fill`` rather than a filter -- they fall back to
-approximations and emit a warning. Divide and Subtract are approximated with
+approximations and log at ``DEBUG``. Divide and Subtract are approximated with
 ``difference``, which inverts colors rather than approximating them; Linear Burn and
 Linear Dodge use ``plus-darker`` and ``plus-lighter`` as above. Flattening those
 layers in Photoshop is the reliable workaround.
@@ -198,7 +198,7 @@ neither primitive can express, so there is no faithful conversion to implement:
 
 Layers of these four types are **omitted from the output**: the rest of the
 document converts normally, but the adjustment is not applied. The converter logs
-a warning naming the layer. Flatten these adjustments in Photoshop before
+the layer at DEBUG (``-vv``). Flatten these adjustments in Photoshop before
 conversion, or export a flattened version.
 
 **Technical Limitations:**
@@ -244,7 +244,7 @@ The **ColorBalance** adjustment layer is implemented using SVG ``feComponentTran
 
 * **Global luminance**: Cannot calculate true RGB luminance (0.299R + 0.587G + 0.114B) due to SVG's per-channel processing
 * **Neutral color preservation**: Photoshop preserves pure neutral colors (white, gray, black) to avoid introducing unwanted color casts. The SVG implementation applies adjustments literally, which can tint neutral colors. For example, white (255, 255, 255) may become slightly tinted when Photoshop would keep it pure white.
-* **Preserve Luminosity mode**: Not fully supported - logs warning when enabled (luminosity=1)
+* **Preserve Luminosity mode**: Not fully supported - logs at ``DEBUG`` when enabled (luminosity=1)
 * **Highly saturated colors**: May have ~10-15% higher error for pure/saturated colors
 * **Extreme negative adjustments**: Severe color clipping when subtracting from low RGB values
 * **File size**: Adds ~2-3KB per ColorBalance layer (768 float values in LUTs)
@@ -432,7 +432,7 @@ To enable text wrapping:
   because the browser breaks lines where Photoshop does not and clipping would
   drop text Photoshop draws; the SVG canvas still bounds it, and an unbreakable
   word wider than the box overflows the same way. A layer that cannot fit
-  however it wraps names its shortfall in a conversion-time warning
+  however it wraps names its shortfall in an ``INFO`` message
   (`#449 <https://github.com/CyberAgent/psd2svg/issues/449>`_)
 * Point text (ShapeType=0) always uses native SVG ``<text>`` elements, regardless of this setting
 * Default behavior (``text_wrapping_mode=0``) maintains backward compatibility with native SVG text
@@ -484,7 +484,7 @@ in foreignObject mode. Space before/after is the exception: native SVG
 
 Text conversion requires fonts to be installed on the system. The converter uses ``fontconfig`` to resolve font names. If a font is not found:
 
-* A warning is logged
+* One warning is logged per missing font
 * Text may fall back to a default system font
 * Results may differ from Photoshop's rendering
 
@@ -517,7 +517,7 @@ psd2svg therefore encodes the scaling in the ``font-size`` and in a transform on
 
 **Impact:**
 
-Only the last case is approximate, and only where the residual transform stays on the ``<tspan>``. Glyph advance widths, the position of the following characters and center/right alignment all match Photoshop, but renderers that ignore ``transform`` on ``<tspan>`` draw the run without the cross-axis scaling: glyphs of a horizontally scaled run are as tall as they are wide, and a vertically scaled run keeps its original height. A warning is logged during conversion.
+Only the last case is approximate, and only where the residual transform stays on the ``<tspan>``. Glyph advance widths, the position of the following characters and center/right alignment all match Photoshop, but renderers that ignore ``transform`` on ``<tspan>`` draw the run without the cross-axis scaling: glyphs of a horizontally scaled run are as tall as they are wide, and a vertically scaled run keeps its original height. An ``INFO`` message is logged during conversion.
 
 Character alignment compounds this: a run aligned by its em box is positioned for the scaled cross-axis size it should have, so where the residual transform is ignored the run is drawn at its unscaled size in the position the scaled one would occupy.
 
@@ -546,7 +546,7 @@ Rendering per-span non-uniform scaling exactly would require splitting the scale
 
 ``textLength`` with ``lengthAdjust="spacingAndGlyphs"`` is not a solution either: it also needs the natural text width, and resvg does not advance the following text by it.
 
-Given these complexities, the current implementation preserves the text layout and emits a clear warning instead.
+Given these complexities, the current implementation preserves the text layout and logs an ``INFO`` message instead.
 
 **Letter Spacing Differences:**
 

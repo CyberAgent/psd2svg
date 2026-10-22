@@ -849,7 +849,7 @@ class SVGDocument:
             family_name = resolved_font.family
 
             # Log resolution with file path
-            logger.info(
+            logger.debug(
                 f"Resolved font '{ps_name}' → '{family_name}' "
                 f"(file: '{resolved_font.file}')"
             )
@@ -1015,7 +1015,7 @@ class SVGDocument:
             resolved_fonts_map: Pre-resolved fonts from _resolve_and_collect_fonts().
         """
         if not resolved_fonts_map:
-            logger.warning("No resolved fonts found; skipping font embedding")
+            logger.debug("No resolved fonts found; skipping font embedding")
             return
 
         # Use pre-resolved fonts directly - NO re-resolution needed
@@ -1026,7 +1026,7 @@ class SVGDocument:
             resolved_fonts, subset_fonts, font_format, use_data_uri
         )
         if not css_rules:
-            logger.warning("No css font rules inserted; skipping <style> update")
+            logger.debug("No css font rules inserted; skipping <style> update")
             return
 
         # Insert all CSS rules into <style> element

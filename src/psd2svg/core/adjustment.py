@@ -66,17 +66,15 @@ class AdjustmentConverter(ConverterProtocol):
         # Validate and clamp levels to valid range
         levels = layer.posterize
         if levels is None:
-            logger.warning(
-                f"Posterize adjustment '{layer.name}' has no levels, skipping"
-            )
+            logger.debug(f"Posterize adjustment '{layer.name}' has no levels, skipping")
             return None
         if levels < 2:
-            logger.warning(
+            logger.debug(
                 f"Posterize levels {levels} is below minimum (2), clamping to 2"
             )
             levels = 2
         elif levels > 256:
-            logger.warning(
+            logger.debug(
                 f"Posterize levels {levels} exceeds maximum (256), clamping to 256"
             )
             levels = 256
@@ -123,7 +121,7 @@ class AdjustmentConverter(ConverterProtocol):
         # Extract threshold value (0-255)
         threshold = layer.threshold
         if threshold is None:
-            logger.warning(
+            logger.debug(
                 f"Threshold adjustment '{layer.name}' has no threshold, skipping"
             )
             return None
@@ -133,12 +131,12 @@ class AdjustmentConverter(ConverterProtocol):
 
         # Validate threshold value (warn but don't clamp except for > 255)
         if threshold < 1:
-            logger.warning(
+            logger.debug(
                 f"Threshold value {threshold} is below minimum (1), "
                 f"resulting in all-white output"
             )
         elif threshold > 255:
-            logger.warning(
+            logger.debug(
                 f"Threshold value {threshold} exceeds maximum (255), clamping to 255"
             )
             threshold = 255
@@ -187,7 +185,7 @@ class AdjustmentConverter(ConverterProtocol):
         # Extract adjustment parameters
         master = layer.master
         if master is None:
-            logger.warning(
+            logger.debug(
                 f"HueSaturation adjustment '{layer.name}' has no master values, "
                 "skipping"
             )
@@ -197,14 +195,14 @@ class AdjustmentConverter(ConverterProtocol):
 
         # Check if this is a no-op adjustment
         if enable_colorization == 0 and hue == 0 and saturation == 0 and lightness == 0:
-            logger.info(
+            logger.debug(
                 f"HueSaturation adjustment '{layer.name}' has no effect, skipping"
             )
             return None
 
         colorization = layer.colorization
         if enable_colorization == 1 and colorization is None:
-            logger.warning(
+            logger.debug(
                 f"HueSaturation adjustment '{layer.name}' has no colorization "
                 "values, skipping"
             )
@@ -258,22 +256,20 @@ class AdjustmentConverter(ConverterProtocol):
 
         # Check if this is a no-op adjustment (within floating-point tolerance)
         if abs(exposure) < 1e-6 and abs(offset) < 1e-6 and abs(gamma - 1.0) < 1e-6:
-            logger.info(f"Exposure adjustment '{layer.name}' has no effect, skipping")
+            logger.debug(f"Exposure adjustment '{layer.name}' has no effect, skipping")
             return None
 
         # Validate parameters (warn but don't clamp)
         if not (-20.0 <= exposure <= 20.0):
-            logger.warning(
+            logger.debug(
                 f"Exposure value {exposure} is outside expected range [-20, +20]"
             )
         if not (-0.5 <= offset <= 0.5):
-            logger.warning(
+            logger.debug(
                 f"Offset value {offset} is outside expected range [-0.5, +0.5]"
             )
         if not (0.01 <= gamma <= 9.99):
-            logger.warning(
-                f"Gamma value {gamma} is outside expected range [0.01, 9.99]"
-            )
+            logger.debug(f"Gamma value {gamma} is outside expected range [0.01, 9.99]")
 
         # Create filter structure
         filter, use = self._create_filter(layer, name="exposure", **attrib)
@@ -352,18 +348,18 @@ class AdjustmentConverter(ConverterProtocol):
 
         # Early return for no-op
         if brightness == 0 and contrast == 0:
-            logger.info(
+            logger.debug(
                 f"BrightnessContrast adjustment '{layer.name}' has no effect, skipping"
             )
             return None
 
         # Parameter validation (warn but don't clamp)
         if not (-150 <= brightness <= 150):
-            logger.warning(
+            logger.debug(
                 f"Brightness value {brightness} is outside expected range [-150, +150]"
             )
         if not (-50 <= contrast <= 100):
-            logger.warning(
+            logger.debug(
                 f"Contrast value {contrast} is outside expected range [-50, +100]"
             )
 
@@ -433,7 +429,7 @@ class AdjustmentConverter(ConverterProtocol):
         midtones = layer.midtones
         highlights = layer.highlights
         if shadows is None or midtones is None or highlights is None:
-            logger.warning(
+            logger.debug(
                 f"ColorBalance adjustment '{layer.name}' has incomplete data, skipping"
             )
             return None
@@ -448,14 +444,14 @@ class AdjustmentConverter(ConverterProtocol):
 
         # Check for no-op
         if shadows == (0, 0, 0) and midtones == (0, 0, 0) and highlights == (0, 0, 0):
-            logger.info(
+            logger.debug(
                 f"ColorBalance adjustment '{layer.name}' has no effect, skipping"
             )
             return None
 
         # Warn about preserve luminosity limitation
         if preserve_luminosity:
-            logger.warning(
+            logger.debug(
                 f"ColorBalance adjustment '{layer.name}': "
                 "Preserve Luminosity is not fully supported in SVG. "
                 "Results may differ from Photoshop."
@@ -509,7 +505,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not supported. Photoshop's per-hue-range weighting has no SVG
         filter equivalent, so the layer is omitted from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Black and White adjustment layer is not supported and is omitted "
             f"from the output: '{layer.name}' ({layer.kind}). Photoshop weights "
             f"each pixel by which of six color ranges its hue falls into, which "
@@ -526,7 +522,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not yet implemented, tracked by issue #369. The layer is omitted
         from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Channel Mixer adjustment layer is not yet implemented and is "
             f"omitted from the output: '{layer.name}' ({layer.kind}). "
             f"See https://github.com/CyberAgent/psd2svg/issues/369."
@@ -541,7 +537,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not supported. A 3D LUT has no SVG filter primitive and psd-tools
         does not expose the data, so the layer is omitted from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Color Lookup adjustment layer is not supported and is omitted "
             f"from the output: '{layer.name}' ({layer.kind}). A 3D LUT has no "
             f"SVG filter primitive, and psd-tools does not expose the lookup "
@@ -570,7 +566,7 @@ class AdjustmentConverter(ConverterProtocol):
         # Validate curve data
         data = layer.data
         if data is None or not data.extra:
-            logger.warning(
+            logger.debug(
                 f"Curves adjustment '{layer.name}' has no curve data, skipping"
             )
             return None
@@ -587,7 +583,9 @@ class AdjustmentConverter(ConverterProtocol):
                 break
 
         if is_identity:
-            logger.info(f"Curves adjustment '{layer.name}' is identity curve, skipping")
+            logger.debug(
+                f"Curves adjustment '{layer.name}' is identity curve, skipping"
+            )
             return None
 
         # Log curve info for debugging
@@ -627,7 +625,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not yet implemented, tracked by issue #368. The layer is omitted
         from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Gradient Map adjustment layer is not yet implemented and is "
             f"omitted from the output: '{layer.name}' ({layer.kind}). "
             f"See https://github.com/CyberAgent/psd2svg/issues/368."
@@ -654,7 +652,7 @@ class AdjustmentConverter(ConverterProtocol):
         # Validate data structure
         data = layer.data
         if data is None or len(data) < 4:
-            logger.warning(
+            logger.debug(
                 f"Levels adjustment '{layer.name}' has insufficient data, skipping"
             )
             return None
@@ -674,7 +672,7 @@ class AdjustmentConverter(ConverterProtocol):
                 break
 
         if is_identity:
-            logger.info(f"Levels adjustment '{layer.name}' is identity, skipping")
+            logger.debug(f"Levels adjustment '{layer.name}' is identity, skipping")
             return None
 
         # Log for debugging
@@ -714,7 +712,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not yet implemented, tracked by issue #370. The layer is omitted
         from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Photo Filter adjustment layer is not yet implemented and is "
             f"omitted from the output: '{layer.name}' ({layer.kind}). "
             f"See https://github.com/CyberAgent/psd2svg/issues/370."
@@ -729,7 +727,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not supported. Photoshop's per-hue-range adjustment has no SVG
         filter equivalent, so the layer is omitted from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Selective Color adjustment layer is not supported and is omitted "
             f"from the output: '{layer.name}' ({layer.kind}). Photoshop adjusts "
             f"each pixel by which color range its hue falls into, which SVG "
@@ -746,7 +744,7 @@ class AdjustmentConverter(ConverterProtocol):
         Note: Not supported. The adjustment is nonlinear in each pixel's
         existing saturation, so the layer is omitted from the output.
         """
-        logger.warning(
+        logger.debug(
             f"Vibrance adjustment layer is not supported and is omitted from "
             f"the output: '{layer.name}' ({layer.kind}). The adjustment is "
             f"nonlinear in each pixel's existing saturation, which is not a "
@@ -829,7 +827,7 @@ class AdjustmentConverter(ConverterProtocol):
         """
         if len(points) < 2:
             # Edge case: invalid curve, return identity
-            logger.warning("Curve has fewer than 2 points, using identity")
+            logger.debug("Curve has fewer than 2 points, using identity")
             return list(np.linspace(0, 1, 256))
 
         # IMPORTANT: Photoshop curve points are (output, input), not (input, output)!
@@ -858,7 +856,7 @@ class AdjustmentConverter(ConverterProtocol):
 
         # Validate we still have enough points after deduplication
         if len(points) < 2:
-            logger.warning(
+            logger.debug(
                 "Curve has fewer than 2 points after deduplication, using identity"
             )
             return list(np.linspace(0, 1, 256))
@@ -955,7 +953,7 @@ class AdjustmentConverter(ConverterProtocol):
             if 0 <= item.channel_id <= 3:
                 curves_by_channel[item.channel_id] = item.points
             else:
-                logger.warning(
+                logger.debug(
                     f"Curves adjustment '{layer.name}': "
                     f"Unknown channel ID {item.channel_id}, skipping"
                 )
@@ -1112,7 +1110,7 @@ class AdjustmentConverter(ConverterProtocol):
 
         # Handle edge case: input_ceiling == input_floor (division by zero)
         if abs(input_ceiling - input_floor) < 1e-6:
-            logger.warning(
+            logger.debug(
                 f"Levels adjustment: {channel_name} channel has "
                 f"input_ceiling == input_floor ({input_ceiling}), "
                 f"using extreme mapping"
@@ -1124,7 +1122,7 @@ class AdjustmentConverter(ConverterProtocol):
 
         # Handle edge case: gamma <= 0 (invalid)
         if gamma <= 0:
-            logger.warning(
+            logger.debug(
                 f"Levels adjustment: {channel_name} channel has "
                 f"invalid gamma ({gamma}), using gamma=100"
             )
@@ -1262,12 +1260,12 @@ class AdjustmentConverter(ConverterProtocol):
         # NOTE: Find the appropriate container in the clipping context,
         # as the parent is mask or clipPath.
         if self.current.tag == "clipPath" or self.current.tag == "mask":
-            logger.warning(
+            logger.debug(
                 "Wrapping backdrop inside clipping/mask context is not supported yet."
             )
         siblings = list(self.current)
         if not siblings:
-            logger.warning("No backdrop elements found to wrap for adjustment.")
+            logger.debug("No backdrop elements found to wrap for adjustment.")
         wrapper = self.create_node(tag, **attrib)  # type: ignore[arg-type]
         for node in siblings:
             self.current.remove(node)

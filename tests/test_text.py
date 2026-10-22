@@ -202,7 +202,7 @@ def test_uniform_layer_scale_keeps_text_when_matrix_mismatches(
         node.set("transform", emitted_transform)
     span = ET.SubElement(node, "tspan", {"font-size": "10"})
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         assert not text_module._fold_uniform_text_scale(
             node, Transform(0.5, 0, 0, 0.5, 4, 5), 0.5
         )
@@ -727,7 +727,7 @@ def test_text_style_faux_bold_yields_to_character_stroke(
         StyleSheet, "stroke_color", property(lambda self: (1.0, 1.0, 0.0, 0.0))
     )
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         svg = convert_psd_to_svg("texts/style-faux-bold.psd")
 
     # The character stroke is shared by both spans, so it lands on <text>.
@@ -2873,7 +2873,7 @@ def test_foreignobject_warns_when_text_cannot_fit_its_box(
 ) -> None:
     """Text that overflows on one line per paragraph overflows however it wraps."""
     psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
-    with caplog.at_level(logging.WARNING, logger="psd2svg.core.text"):
+    with caplog.at_level(logging.INFO, logger="psd2svg.core.text"):
         SVGDocument.from_psd(
             psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
         )
@@ -2895,7 +2895,7 @@ def test_foreignobject_empty_paragraph_does_not_trigger_the_warning(
     empty third would put the floor at 112.00px.
     """
     psdimage = PSDImage.open(get_fixture("texts/whitespaces-shapetype1.psd"))
-    with caplog.at_level(logging.WARNING, logger="psd2svg.core.text"):
+    with caplog.at_level(logging.INFO, logger="psd2svg.core.text"):
         SVGDocument.from_psd(
             psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
         )
@@ -2918,7 +2918,7 @@ def test_foreignobject_overflow_measures_the_block_axis(
         property(lambda self: WritingDirection.VERTICAL_RL),
     )
     psdimage = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
-    with caplog.at_level(logging.WARNING, logger="psd2svg.core.text"):
+    with caplog.at_level(logging.INFO, logger="psd2svg.core.text"):
         SVGDocument.from_psd(
             psdimage, text_wrapping_mode=TextWrappingMode.FOREIGN_OBJECT
         )
@@ -3548,7 +3548,7 @@ def test_text_style_horizontal_scale_warning(
 ) -> None:
     """Test that scaled text logs a warning about browser compatibility."""
     # Capture warning logs
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.INFO):
         svg = convert_psd_to_svg("texts/style-horizontally-scale-200.psd")
 
     # Should log a warning about text scaling not being supported
@@ -3568,7 +3568,7 @@ def test_text_style_horizontal_scale_warning(
 
 def test_text_style_vertical_scale_warning(caplog: pytest.LogCaptureFixture) -> None:
     """Test that vertically scaled text logs a warning."""
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.INFO):
         convert_psd_to_svg("texts/style-vertically-scale-200.psd")
 
     assert any("text scaling" in record.message.lower() for record in caplog.records), (
@@ -3580,7 +3580,7 @@ def test_text_style_uniform_scale_no_warning(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test that uniform scaled text does NOT log a warning (now browser-compatible)."""
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.INFO):
         svg = convert_psd_to_svg("texts/style-scale-combination.psd")
 
     # Should NOT warn for uniform scaling (we fixed it)
@@ -4168,7 +4168,7 @@ def test_cmyk_style_sheet_colors() -> None:
 
 def test_grayscale_text_fill_color(caplog: pytest.LogCaptureFixture) -> None:
     """Grayscale text fill colors keep their tone instead of turning black."""
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         svg = convert_psd_to_svg("texts/style-fill-color-gray.psd")
     assert "Unsupported text color" not in caplog.text
 
@@ -4216,7 +4216,7 @@ def test_unsupported_text_color_falls_back_to_default(
     uninterpretable stroke color should not draw an outline that the document
     never asked for.
     """
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         fill_style = StyleSheet(name="", style_sheet_data={"FillColor": color})
         assert fill_style.fill_color == (1.0, 0.0, 0.0, 0.0)
         stroke_style = StyleSheet(

@@ -761,7 +761,8 @@ class TestFontFilePathValidation:
         </svg>
         """
 
-        paths = ResvgRasterizer._extract_font_file_paths(svg_content)
+        with caplog.at_level(logging.INFO):
+            paths = ResvgRasterizer._extract_font_file_paths(svg_content)
         assert len(paths) == 0
         assert "Skipping non-existent font file" in caplog.text
 
@@ -829,7 +830,8 @@ class TestFontFilePathValidation:
         </svg>
         """
 
-        paths = ResvgRasterizer._extract_font_file_paths(svg_content)
+        with caplog.at_level(logging.INFO):
+            paths = ResvgRasterizer._extract_font_file_paths(svg_content)
         # Only valid font should be extracted
         assert len(paths) == 1
         assert paths[0] == str(valid_font)
