@@ -32,6 +32,7 @@ from typing import Iterator, cast
 
 import numpy as np
 from psd_tools.api import adjustments, layers
+from psd_tools.constants import BlendMode
 from psd_tools.psd.adjustments import Curves as CurvesData
 from psd_tools.psd.adjustments import CurvesExtraItem, LevelRecord
 from psd_tools.psd.adjustments import Levels as LevelsData
@@ -39,6 +40,7 @@ from psd_tools.psd.adjustments import Levels as LevelsData
 from psd2svg import svg_utils
 from psd2svg.core.base import ConverterProtocol
 from psd2svg.core.constants import BLEND_MODE
+from psd2svg.core.layer import get_svg_blend_mode
 
 logger = logging.getLogger(__name__)
 
@@ -1276,7 +1278,10 @@ class AdjustmentConverter(ConverterProtocol):
         The result is ``blend(adjusted, source) * w + source * (1 - w)`` where the
         weight ``w`` is the layer opacity times the layer mask.
         """
-        mode = BLEND_MODE[layer.blend_mode]
+        if layer.blend_mode in (BlendMode.LINEAR_DODGE, BlendMode.LINEAR_BURN):
+            mode = BLEND_MODE[layer.blend_mode]  # Exact as arithmetic sums.
+        else:
+            mode = get_svg_blend_mode(layer.blend_mode)
         opacity = layer.opacity / 255
         has_mask = self.has_raster_mask(layer)
         is_normal = mode in ("normal", "pass-through")

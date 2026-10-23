@@ -1,6 +1,8 @@
 """Tests for the SVG structure produced by layer conversion."""
 
+import logging
 from pathlib import Path
+from typing import cast
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -542,6 +544,32 @@ class TestAdjustmentBackdrop:
         document.save(str(svg_file), image_prefix="images/img", image_format="png")
         image = next(ET.parse(svg_file).iter(f"{SVG_NS}feImage"))
         assert (tmp_path / image.get("href", "")).is_file()
+
+    def test_loaded_mask_image_is_embedded(self) -> None:
+        """Test that the mask bitmap inside the filter survives export and load."""
+        document = SVGDocument.from_psd(
+            PSDImage.open(get_fixture("adjustments/invert-mask.psd"))
+        )
+        exported = document.export()
+        loaded = SVGDocument.load(str(exported["svg"]), cast(dict, exported["images"]))
+        image = next(ET.fromstring(loaded.tostring()).iter(f"{SVG_NS}feImage"))
+        assert image.get("href", "").startswith("data:image/")
+
+    @pytest.mark.parametrize(
+        "blend_mode, logged",
+        [(BlendMode.DARKER_COLOR, True), (BlendMode.LINEAR_DODGE, False)],
+    )
+    def test_approximated_blend_mode_is_logged(
+        self, blend_mode: BlendMode, logged: bool, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that only approximated blend modes are logged inside the filter."""
+        psdimage = PSDImage.open(get_fixture("adjustments/posterize-levels4.psd"))
+        for layer in psdimage.descendants():
+            if isinstance(layer, layers.AdjustmentLayer):
+                layer.blend_mode = blend_mode
+        with caplog.at_level(logging.DEBUG, logger="psd2svg"):
+            SVGDocument.from_psd(psdimage)
+        assert ("not accurately supported" in caplog.text) is logged
 
     def test_filter_region_covers_canvas(self) -> None:
         """Test that strokes and effects outside the backdrop bbox stay visible."""

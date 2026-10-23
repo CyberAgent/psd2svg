@@ -19,6 +19,32 @@ logger = logging.getLogger(__name__)
 ARTBOARD_BACKGROUND_FILL = {1: "#ffffff", 2: "#000000", 4: "custom"}
 
 
+def get_svg_blend_mode(psd_mode: bytes | BlendMode) -> str:
+    """Convert a Photoshop blend mode, logging approximated modes.
+
+    Raises:
+        ValueError: If the blend mode is not supported.
+    """
+    if psd_mode not in BLEND_MODE:
+        raise ValueError(f"Unsupported blend mode: {psd_mode!r}")
+
+    svg_mode = BLEND_MODE[psd_mode]
+    if psd_mode in INACCURATE_BLEND_MODES:
+        # Format the mode name for display
+        mode_name = (
+            psd_mode.name
+            if hasattr(psd_mode, "name")
+            else psd_mode.decode()
+            if isinstance(psd_mode, bytes)
+            else str(psd_mode)
+        )
+        logger.debug(
+            f"Blend mode '{mode_name}' is not accurately supported in SVG. "
+            f"Using approximation '{svg_mode}' instead."
+        )
+    return svg_mode
+
+
 class LayerConverter(ConverterProtocol):
     """Main layer converter mixin."""
 
@@ -706,26 +732,7 @@ class LayerConverter(ConverterProtocol):
         Raises:
             ValueError: If the blend mode is not supported.
         """
-        if psd_mode not in BLEND_MODE:
-            raise ValueError(f"Unsupported blend mode: {psd_mode!r}")
-
-        # Warn if the blend mode is not accurately supported in SVG
-        if psd_mode in INACCURATE_BLEND_MODES:
-            blend_mode = BLEND_MODE[psd_mode]
-            # Format the mode name for display
-            mode_name = (
-                psd_mode.name
-                if hasattr(psd_mode, "name")
-                else psd_mode.decode()
-                if isinstance(psd_mode, bytes)
-                else str(psd_mode)
-            )
-            logger.debug(
-                f"Blend mode '{mode_name}' is not accurately supported in SVG. "
-                f"Using approximation '{blend_mode}' instead."
-            )
-
-        svg_mode = BLEND_MODE[psd_mode]
+        svg_mode = get_svg_blend_mode(psd_mode)
         if svg_mode not in ("normal", "pass-through"):
             svg_utils.add_style(node, "mix-blend-mode", svg_mode)
 

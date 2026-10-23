@@ -485,12 +485,11 @@ class SVGDocument:
             The modified SVG element (same object as input).
         """
         # An feImage without href shows a registered bitmap, like <image>.
-        nodes = [
-            node
-            for node in svg.iter()
-            if node.tag == "image"
-            or (node.tag == "feImage" and "href" not in node.attrib)
-        ]
+        nodes = []
+        for node in svg.iter():
+            tag = node.tag.rpartition("}")[2]  # A loaded document has namespaces.
+            if tag == "image" or (tag == "feImage" and "href" not in node.attrib):
+                nodes.append(node)
 
         # Validate that all image nodes have IDs and corresponding images exist
         for node in nodes:
