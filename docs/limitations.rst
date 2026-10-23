@@ -574,6 +574,15 @@ including the Playwright rasterizer, but not in resvg output. This support does
 not reproduce Photoshop's proprietary optical kerning adjustments, so text that
 uses optical kerning can still have different glyph positions.
 
+Even with a font that provides ``palt``, browser output may differ at the end
+of a line or style run. The feature can change both a glyph's placement and its
+advance, including for the final glyph. Photoshop's automatic kerning and
+line-end Mojikumi rules need not apply the same terminal adjustment. As a
+result, the final glyph's position or advance, and therefore the line's total
+width, may differ from Photoshop even when the interior spacing looks right.
+Glyph outlines can still match. The corresponding behavior of ``vpal`` in
+vertical text has not been verified against a Photoshop fixture.
+
 **Why They Differ:**
 
 Optical kerning is a proprietary Adobe algorithm that cannot be replicated in SVG. The difference between optical and metrics kerning is expected and inherent to the different rendering engines. Most fonts have well-designed kerning tables, so the visual difference is typically minimal.
@@ -601,7 +610,11 @@ To compensate for kerning differences, you can use the ``text_letter_spacing_off
        text_letter_spacing_offset=0.01
    )
 
-The offset is in pixels and is added to all letter-spacing values. Typical values range from -0.02 to 0.02. You may need to experiment with different values depending on your fonts and target renderers.
+The offset is in pixels and is added to all letter-spacing values. Typical
+values range from -0.02 to 0.02. You may need to experiment with different
+values depending on your fonts and target renderers. Because it changes
+spacing throughout the text, it cannot selectively correct a final-glyph
+``palt`` adjustment.
 
 **Technical Notes:**
 
@@ -616,6 +629,7 @@ The offset is in pixels and is added to all letter-spacing values. Typical value
 
 * `CSS font-kerning property <https://developer.mozilla.org/en-US/docs/Web/CSS/font-kerning>`_
 * `SVG Text Module <https://www.w3.org/TR/SVG2/text.html>`_
+* `OpenType palt feature <https://learn.microsoft.com/en-us/typography/opentype/otspec182/features_pt>`_
 
 Rasterized Text (Image Fallback)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
