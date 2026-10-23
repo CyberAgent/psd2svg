@@ -17,6 +17,8 @@ from psd2svg.timeout_utils import with_timeout
 
 logger = logging.getLogger(__name__)
 
+XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
+
 DEFAULT_IMAGE_FORMAT = "webp"
 
 
@@ -469,8 +471,8 @@ class SVGDocument:
     ) -> ET.Element:
         """Handle image embedding or saving.
 
-        Modifies the provided SVG element in-place by updating <image> element
-        href attributes to either data URIs or file paths.
+        Modifies the provided SVG element in-place by updating <image> and
+        href-less <feImage> element href attributes to either data URIs or file paths.
 
         Args:
             svg: SVG element to modify in-place.
@@ -484,19 +486,25 @@ class SVGDocument:
         Returns:
             The modified SVG element (same object as input).
         """
-        nodes = svg.findall(".//image")
+        # An feImage without href shows a registered bitmap, like <image>.
+        nodes = []
+        for node in svg.iter():
+            tag = node.tag.rpartition("}")[2]  # A loaded document has namespaces.
+            has_href = "href" in node.attrib or XLINK_HREF in node.attrib
+            if tag == "image" or (tag == "feImage" and not has_href):
+                nodes.append(node)
 
         # Validate that all image nodes have IDs and corresponding images exist
         for node in nodes:
             image_id = node.get("id")
             if image_id is None:
                 raise RuntimeError(
-                    f"<image> element missing required 'id' attribute: "
+                    f"<{node.tag}> element missing required 'id' attribute: "
                     f"{ET.tostring(node, encoding='unicode')}"
                 )
             if image_id not in self.images:
                 raise RuntimeError(
-                    f"No image found for <image> element with id='{image_id}'"
+                    f"No image found for <{node.tag}> element with id='{image_id}'"
                 )
 
         # Handle image resources (skip if no images).

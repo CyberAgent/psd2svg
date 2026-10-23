@@ -19,6 +19,32 @@ logger = logging.getLogger(__name__)
 ARTBOARD_BACKGROUND_FILL = {1: "#ffffff", 2: "#000000", 4: "custom"}
 
 
+def get_svg_blend_mode(psd_mode: bytes | BlendMode) -> str:
+    """Convert a Photoshop blend mode, logging approximated modes.
+
+    Raises:
+        ValueError: If the blend mode is not supported.
+    """
+    if psd_mode not in BLEND_MODE:
+        raise ValueError(f"Unsupported blend mode: {psd_mode!r}")
+
+    svg_mode = BLEND_MODE[psd_mode]
+    if psd_mode in INACCURATE_BLEND_MODES:
+        # Format the mode name for display
+        mode_name = (
+            psd_mode.name
+            if hasattr(psd_mode, "name")
+            else psd_mode.decode()
+            if isinstance(psd_mode, bytes)
+            else str(psd_mode)
+        )
+        logger.debug(
+            f"Blend mode '{mode_name}' is not accurately supported in SVG. "
+            f"Using approximation '{svg_mode}' instead."
+        )
+    return svg_mode
+
+
 class LayerConverter(ConverterProtocol):
     """Main layer converter mixin."""
 
@@ -706,26 +732,7 @@ class LayerConverter(ConverterProtocol):
         Raises:
             ValueError: If the blend mode is not supported.
         """
-        if psd_mode not in BLEND_MODE:
-            raise ValueError(f"Unsupported blend mode: {psd_mode!r}")
-
-        # Warn if the blend mode is not accurately supported in SVG
-        if psd_mode in INACCURATE_BLEND_MODES:
-            blend_mode = BLEND_MODE[psd_mode]
-            # Format the mode name for display
-            mode_name = (
-                psd_mode.name
-                if hasattr(psd_mode, "name")
-                else psd_mode.decode()
-                if isinstance(psd_mode, bytes)
-                else str(psd_mode)
-            )
-            logger.debug(
-                f"Blend mode '{mode_name}' is not accurately supported in SVG. "
-                f"Using approximation '{blend_mode}' instead."
-            )
-
-        svg_mode = BLEND_MODE[psd_mode]
+        svg_mode = get_svg_blend_mode(psd_mode)
         if svg_mode not in ("normal", "pass-through"):
             svg_utils.add_style(node, "mix-blend-mode", svg_mode)
 
@@ -747,15 +754,32 @@ class LayerConverter(ConverterProtocol):
         ):
             svg_utils.add_style(node, "isolation", "isolate")
 
+    def has_raster_mask(self, layer: layers.Layer) -> bool:
+        """Whether the layer has an enabled, non-empty raster mask."""
+        return (
+            layer.has_mask()
+            and layer.mask is not None
+            and not layer.mask.disabled
+            and layer.mask.width > 0
+            and layer.mask.height > 0
+        )
+
+    def register_mask_image(self, layer: layers.Layer) -> str | None:
+        """Register the grayscale raster mask of the layer, returning its image ID."""
+        if layer.mask is None:
+            return None
+        description = f"Mask of layer '{layer.name}'"
+        self.check_image_dimension(
+            layer.mask.width, layer.mask.height, description=description
+        )
+        mask_image = layer.mask.topil()
+        if mask_image is None:
+            return None
+        return self.register_image(mask_image.convert("L"), description=description)
+
     def apply_mask(self, layer: layers.Layer, target: ET.Element) -> ET.Element:
         """Add a layer mask to the target node."""
-        if (
-            not layer.has_mask()
-            or layer.mask is None
-            or layer.mask.disabled
-            or layer.mask.width == 0
-            or layer.mask.height == 0
-        ):
+        if not self.has_raster_mask(layer) or layer.mask is None:
             return target
         logger.debug(f"Adding mask: '{layer.name}' ({layer.kind})")
 
@@ -804,15 +828,8 @@ class LayerConverter(ConverterProtocol):
                 )
 
         # Mask image. A mask bbox is unclipped, so it can exceed the canvas.
-        description = f"Mask of layer '{layer.name}'"
-        self.check_image_dimension(
-            layer.mask.width, layer.mask.height, description=description
-        )
-        mask_image = layer.mask.topil()
-        if mask_image is not None:
-            image_id = self.register_image(
-                mask_image.convert("L"), description=description
-            )
+        image_id = self.register_mask_image(layer)
+        if image_id is not None:
             with self.set_current(mask):
                 self.create_node(
                     "image",
