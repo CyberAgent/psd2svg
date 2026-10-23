@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **XHTML namespace declarations survive unrevised names in `foreignObject`** (#495)
+  - Prefixed attributes and tags keep their declarations, including Unicode names and
+    names beginning with `div`, `p`, or `span`.
+
 - **Stacked adjustment layers no longer render in exponential time in Chromium** (#497)
   - Applies to unmasked, opaque, normal-blend adjustments; masked, clipped, translucent, and blended ones still double the render tree (#496).
 
