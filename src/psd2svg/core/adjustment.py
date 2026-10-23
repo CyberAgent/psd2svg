@@ -1,7 +1,7 @@
 """Mixin for adjustment layers conversion.
 
 Due to the limited support of BackgroundImage in SVG filters, our approach wraps
-the backdrop elements into a symbol, and use two <use> elements to apply the filter.
+the backdrop elements into a symbol and references it with a filtered <use>.
 
 When we have a layer structure like this::
 
@@ -16,12 +16,12 @@ We convert it into the following SVG structure::
         <image id="layer2" ... />
     </symbol>
     <filter id="adjustment"></filter>
-    <use href="#backdrop" />
     <use href="#backdrop" filter="url(#adjustment)" />
 
-
-This approach may have limitations when the backdrop has transparency, as the
-stacked use elements may not produce the intended visual result.
+When the adjustment has a mask, a clipping context, opacity, or a blend mode,
+a plain ``<use href="#backdrop" />`` precedes the filtered one to show through.
+That stacked pair may not produce the intended result over a transparent
+backdrop.
 """
 
 import logging
@@ -1237,13 +1237,17 @@ class AdjustmentConverter(ConverterProtocol):
     ) -> tuple[ET.Element, ET.Element]:
         """Create SVG filter structure for the adjustment layer."""
         wrapper = self._wrap_backdrop("symbol", id=self.auto_id("backdrop"))
-        filter = self.create_node("filter", id=self.auto_id(name))
-        # Backdrop use.
-        self.create_node(
-            "use",
-            href=svg_utils.get_uri(wrapper),
+        # The canvas region keeps strokes and effects outside the backdrop bbox.
+        filter = self.create_node(
+            "filter",
+            id=self.auto_id(name),
+            filterUnits="userSpaceOnUse",
+            x=0,
+            y=0,
+            width=self.psd.width,
+            height=self.psd.height,
         )
-        # Apply filter to the use.
+        index = len(self.current)
         use = self.create_node(
             "use",
             href=svg_utils.get_uri(wrapper),
@@ -1253,6 +1257,14 @@ class AdjustmentConverter(ConverterProtocol):
         )
         self.set_layer_attributes(layer, use)
         use = self.apply_mask(layer, use)
+        # A plain backdrop under a fully opaque filtered use would only double
+        # the render tree, which grows exponentially with stacked adjustments.
+        if any(
+            key in use.attrib for key in ("opacity", "mask", "clip-path")
+        ) or "mix-blend-mode" in use.get("style", ""):
+            self.current.insert(
+                index, svg_utils.create_node("use", href=svg_utils.get_uri(wrapper))
+            )
         return filter, use
 
     def _wrap_backdrop(self, tag: str = "symbol", **attrib: str) -> ET.Element:
