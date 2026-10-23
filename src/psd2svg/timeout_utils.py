@@ -55,8 +55,8 @@ def with_timeout(
     try:
         return _run_with_timeout(func, timeout_seconds, *args, **kwargs)
     finally:
+        # A logging handler may block; the daemon monitor must not delay the result.
         finished.set()
-        warning_thread.join()
 
 
 def _run_with_timeout(
