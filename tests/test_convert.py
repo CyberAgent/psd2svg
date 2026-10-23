@@ -1,17 +1,20 @@
 import logging
 import os
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 
+import numpy as np
 import pytest
 from psd_tools import PSDImage
-from psd_tools.api.adjustments import ColorBalance, Curves, Levels
+from psd_tools.api.adjustments import ColorBalance, Curves, Invert, Levels
+from psd_tools.constants import BlendMode
 from psd_tools.psd.adjustments import CurvesExtraItem
 
 from psd2svg import SVGDocument, convert
 from psd2svg.core.converter import Converter
 from psd2svg.eval import compute_conversion_quality
-from tests.conftest import get_fixture
+from psd2svg.rasterizer import BaseRasterizer, PlaywrightRasterizer, ResvgRasterizer
+from tests.conftest import get_fixture, requires_playwright
 
 
 @pytest.mark.parametrize(
@@ -512,6 +515,72 @@ def test_fill_layers(psd_file: str) -> None:
 def test_adjustment_invert(psd_file: str) -> None:
     """Test conversion quality of invert adjustment layer."""
     evaluate_quality(psd_file, 0.01)
+
+
+def _render_invert(
+    rasterizer: BaseRasterizer,
+    visible: bool = True,
+    blend_mode: BlendMode = BlendMode.NORMAL,
+    opacity: int = 255,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Render the masked invert over a semi-transparent ellipse, and its mask."""
+    psdimage = PSDImage.open(get_fixture("adjustments/invert-mask-transparent.psd"))
+    layer = next(layer for layer in psdimage.descendants() if isinstance(layer, Invert))
+    layer.visible = visible
+    layer.blend_mode = blend_mode
+    layer.opacity = opacity
+    assert layer.mask is not None
+    mask_image = layer.mask.topil()
+    assert mask_image is not None
+    image = rasterizer.from_string(SVGDocument.from_psd(psdimage).tostring())
+    return (
+        np.asarray(image.convert("RGBA"), dtype=np.float64) / 255,
+        np.asarray(mask_image, dtype=np.float64)[..., None] / 255,
+    )
+
+
+@pytest.mark.parametrize(
+    "rasterizer_class",
+    [
+        pytest.param(ResvgRasterizer, id="resvg"),
+        pytest.param(PlaywrightRasterizer, id="chromium", marks=requires_playwright),
+    ],
+)
+@pytest.mark.parametrize(
+    "blend_mode, blend",
+    [
+        (BlendMode.NORMAL, lambda adjusted, source: adjusted),
+        (BlendMode.MULTIPLY, lambda adjusted, source: adjusted * source),
+        (
+            BlendMode.LINEAR_DODGE,
+            lambda adjusted, source: np.minimum(1, adjusted + source),
+        ),
+        (
+            BlendMode.LINEAR_BURN,
+            lambda adjusted, source: np.maximum(0, adjusted + source - 1),
+        ),
+    ],
+    ids=["normal", "multiply", "linear-dodge", "linear-burn"],
+)
+@pytest.mark.parametrize("opacity", [255, 128])
+def test_adjustment_composites_over_transparent_backdrop(
+    rasterizer_class: type[BaseRasterizer],
+    blend_mode: BlendMode,
+    blend: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    opacity: int,
+) -> None:
+    """Test that a masked adjustment blends by opacity and keeps the backdrop alpha."""
+    rasterizer = rasterizer_class()
+    source, _ = _render_invert(rasterizer, visible=False)
+    actual, mask = _render_invert(rasterizer, blend_mode=blend_mode, opacity=opacity)
+
+    color = source[..., :3]
+    weight = mask * opacity / 255
+    expected = blend(1 - color, color) * weight + color * (1 - weight)
+    covered = source[..., 3] > 0.25
+    error = np.abs(actual[..., :3] - expected)[covered].mean() * 255
+    assert error < 3, f"Mean color error is {error:.1f}/255"
+    assert np.abs(actual[..., 3] - source[..., 3]).max() * 255 <= 3
 
 
 @pytest.mark.parametrize(
