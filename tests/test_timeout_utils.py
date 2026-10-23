@@ -7,7 +7,9 @@ This module tests the cross-platform timeout functionality:
 - Exception propagation
 """
 
+import logging
 import signal
+import threading
 import time
 from typing import Any
 
@@ -18,6 +20,53 @@ from psd2svg.timeout_utils import with_timeout
 
 class TestWithTimeoutBasicBehavior:
     """Tests for basic with_timeout() behavior."""
+
+    @pytest.mark.parametrize("should_timeout", [False, True])
+    def test_blocked_warning_handler_does_not_delay_completion(
+        self, should_timeout: bool
+    ) -> None:
+        warning_started = threading.Event()
+        release_handler = threading.Event()
+        handler_finished = threading.Event()
+        fallback_release = threading.Timer(3, release_handler.set)
+        fallback_release.daemon = True
+
+        class BlockingHandler(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                warning_started.set()
+                fallback_release.start()
+                release_handler.wait()
+                handler_finished.set()
+
+        logger = logging.getLogger("psd2svg.timeout_utils")
+        original_level = logger.level
+        handler = BlockingHandler()
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            if should_timeout:
+                with pytest.raises(TimeoutError):
+                    with_timeout(time.sleep, 2, 3)
+            else:
+                assert with_timeout(warning_started.wait, 2, 1.8)
+            assert warning_started.is_set()
+            assert not release_handler.is_set()
+        finally:
+            release_handler.set()
+            fallback_release.cancel()
+            handler_finished.wait(2)
+            logger.removeHandler(handler)
+            logger.setLevel(original_level)
+
+    def test_warns_at_half_and_three_quarters_of_timeout(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            with_timeout(time.sleep, 1, 0.85)
+
+        warnings = [record.message for record in caplog.records]
+        assert any("50%" in message for message in warnings)
+        assert any("75%" in message for message in warnings)
 
     def test_with_timeout_disabled_returns_result(self) -> None:
         """Test with_timeout() executes normally when timeout is disabled (0)."""

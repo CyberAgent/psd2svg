@@ -137,6 +137,7 @@ class SVGDocument:
         # Default to ResourceLimits.default() if not specified
         if resource_limits is None:
             resource_limits = ResourceLimits.default()
+        resource_limits.reset_warnings()
 
         # Build SVG tree with original font names
         converter = Converter(
@@ -1127,6 +1128,7 @@ def convert(
     # Default to ResourceLimits.default() if not specified
     if resource_limits is None:
         resource_limits = ResourceLimits.default()
+    resource_limits.reset_warnings()
 
     # Validate file size before loading
     if resource_limits.is_file_size_limited():
@@ -1137,6 +1139,9 @@ def convert(
                 f"To process: set PSD2SVG_MAX_FILE_SIZE={file_size + 1024 * 1024 * 100} environment variable, "  # noqa: E501
                 f"or use ResourceLimits(max_file_size={file_size + 1024 * 1024 * 100}) in Python API."  # noqa: E501
             )
+        resource_limits.warn_near_limit(
+            "File size", file_size, resource_limits.max_file_size, 0.8
+        )
 
     psdimage = PSDImage.open(input_path)
     document = SVGDocument.from_psd(
