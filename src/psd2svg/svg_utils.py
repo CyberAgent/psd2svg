@@ -378,7 +378,7 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
         - Handles multiple foreignObject elements, but not nested foreignObject tags
         - Works with any namespace prefix (html, ns0, ns1, etc.)
         - Only modifies XHTML elements (div, p, span) inside foreignObject
-        - Keeps declarations used by prefixed content outside foreignObject
+        - Keeps declarations used by prefixed names that are not rewritten
         - Adds xmlns declaration to first XHTML element in each foreignObject
     """
     # XHTML namespace URL - escaped for use in regex patterns
@@ -427,6 +427,13 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
         prefix for prefix in prefixes if prefix_used_outside(prefix)
     }
 
+    def prefix_used_in_fragment(fragment: str, prefix: str) -> bool:
+        """Check for prefixed element or attribute names left after rewriting."""
+        # ElementTree accepts Unicode XML names, so look for name delimiters
+        # instead of restricting the first character to ASCII letters.
+        name = rf"{re.escape(prefix)}:[^\s/>=]+"
+        return re.search(rf"</?{name}(?=[\s/>])|\s{name}\s*=", fragment) is not None
+
     def add_xmlns_to_first_element(match: re.Match[str]) -> str:
         """Add xmlns declaration to first XHTML element."""
         # Everything up to and including <foreignObject...> and content before tag
@@ -455,14 +462,19 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
     def rewrite_foreign_object(fragment: str) -> str:
         for prefix in prefixes:
             fragment = re.sub(
-                f' xmlns:{re.escape(prefix)}="{xhtml_ns_escaped}"',
-                "",
-                fragment,
+                f"<{re.escape(prefix)}:(div|p|span)(?=[\\s/>])", r"<\1", fragment
             )
-            fragment = re.sub(f"<{re.escape(prefix)}:(div|p|span)", r"<\1", fragment)
             fragment = re.sub(
                 f"</{re.escape(prefix)}:(div|p|span)>", r"</\1>", fragment
             )
+
+        for prefix in prefixes:
+            if not prefix_used_in_fragment(fragment, prefix):
+                fragment = re.sub(
+                    f' xmlns:{re.escape(prefix)}="{xhtml_ns_escaped}"',
+                    "",
+                    fragment,
+                )
 
         return re.sub(
             r"(<foreignObject[^>]*>(?:(?!</foreignObject).)*?)<(div|p|span)([^>]*)(>)",
@@ -471,21 +483,34 @@ def _fix_xhtml_namespace_prefixes(svg_string: str) -> str:
             flags=re.DOTALL,
         )
 
-    # Find spans without copying the image payload. Declarations inside a
-    # foreignObject are handled when that whole fragment is rewritten.
+    # Rewrite only foreignObject spans, leaving large image payloads untouched.
+    rewritten_foreign_objects = [
+        (match, rewrite_foreign_object(match.group())) for match in foreign_objects
+    ]
+    prefixes_used_inside = {
+        prefix
+        for prefix in prefixes
+        if any(
+            prefix_used_in_fragment(fragment, prefix)
+            for _, fragment in rewritten_foreign_objects
+        )
+    }
+
+    # Declarations inside a foreignObject are handled by its rewrite above.
     edits = [
         (match.start(), match.end(), "")
         for match in declarations
         if match.group(1) not in prefixes_used_outside
+        and match.group(1) not in prefixes_used_inside
         and not inside_foreign_object(match.start())
     ]
     edits.extend(
         (
             match.start(),
             match.end(),
-            rewrite_foreign_object(match.group()),
+            fragment,
         )
-        for match in foreign_objects
+        for match, fragment in rewritten_foreign_objects
     )
     edits.sort(key=lambda edit: edit[0])
 

@@ -1963,6 +1963,83 @@ def test_xhtml_prefix_fixup_keeps_declaration_used_by_outside_attribute() -> Non
     ET.fromstring(result)
 
 
+@pytest.mark.parametrize(
+    "foreign_object",
+    [
+        '<foreignObject ns0:data="1"><ns0:div>text</ns0:div></foreignObject>',
+        "<foreignObject><ns0:div><ns0:a>link</ns0:a><ns0:br/>"
+        "</ns0:div></foreignObject>",
+        '<foreignObject><ns0:div>text</ns0:div><svg ns0:data="1" /></foreignObject>',
+    ],
+)
+def test_xhtml_prefix_fixup_keeps_declaration_for_unrevised_names(
+    foreign_object: str,
+) -> None:
+    namespace = svg_utils.XHTML_NAMESPACE
+    serialized = f'<svg xmlns:ns0="{namespace}">{foreign_object}</svg>'
+
+    result = svg_utils._fix_xhtml_namespace_prefixes(serialized)
+
+    assert f'xmlns:ns0="{namespace}"' in result
+    assert f'<div xmlns="{namespace}"' in result
+    ET.fromstring(result)
+
+
+@pytest.mark.parametrize("tag_name", ["pre", "param", "span2", "div2"])
+def test_xhtml_prefix_fixup_does_not_rewrite_partial_tag_name(
+    tag_name: str,
+) -> None:
+    namespace = svg_utils.XHTML_NAMESPACE
+    serialized = (
+        f'<svg xmlns:ns0="{namespace}"><foreignObject>'
+        f"<ns0:div><ns0:{tag_name}>text</ns0:{tag_name}></ns0:div>"
+        "</foreignObject></svg>"
+    )
+
+    result = svg_utils._fix_xhtml_namespace_prefixes(serialized)
+
+    assert f"<ns0:{tag_name}>text</ns0:{tag_name}>" in result
+    ET.fromstring(result)
+
+
+def test_xhtml_prefix_fixup_keeps_local_declaration_for_unrevised_name() -> None:
+    namespace = svg_utils.XHTML_NAMESPACE
+    serialized = (
+        '<svg><foreignObject xmlns:ns0="http://www.w3.org/1999/xhtml" '
+        'ns0:data="1"><ns0:div>text</ns0:div></foreignObject></svg>'
+    )
+
+    result = svg_utils._fix_xhtml_namespace_prefixes(serialized)
+
+    assert f'<foreignObject xmlns:ns0="{namespace}" ns0:data="1">' in result
+    ET.fromstring(result)
+
+
+@pytest.mark.parametrize("name_location", ["tag", "attribute"])
+def test_xhtml_prefix_fixup_keeps_declaration_for_unicode_name(
+    name_location: str,
+) -> None:
+    namespace = svg_utils.XHTML_NAMESPACE
+    svg = ET.Element("svg")
+    foreign_object = ET.SubElement(svg, "foreignObject")
+    div = ET.SubElement(foreign_object, f"{{{namespace}}}div")
+    if name_location == "tag":
+        ET.SubElement(div, f"{{{namespace}}}é").text = "text"
+    else:
+        div.set(f"{{{namespace}}}é", "1")
+
+    result = svg_utils.tostring(svg)
+
+    assert ":é" in result
+    parsed = ET.fromstring(result)
+    parsed_div = parsed.find(f".//{{{namespace}}}div")
+    assert parsed_div is not None
+    if name_location == "tag":
+        assert parsed_div.find(f"{{{namespace}}}é") is not None
+    else:
+        assert parsed_div.get(f"{{{namespace}}}é") == "1"
+
+
 def test_xhtml_prefix_fixup_ignores_self_closing_foreign_object() -> None:
     namespace = svg_utils.XHTML_NAMESPACE
     serialized = (
