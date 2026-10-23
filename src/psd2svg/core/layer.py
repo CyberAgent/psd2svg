@@ -747,15 +747,32 @@ class LayerConverter(ConverterProtocol):
         ):
             svg_utils.add_style(node, "isolation", "isolate")
 
+    def has_raster_mask(self, layer: layers.Layer) -> bool:
+        """Whether the layer has an enabled, non-empty raster mask."""
+        return (
+            layer.has_mask()
+            and layer.mask is not None
+            and not layer.mask.disabled
+            and layer.mask.width > 0
+            and layer.mask.height > 0
+        )
+
+    def register_mask_image(self, layer: layers.Layer) -> str | None:
+        """Register the grayscale raster mask of the layer, returning its image ID."""
+        if layer.mask is None:
+            return None
+        description = f"Mask of layer '{layer.name}'"
+        self.check_image_dimension(
+            layer.mask.width, layer.mask.height, description=description
+        )
+        mask_image = layer.mask.topil()
+        if mask_image is None:
+            return None
+        return self.register_image(mask_image.convert("L"), description=description)
+
     def apply_mask(self, layer: layers.Layer, target: ET.Element) -> ET.Element:
         """Add a layer mask to the target node."""
-        if (
-            not layer.has_mask()
-            or layer.mask is None
-            or layer.mask.disabled
-            or layer.mask.width == 0
-            or layer.mask.height == 0
-        ):
+        if not self.has_raster_mask(layer) or layer.mask is None:
             return target
         logger.debug(f"Adding mask: '{layer.name}' ({layer.kind})")
 
@@ -804,15 +821,8 @@ class LayerConverter(ConverterProtocol):
                 )
 
         # Mask image. A mask bbox is unclipped, so it can exceed the canvas.
-        description = f"Mask of layer '{layer.name}'"
-        self.check_image_dimension(
-            layer.mask.width, layer.mask.height, description=description
-        )
-        mask_image = layer.mask.topil()
-        if mask_image is not None:
-            image_id = self.register_image(
-                mask_image.convert("L"), description=description
-            )
+        image_id = self.register_mask_image(layer)
+        if image_id is not None:
             with self.set_current(mask):
                 self.create_node(
                     "image",

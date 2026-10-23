@@ -469,8 +469,8 @@ class SVGDocument:
     ) -> ET.Element:
         """Handle image embedding or saving.
 
-        Modifies the provided SVG element in-place by updating <image> element
-        href attributes to either data URIs or file paths.
+        Modifies the provided SVG element in-place by updating <image> and
+        href-less <feImage> element href attributes to either data URIs or file paths.
 
         Args:
             svg: SVG element to modify in-place.
@@ -484,19 +484,25 @@ class SVGDocument:
         Returns:
             The modified SVG element (same object as input).
         """
-        nodes = svg.findall(".//image")
+        # An feImage without href shows a registered bitmap, like <image>.
+        nodes = [
+            node
+            for node in svg.iter()
+            if node.tag == "image"
+            or (node.tag == "feImage" and "href" not in node.attrib)
+        ]
 
         # Validate that all image nodes have IDs and corresponding images exist
         for node in nodes:
             image_id = node.get("id")
             if image_id is None:
                 raise RuntimeError(
-                    f"<image> element missing required 'id' attribute: "
+                    f"<{node.tag}> element missing required 'id' attribute: "
                     f"{ET.tostring(node, encoding='unicode')}"
                 )
             if image_id not in self.images:
                 raise RuntimeError(
-                    f"No image found for <image> element with id='{image_id}'"
+                    f"No image found for <{node.tag}> element with id='{image_id}'"
                 )
 
         # Handle image resources (skip if no images).

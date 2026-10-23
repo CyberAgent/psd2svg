@@ -207,13 +207,13 @@ Adjustment layers in Photoshop apply filters to the combined backdrop of all lay
 
 * **CSS backdrop-filter**: Would be ideal but does not work on SVG elements (only HTML elements)
 * **SVG BackgroundImage**: SVG filters' ``BackgroundImage`` feature has poor browser support and is not available in most rasterizers (including resvg)
-* **Current workaround**: The experimental implementation wraps backdrop layers in a ``<symbol>`` and references it with a filtered ``<use>``. A masked, clipped, translucent, or blended adjustment adds a second, unfiltered ``<use>`` underneath so the backdrop shows through
+* **Current workaround**: The experimental implementation wraps backdrop layers in a ``<symbol>`` and references it with a filtered ``<use>``. The filter composites the adjustment's blend mode, opacity, and layer mask with the backdrop itself. A clipped adjustment adds a second, unfiltered ``<use>`` underneath so the backdrop shows through outside the clipping base
 
-**Critical Limitation - Transparency Not Supported:**
+**Critical Limitation - Clipped Adjustments:**
 
-A masked, clipped, translucent, or blended adjustment **does not work correctly when the backdrop has transparency**. Its two stacked ``<use>`` elements composite a semi-transparent backdrop twice.
+A clipped adjustment **does not work correctly when the backdrop has transparency**. Its two stacked ``<use>`` elements composite a semi-transparent backdrop twice.
 
-Each such adjustment also doubles the render tree for every adjustment stacked above it, so a deep stack of them renders in exponential time and memory in Chromium (`#496 <https://github.com/CyberAgent/psd2svg/issues/496>`_).
+Each clipped adjustment also doubles the render tree for every adjustment stacked above it, so a deep stack of them renders in exponential time and memory in Chromium.
 
 **Workaround:** Flatten adjustment layers in Photoshop before conversion, or export a flattened version. This is the recommended approach for production use.
 

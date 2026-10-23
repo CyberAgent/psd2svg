@@ -1,5 +1,6 @@
 """Tests for the SVG structure produced by layer conversion."""
 
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -474,9 +475,14 @@ class TestAdjustmentBackdrop:
         svg = build_svg("adjustments/posterize-levels4.psd", optimize)
         assert list(backdrop_references(svg).values()) == [1]
 
-    def test_stacked_adjustments_reference_each_backdrop_once(self) -> None:
+    @pytest.mark.parametrize(
+        "psd_file", ["adjustments/posterize-levels4.psd", "adjustments/invert-mask.psd"]
+    )
+    def test_stacked_adjustments_reference_each_backdrop_once(
+        self, psd_file: str
+    ) -> None:
         """Test that a stack of adjustments keeps the render tree linear."""
-        psdimage = PSDImage.open(get_fixture("adjustments/posterize-levels4.psd"))
+        psdimage = PSDImage.open(get_fixture(psd_file))
         adjustment = next(
             layer
             for layer in psdimage.descendants()
@@ -489,32 +495,53 @@ class TestAdjustmentBackdrop:
                 converter.add_layer(adjustment)
         assert list(backdrop_references(converter.svg).values()) == [1] * 4
 
-    @pytest.mark.parametrize(
-        "psd_file",
-        ["adjustments/invert-mask.psd", "adjustments/invert-clipping-mask.psd"],
-    )
     @pytest.mark.parametrize("optimize", [False, True])
-    def test_masked_adjustment_keeps_backdrop(
-        self, psd_file: str, optimize: bool
-    ) -> None:
-        """Test that the backdrop shows through where the adjustment is masked."""
-        svg = build_svg(psd_file, optimize)
+    def test_masked_adjustment_references_backdrop_once(self, optimize: bool) -> None:
+        """Test that the filter composites the layer mask with the backdrop."""
+        svg = build_svg("adjustments/invert-mask.psd", optimize)
+        assert list(backdrop_references(svg).values()) == [1]
+        use = next(node for node in svg.iter(f"{SVG_NS}use"))
+        assert "mask" not in use.attrib
+        image = next(svg.iter(f"{SVG_NS}feImage"))
+        assert image.get("href", "").startswith("data:image/")
+
+    @pytest.mark.parametrize("optimize", [False, True])
+    def test_clipped_adjustment_keeps_backdrop(self, optimize: bool) -> None:
+        """Test that the backdrop shows through outside the clipping base."""
+        svg = build_svg("adjustments/invert-clipping-mask.psd", optimize)
         assert list(backdrop_references(svg).values()) == [2]
 
     @pytest.mark.parametrize(
         "attribute, value",
-        [("opacity", 128), ("blend_mode", BlendMode.MULTIPLY)],
+        [
+            ("opacity", 128),
+            ("blend_mode", BlendMode.MULTIPLY),
+            ("blend_mode", BlendMode.LINEAR_DODGE),
+        ],
     )
-    def test_translucent_adjustment_keeps_backdrop(
+    def test_translucent_adjustment_references_backdrop_once(
         self, attribute: str, value: object
     ) -> None:
-        """Test that the backdrop shows through a translucent or blended adjustment."""
+        """Test that the filter composites the opacity and blend mode."""
         psdimage = PSDImage.open(get_fixture("adjustments/posterize-levels4.psd"))
         for layer in psdimage.descendants():
             if isinstance(layer, layers.AdjustmentLayer):
                 setattr(layer, attribute, value)
         svg = ET.fromstring(SVGDocument.from_psd(psdimage).tostring())
-        assert list(backdrop_references(svg).values()) == [2]
+        assert list(backdrop_references(svg).values()) == [1]
+        use = next(node for node in svg.iter(f"{SVG_NS}use"))
+        assert "opacity" not in use.attrib
+        assert "mix-blend-mode" not in use.get("style", "")
+
+    def test_mask_image_is_saved_to_file(self, tmp_path: Path) -> None:
+        """Test that a mask bitmap inside the filter is saved like an <image>."""
+        document = SVGDocument.from_psd(
+            PSDImage.open(get_fixture("adjustments/invert-mask.psd"))
+        )
+        svg_file = tmp_path / "output.svg"
+        document.save(str(svg_file), image_prefix="images/img", image_format="png")
+        image = next(ET.parse(svg_file).iter(f"{SVG_NS}feImage"))
+        assert (tmp_path / image.get("href", "")).is_file()
 
     def test_filter_region_covers_canvas(self) -> None:
         """Test that strokes and effects outside the backdrop bbox stay visible."""

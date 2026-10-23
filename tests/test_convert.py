@@ -506,12 +506,7 @@ def test_fill_layers(psd_file: str) -> None:
                 reason="Adjustment layer for clipping base is not supported."
             ),
         ),
-        pytest.param(
-            "adjustments/invert-mask-transparent.psd",
-            marks=pytest.mark.xfail(
-                reason="Transparency is not supported for adjustment layers."
-            ),
-        ),
+        "adjustments/invert-mask-transparent.psd",
     ],
 )
 def test_adjustment_invert(psd_file: str) -> None:

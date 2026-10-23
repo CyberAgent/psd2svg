@@ -18,16 +18,17 @@ We convert it into the following SVG structure::
     <filter id="adjustment"></filter>
     <use href="#backdrop" filter="url(#adjustment)" />
 
-When the adjustment has a mask, a clipping context, opacity, or a blend mode,
-a plain ``<use href="#backdrop" />`` precedes the filtered one to show through.
-That stacked pair may not produce the intended result over a transparent
-backdrop.
+The filter composites the blend mode, opacity, and layer mask of the adjustment
+with ``SourceGraphic``. In a clipping context, the ``<use>`` carries them instead
+and a plain ``<use href="#backdrop" />`` precedes it to show through. That
+stacked pair may not produce the intended result over a transparent backdrop.
 """
 
+import contextlib
 import logging
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
-from typing import cast
+from typing import Iterator, cast
 
 import numpy as np
 from psd_tools.api import adjustments, layers
@@ -37,6 +38,7 @@ from psd_tools.psd.adjustments import Levels as LevelsData
 
 from psd2svg import svg_utils
 from psd2svg.core.base import ConverterProtocol
+from psd2svg.core.constants import BLEND_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +50,7 @@ class AdjustmentConverter(ConverterProtocol):
         self, layer: adjustments.Invert, depth: int = 0, **attrib: str
     ) -> ET.Element | None:
         """Add an invert adjustment layer to the svg document."""
-        filter, use = self._create_filter(layer, name="invert", **attrib)
-        with self.set_current(filter):
+        with self._create_filter(layer, name="invert", **attrib) as use:
             fe_component = self.create_node(
                 "feComponentTransfer", color_interpolation_filters="sRGB"
             )
@@ -83,8 +84,7 @@ class AdjustmentConverter(ConverterProtocol):
         table_values = [i / (levels - 1) for i in range(levels)]
         table_values_str = svg_utils.seq2str(table_values, sep=" ")
 
-        filter, use = self._create_filter(layer, name="posterize", **attrib)
-        with self.set_current(filter):
+        with self._create_filter(layer, name="posterize", **attrib) as use:
             fe_component = self.create_node(
                 "feComponentTransfer", color_interpolation_filters="sRGB"
             )
@@ -146,8 +146,7 @@ class AdjustmentConverter(ConverterProtocol):
         table_values_str = svg_utils.seq2str(table_values, sep=" ")
 
         # Create filter structure
-        filter, use = self._create_filter(layer, name="threshold", **attrib)
-        with self.set_current(filter):
+        with self._create_filter(layer, name="threshold", **attrib) as use:
             # Step 1: Convert to grayscale using luminance formula
             # ITU-R BT.601: L = 0.299*R + 0.587*G + 0.114*B
             # This desaturates the image to grayscale
@@ -209,9 +208,7 @@ class AdjustmentConverter(ConverterProtocol):
             return None
 
         # Create filter structure
-        filter, use = self._create_filter(layer, name="huesaturation", **attrib)
-
-        with self.set_current(filter):
+        with self._create_filter(layer, name="huesaturation", **attrib) as use:
             if enable_colorization == 1 and colorization is not None:
                 # Colorize mode: desaturate, then apply colorization
                 self._apply_colorize_mode(*colorization)
@@ -272,9 +269,7 @@ class AdjustmentConverter(ConverterProtocol):
             logger.debug(f"Gamma value {gamma} is outside expected range [0.01, 9.99]")
 
         # Create filter structure
-        filter, use = self._create_filter(layer, name="exposure", **attrib)
-
-        with self.set_current(filter):
+        with self._create_filter(layer, name="exposure", **attrib) as use:
             # Stage 1: Apply exposure (multiply by 2^exposure)
             if abs(exposure) >= 1e-6:  # Only apply if non-zero
                 exposure_scale = 2**exposure
@@ -364,9 +359,7 @@ class AdjustmentConverter(ConverterProtocol):
             )
 
         # Create filter structure
-        filter, use = self._create_filter(layer, name="brightnesscontrast", **attrib)
-
-        with self.set_current(filter):
+        with self._create_filter(layer, name="brightnesscontrast", **attrib) as use:
             # Stage 1: Apply brightness (if non-zero)
             if brightness != 0:
                 brightness_offset = brightness / 255.0
@@ -472,9 +465,6 @@ class AdjustmentConverter(ConverterProtocol):
                 "this adjustment in Photoshop before conversion."
             )
 
-        # Create filter structure
-        filter, use = self._create_filter(layer, name="colorbalance", **attrib)
-
         # Generate lookup tables
         lut_r = self._generate_colorbalance_lut(shadows, midtones, highlights, 0)
         lut_g = self._generate_colorbalance_lut(shadows, midtones, highlights, 1)
@@ -485,8 +475,7 @@ class AdjustmentConverter(ConverterProtocol):
         lut_g_str = svg_utils.seq2str(lut_g, sep=" ")
         lut_b_str = svg_utils.seq2str(lut_b, sep=" ")
 
-        # Create filter
-        with self.set_current(filter):
+        with self._create_filter(layer, name="colorbalance", **attrib) as use:
             fe_component = self.create_node(
                 "feComponentTransfer", color_interpolation_filters="sRGB"
             )
@@ -603,10 +592,7 @@ class AdjustmentConverter(ConverterProtocol):
         lut_b_str = svg_utils.seq2str(lut_b, sep=" ")
 
         # Create filter structure
-        filter, use = self._create_filter(layer, name="curves", **attrib)
-
-        # Build SVG filter primitives
-        with self.set_current(filter):
+        with self._create_filter(layer, name="curves", **attrib) as use:
             fe_component = self.create_node(
                 "feComponentTransfer", color_interpolation_filters="sRGB"
             )
@@ -690,10 +676,7 @@ class AdjustmentConverter(ConverterProtocol):
         lut_b_str = svg_utils.seq2str(lut_b, sep=" ")
 
         # Create filter structure
-        filter, use = self._create_filter(layer, name="levels", **attrib)
-
-        # Build SVG filter primitives
-        with self.set_current(filter):
+        with self._create_filter(layer, name="levels", **attrib) as use:
             fe_component = self.create_node(
                 "feComponentTransfer", color_interpolation_filters="sRGB"
             )
@@ -1232,10 +1215,16 @@ class AdjustmentConverter(ConverterProtocol):
             for func in ["feFuncR", "feFuncG", "feFuncB"]:
                 self.create_node(func, type="linear", slope=slope, intercept=intercept)
 
+    @contextlib.contextmanager
     def _create_filter(
         self, layer: layers.AdjustmentLayer, name: str, **attrib: str
-    ) -> tuple[ET.Element, ET.Element]:
-        """Create SVG filter structure for the adjustment layer."""
+    ) -> Iterator[ET.Element]:
+        """Create the filtered backdrop reference of the adjustment layer.
+
+        The body runs with the filter as the current node to add the adjustment
+        primitives. Yields the ``<use>`` element.
+        """
+        composite = self._composites_in_filter(layer, attrib)
         wrapper = self._wrap_backdrop("symbol", id=self.auto_id("backdrop"))
         # The canvas region keeps strokes and effects outside the backdrop bbox.
         filter = self.create_node(
@@ -1255,17 +1244,176 @@ class AdjustmentConverter(ConverterProtocol):
             class_=name,
             **attrib,  # type: ignore[arg-type]  # Clipping context etc.
         )
-        self.set_layer_attributes(layer, use)
-        use = self.apply_mask(layer, use)
-        # A plain backdrop under a fully opaque filtered use would only double
-        # the render tree, which grows exponentially with stacked adjustments.
-        if any(
-            key in use.attrib for key in ("opacity", "mask", "clip-path")
-        ) or "mix-blend-mode" in use.get("style", ""):
-            self.current.insert(
-                index, svg_utils.create_node("use", href=svg_utils.get_uri(wrapper))
+        if not composite:
+            self.set_layer_attributes(layer, use)
+            use = self.apply_mask(layer, use)
+            # A plain backdrop under a fully opaque filtered use would only double
+            # the render tree, which grows exponentially with stacked adjustments.
+            if any(
+                key in use.attrib for key in ("opacity", "mask", "clip-path")
+            ) or "mix-blend-mode" in use.get("style", ""):
+                self.current.insert(
+                    index, svg_utils.create_node("use", href=svg_utils.get_uri(wrapper))
+                )
+        with self.set_current(filter):
+            yield use
+            if composite:
+                self._composite_adjustment(layer)
+
+    def _composites_in_filter(
+        self, layer: layers.AdjustmentLayer, attrib: dict[str, str]
+    ) -> bool:
+        """Whether the filter can composite the blend mode, opacity and mask."""
+        if "mask" in attrib or "clip-path" in attrib:
+            return False
+        if self.current.tag in ("clipPath", "mask"):
+            return False
+        return layer.blend_mode in BLEND_MODE
+
+    def _composite_adjustment(self, layer: layers.AdjustmentLayer) -> None:
+        """Composite the adjusted image over SourceGraphic inside the filter.
+
+        The result is ``blend(adjusted, source) * w + source * (1 - w)`` where the
+        weight ``w`` is the layer opacity times the layer mask.
+        """
+        mode = BLEND_MODE[layer.blend_mode]
+        opacity = layer.opacity / 255
+        has_mask = self.has_raster_mask(layer)
+        is_normal = mode in ("normal", "pass-through")
+        if is_normal and opacity >= 1.0 and not has_mask:
+            return
+
+        result = "SourceGraphic"
+        if len(self.current):
+            result = "adjusted"
+            self.current[-1].set("result", result)
+        if not is_normal:
+            result = self._blend_adjusted(result, mode)
+
+        if not has_mask:
+            self.create_node(
+                "feComposite",
+                in_=result,
+                in2="SourceGraphic",
+                operator="arithmetic",
+                k2=opacity,
+                k3=1 - opacity,
+                color_interpolation_filters="sRGB",
             )
-        return filter, use
+            return
+
+        assert layer.mask is not None
+        inverted = layer.mask.background_color > 0
+        if inverted:
+            self.create_node(
+                "feFlood",
+                flood_color="#ffffff",
+                result="maskbackground",
+                color_interpolation_filters="sRGB",
+            )
+        image_id = self.register_mask_image(layer)
+        if image_id is not None:
+            self.create_node(
+                "feImage",
+                id=image_id,
+                x=layer.mask.left,
+                y=layer.mask.top,
+                width=layer.mask.width,
+                height=layer.mask.height,
+                preserveAspectRatio="none",
+                color_interpolation_filters="sRGB",
+            )
+            if inverted:
+                self.create_node(
+                    "feComposite",
+                    in2="maskbackground",
+                    operator="over",
+                    color_interpolation_filters="sRGB",
+                )
+        elif not inverted:
+            self.create_node(
+                "feFlood", flood_opacity=0, color_interpolation_filters="sRGB"
+            )
+        # The grayscale mask times the opacity, as alpha.
+        alpha = svg_utils.num2str(opacity)
+        self.create_node(
+            "feColorMatrix",
+            type="matrix",
+            values=f"0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 {alpha} 0 0 0 0",
+            result="weight",
+            color_interpolation_filters="sRGB",
+        )
+        self.create_node(
+            "feComposite",
+            in_=result,
+            in2="weight",
+            operator="in",
+            result="masked",
+            color_interpolation_filters="sRGB",
+        )
+        self.create_node(
+            "feComposite",
+            in_="SourceGraphic",
+            in2="weight",
+            operator="out",
+            result="unmasked",
+            color_interpolation_filters="sRGB",
+        )
+        self.create_node(
+            "feComposite",
+            in_="masked",
+            in2="unmasked",
+            operator="arithmetic",
+            k2=1,
+            k3=1,
+            color_interpolation_filters="sRGB",
+        )
+
+    def _blend_adjusted(self, adjusted: str, mode: str) -> str:
+        """Blend the adjusted image with SourceGraphic, keeping the source alpha.
+
+        Both sides blend as opaque colors so that a semi-transparent backdrop does
+        not composite over itself.
+        """
+        for name, source in (
+            ("adjustedopaque", adjusted),
+            ("sourceopaque", "SourceGraphic"),
+        ):
+            node = self.create_node(
+                "feComponentTransfer",
+                in_=source,
+                result=name,
+                color_interpolation_filters="sRGB",
+            )
+            with self.set_current(node):
+                self.create_node("feFuncA", type="linear", slope=0, intercept=1)
+        if mode in ("plus-lighter", "plus-darker"):
+            self.create_node(
+                "feComposite",
+                in_="adjustedopaque",
+                in2="sourceopaque",
+                operator="arithmetic",
+                k2=1,
+                k3=1,
+                k4=-1 if mode == "plus-darker" else 0,
+                color_interpolation_filters="sRGB",
+            )
+        else:
+            self.create_node(
+                "feBlend",
+                in_="adjustedopaque",
+                in2="sourceopaque",
+                mode=mode,
+                color_interpolation_filters="sRGB",
+            )
+        self.create_node(
+            "feComposite",
+            in2="SourceGraphic",
+            operator="in",
+            result="blended",
+            color_interpolation_filters="sRGB",
+        )
+        return "blended"
 
     def _wrap_backdrop(self, tag: str = "symbol", **attrib: str) -> ET.Element:
         """Wrap previous nodes into a container node for adjustment application."""
