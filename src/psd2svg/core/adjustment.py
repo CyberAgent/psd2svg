@@ -32,7 +32,6 @@ from typing import Iterator, cast
 
 import numpy as np
 from psd_tools.api import adjustments, layers
-from psd_tools.constants import BlendMode
 from psd_tools.psd.adjustments import Curves as CurvesData
 from psd_tools.psd.adjustments import CurvesExtraItem, LevelRecord
 from psd_tools.psd.adjustments import Levels as LevelsData
@@ -1278,9 +1277,8 @@ class AdjustmentConverter(ConverterProtocol):
         The result is ``blend(adjusted, source) * w + source * (1 - w)`` where the
         weight ``w`` is the layer opacity times the layer mask.
         """
-        if layer.blend_mode in (BlendMode.LINEAR_DODGE, BlendMode.LINEAR_BURN):
-            mode = BLEND_MODE[layer.blend_mode]  # Exact as arithmetic sums.
-        else:
+        mode = BLEND_MODE[layer.blend_mode]
+        if mode not in ("plus-lighter", "plus-darker"):  # Exact as arithmetic sums.
             mode = get_svg_blend_mode(layer.blend_mode)
         opacity = layer.opacity / 255
         has_mask = self.has_raster_mask(layer)

@@ -557,7 +557,11 @@ class TestAdjustmentBackdrop:
 
     @pytest.mark.parametrize(
         "blend_mode, logged",
-        [(BlendMode.DARKER_COLOR, True), (BlendMode.LINEAR_DODGE, False)],
+        [
+            (BlendMode.DARKER_COLOR, True),
+            (BlendMode.LINEAR_DODGE, False),
+            (BlendMode.LINEAR_BURN, False),
+        ],
     )
     def test_approximated_blend_mode_is_logged(
         self, blend_mode: BlendMode, logged: bool, caplog: pytest.LogCaptureFixture

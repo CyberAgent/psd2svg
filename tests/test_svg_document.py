@@ -18,7 +18,7 @@ import pytest
 from PIL import Image
 from psd_tools import PSDImage
 
-from psd2svg import SVGDocument, svg_utils
+from psd2svg import SVGDocument, image_utils, svg_utils
 from psd2svg.core.font_utils import FontInfo, create_file_url, encode_font_data_uri
 from psd2svg.core.text import TextWrappingMode
 from psd2svg.core.typesetting import TypeSetting
@@ -278,6 +278,18 @@ class TestSVGDocumentImageHandling:
 
         assert "data:image/webp;base64," in result
         assert "href=" in result
+
+    def test_loaded_fe_image_with_xlink_href_is_kept(self) -> None:
+        """Test that only an feImage without any href takes a registered bitmap."""
+        document = SVGDocument.load(
+            '<svg xmlns="http://www.w3.org/2000/svg" '
+            'xmlns:xlink="http://www.w3.org/1999/xlink"><filter id="filter">'
+            '<feImage xlink:href="#shape"/><feImage id="image"/></filter></svg>',
+            {"image": image_utils.encode_image(Image.new("RGB", (10, 10)))},
+        )
+        result = document.tostring()
+        assert 'href="#shape"' in result
+        assert "data:image/webp;base64," in result
 
     def test_tostring_embed_images_false_no_prefix_raises_error(self) -> None:
         """Test tostring() with embed_images=False and no prefix raises error."""

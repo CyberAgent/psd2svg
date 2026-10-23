@@ -17,6 +17,8 @@ from psd2svg.timeout_utils import with_timeout
 
 logger = logging.getLogger(__name__)
 
+XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
+
 DEFAULT_IMAGE_FORMAT = "webp"
 
 
@@ -488,7 +490,8 @@ class SVGDocument:
         nodes = []
         for node in svg.iter():
             tag = node.tag.rpartition("}")[2]  # A loaded document has namespaces.
-            if tag == "image" or (tag == "feImage" and "href" not in node.attrib):
+            has_href = "href" in node.attrib or XLINK_HREF in node.attrib
+            if tag == "image" or (tag == "feImage" and not has_href):
                 nodes.append(node)
 
         # Validate that all image nodes have IDs and corresponding images exist
