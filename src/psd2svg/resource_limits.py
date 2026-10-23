@@ -6,7 +6,7 @@ attacks from malicious or malformed input files.
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,9 @@ class ResourceLimits:
     - Conversion timeout (prevents CPU exhaustion)
     - Layer depth (prevents exponential processing time)
     - Image dimensions (prevents memory exhaustion from large images)
+
+    A conversion warns once per limit type at 80% of the file-size or layer-depth
+    limit and at 90% of the image-dimension limit. Disabled limits do not warn.
 
     Limits can be configured via environment variables or constructor parameters.
     Constructor parameters take precedence over environment variables.
@@ -60,6 +63,34 @@ class ResourceLimits:
     timeout: int = DEFAULT_TIMEOUT
     max_layer_depth: int = DEFAULT_MAX_LAYER_DEPTH
     max_image_dimension: int = DEFAULT_MAX_IMAGE_DIMENSION
+    _warned_limits: set[str] = field(
+        default_factory=set, init=False, repr=False, compare=False
+    )
+
+    def reset_warnings(self) -> None:
+        """Allow warnings to be emitted again for a new conversion."""
+        self._warned_limits.clear()
+
+    def warn_near_limit(
+        self, name: str, value: int, limit: int, threshold: float
+    ) -> None:
+        """Log once per limit type when a valid value approaches its limit."""
+        if (
+            limit <= 0
+            or value > limit
+            or value < limit * threshold
+            or name in self._warned_limits
+        ):
+            return
+        self._warned_limits.add(name)
+        logger.warning(
+            "%s %s is %.0f%% of limit %s. "
+            "Consider increasing the limit if conversion fails.",
+            name,
+            value,
+            100 * value / limit,
+            limit,
+        )
 
     @classmethod
     def default(cls) -> "ResourceLimits":
@@ -269,6 +300,7 @@ class ResourceLimits:
             return
         max_dim = self.max_image_dimension
         if width <= max_dim and height <= max_dim:
+            self.warn_near_limit("Image dimension", max(width, height), max_dim, 0.9)
             return
 
         suggested = max(width, height) + 1000

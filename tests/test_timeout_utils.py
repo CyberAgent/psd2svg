@@ -7,6 +7,7 @@ This module tests the cross-platform timeout functionality:
 - Exception propagation
 """
 
+import logging
 import signal
 import time
 from typing import Any
@@ -18,6 +19,16 @@ from psd2svg.timeout_utils import with_timeout
 
 class TestWithTimeoutBasicBehavior:
     """Tests for basic with_timeout() behavior."""
+
+    def test_warns_at_half_and_three_quarters_of_timeout(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            with_timeout(time.sleep, 1, 0.85)
+
+        warnings = [record.message for record in caplog.records]
+        assert any("50%" in message for message in warnings)
+        assert any("75%" in message for message in warnings)
 
     def test_with_timeout_disabled_returns_result(self) -> None:
         """Test with_timeout() executes normally when timeout is disabled (0)."""

@@ -160,6 +160,18 @@ class TestResourceLimitsDefaults:
 class TestFileSizeValidation:
     """Tests for file size limit enforcement."""
 
+    def test_warns_near_file_size_limit(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        input_path = get_fixture("layer-types/pixel-layer.psd")
+        file_size = os.path.getsize(input_path)
+        limits = ResourceLimits(max_file_size=file_size)
+
+        with caplog.at_level(logging.WARNING):
+            convert(input_path, str(tmp_path / "output.svg"), resource_limits=limits)
+
+        assert sum("File size" in record.message for record in caplog.records) == 1
+
     def test_convert_with_valid_file_size(self, tmp_path: Path) -> None:
         """Test convert() succeeds when file size is below limit."""
         input_path = get_fixture("layer-types/pixel-layer.psd")
@@ -344,6 +356,20 @@ class TestTimeoutProtection:
 
 class TestLayerDepthValidation:
     """Tests for layer depth limit enforcement."""
+
+    def test_warns_once_near_layer_depth_limit(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        psdimage = PSDImage.open(get_fixture("layer-types/group.psd"))
+        converter = Converter(
+            psdimage, resource_limits=ResourceLimits(max_layer_depth=10)
+        )
+
+        with caplog.at_level(logging.WARNING):
+            converter.add_children(psdimage, depth=8)
+            converter.add_children(psdimage, depth=8)
+
+        assert sum("Layer depth" in record.message for record in caplog.records) == 1
 
     def test_from_psd_with_shallow_layers(self) -> None:
         """Test SVGDocument.from_psd() succeeds with shallow layer nesting."""
@@ -544,6 +570,35 @@ class TestImageDimensionValidation:
 
 class TestCheckImageDimension:
     """Tests for ResourceLimits.check_image_dimension()."""
+
+    def test_warns_once_at_ninety_percent(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        limits = ResourceLimits(max_image_dimension=100)
+
+        with caplog.at_level(logging.WARNING):
+            limits.check_image_dimension(89, 1, description="Layer 'a'")
+            limits.check_image_dimension(90, 1, description="Layer 'a'")
+            limits.check_image_dimension(100, 1, description="Layer 'b'")
+
+        assert (
+            sum("Image dimension" in record.message for record in caplog.records) == 1
+        )
+        assert "90% of limit 100" in caplog.text
+
+    def test_reset_allows_warning_on_next_conversion(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        limits = ResourceLimits(max_image_dimension=100)
+
+        with caplog.at_level(logging.WARNING):
+            limits.check_image_dimension(90, 1, description="First")
+            limits.reset_warnings()
+            limits.check_image_dimension(90, 1, description="Second")
+
+        assert (
+            sum("Image dimension" in record.message for record in caplog.records) == 2
+        )
 
     def test_within_limit_passes(self) -> None:
         """Test dimensions at or below the limit are accepted."""

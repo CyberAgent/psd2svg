@@ -213,6 +213,9 @@ class LayerConverter(ConverterProtocol):
                     f"To process: set PSD2SVG_MAX_LAYER_DEPTH={depth + 50} environment variable, "  # noqa: E501
                     f"or use ResourceLimits(max_layer_depth={depth + 50}) in Python API."  # noqa: E501
                 )
+            self.resource_limits.warn_near_limit(
+                "Layer depth", depth, self.resource_limits.max_layer_depth, 0.8
+            )
 
         for layer in group:
             if layer.clipping or (
