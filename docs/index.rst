@@ -37,7 +37,7 @@ Install via pip:
 
    pip install psd2svg
 
-**Requirements:** Python 3.10 or higher. Dependencies (``psd-tools``, ``pillow``, ``numpy``, ``resvg-py``) are installed automatically.
+**Requirements:** Python 3.11 or higher. Dependencies (``psd-tools``, ``pillow``, ``numpy``, ``resvg-py``) are installed automatically.
 
 **Optional features:**
 

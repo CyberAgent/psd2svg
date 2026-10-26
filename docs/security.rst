@@ -248,7 +248,7 @@ For maximum isolation, run conversions in Docker containers:
 .. code-block:: bash
 
     # Dockerfile
-    FROM python:3.10-slim
+    FROM python:3.11-slim
     RUN pip install psd2svg
     WORKDIR /workspace
 

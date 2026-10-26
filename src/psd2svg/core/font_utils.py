@@ -8,12 +8,7 @@ import sys
 import urllib.parse
 import warnings
 from pathlib import Path
-from typing import Any
-
-try:
-    from typing import Self  # type: ignore
-except ImportError:
-    from typing_extensions import Self
+from typing import Any, Self
 
 try:
     import fontconfig
@@ -411,7 +406,7 @@ class FontInfo:
     @staticmethod
     def _resolve_via_fontconfig(
         postscriptname: str, charset_codepoints: set[int] | None
-    ) -> Self | None:
+    ) -> "FontInfo | None":
         """Resolve font via fontconfig with optional charset matching.
 
         Args:
@@ -457,7 +452,7 @@ class FontInfo:
     @staticmethod
     def _resolve_via_windows(
         postscriptname: str, charset_codepoints: set[int] | None
-    ) -> Self | None:
+    ) -> "FontInfo | None":
         """Resolve font via Windows registry with optional charset matching.
 
         Args:
@@ -502,7 +497,7 @@ class FontInfo:
         font_mapping: dict[str, dict[str, float | str]] | None = None,
         charset_codepoints: set[int] | None = None,
         disable_static_mapping: bool = False,
-    ) -> Self | None:
+    ) -> "FontInfo | None":
         """Find font information by PostScript name (backward-compatible wrapper).
 
         .. deprecated:: 0.7.0
@@ -724,7 +719,7 @@ class FontInfo:
     def lookup_static(
         postscriptname: str,
         font_mapping: dict[str, dict[str, float | str]] | None = None,
-    ) -> Self | None:
+    ) -> "FontInfo | None":
         """Lookup font metadata using custom and static mappings only
         (no platform resolution).
 
@@ -819,7 +814,7 @@ class FontInfo:
         postscriptname: str,
         font_mapping: dict[str, dict[str, float | str]],
         charset_codepoints: set[int] | None = None,
-    ) -> Self | None:
+    ) -> "FontInfo | None":
         """Resolve font from custom mapping with file validation.
 
         This helper method handles custom font mapping resolution when file paths
@@ -888,7 +883,7 @@ class FontInfo:
         postscriptname: str,
         font_mapping: dict[str, dict[str, float | str]] | None = None,
         charset_codepoints: set[int] | None = None,
-    ) -> Self | None:
+    ) -> "FontInfo | None":
         """Resolve font with file path using platform-specific resolution.
 
         Uses fontconfig (Linux/macOS) or Windows registry to locate font files.
