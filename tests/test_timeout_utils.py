@@ -62,7 +62,7 @@ class TestWithTimeoutBasicBehavior:
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         with caplog.at_level(logging.WARNING):
-            with_timeout(time.sleep, 1, 0.85)
+            with_timeout(time.sleep, 2, 1.8)
 
         warnings = [record.message for record in caplog.records]
         assert any("50%" in message for message in warnings)

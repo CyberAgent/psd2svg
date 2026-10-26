@@ -137,7 +137,8 @@ class SVGDocument:
         # Default to ResourceLimits.default() if not specified
         if resource_limits is None:
             resource_limits = ResourceLimits.default()
-        resource_limits.reset_warnings()
+        else:
+            resource_limits = dataclasses.replace(resource_limits)
 
         # Build SVG tree with original font names
         converter = Converter(
@@ -1128,7 +1129,8 @@ def convert(
     # Default to ResourceLimits.default() if not specified
     if resource_limits is None:
         resource_limits = ResourceLimits.default()
-    resource_limits.reset_warnings()
+    else:
+        resource_limits = dataclasses.replace(resource_limits)
 
     # Validate file size before loading
     if resource_limits.is_file_size_limited():

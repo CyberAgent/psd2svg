@@ -14,8 +14,11 @@ import signal
 import subprocess
 import sys
 import sysconfig
+import threading
 import time
+import xml.etree.ElementTree as ET
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Protocol
 from unittest.mock import patch
@@ -596,6 +599,42 @@ class TestCheckImageDimension:
             limits.reset_warnings()
             limits.check_image_dimension(90, 1, description="Second")
 
+        assert (
+            sum("Image dimension" in record.message for record in caplog.records) == 2
+        )
+
+    def test_concurrent_conversions_with_shared_limits_warn_independently(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        limits = ResourceLimits(timeout=0, max_image_dimension=100)
+        psdimage = PSDImage.open(get_fixture("layer-types/pixel-layer.psd"))
+        barrier = threading.Barrier(2)
+        conversion_limits: list[ResourceLimits] = []
+
+        def build(converter: Converter) -> None:
+            assert converter.resource_limits is not None
+            conversion_limits.append(converter.resource_limits)
+            barrier.wait(timeout=5)
+            converter.resource_limits.check_image_dimension(
+                90, 1, description="Concurrent conversion"
+            )
+            converter.svg = ET.Element("svg")
+
+        with patch.object(Converter, "build", build):
+            with caplog.at_level(logging.WARNING):
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    futures = [
+                        executor.submit(
+                            SVGDocument.from_psd, psdimage, resource_limits=limits
+                        )
+                        for _ in range(2)
+                    ]
+                    for future in futures:
+                        future.result(timeout=10)
+
+        assert len(conversion_limits) == 2
+        assert all(item is not limits for item in conversion_limits)
+        assert conversion_limits[0] is not conversion_limits[1]
         assert (
             sum("Image dimension" in record.message for record in caplog.records) == 2
         )
