@@ -9,6 +9,21 @@ T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
 
+def _warn_about_elapsed_time(finished: threading.Event, timeout_seconds: int) -> None:
+    """Warn at the two timeout milestones unless the conversion has finished."""
+    for fraction, interval in (
+        (50, timeout_seconds / 2),
+        (75, timeout_seconds / 4),
+    ):
+        if finished.wait(interval):
+            return
+        logger.warning(
+            "PSD conversion has used %s%% of its %s-second timeout.",
+            fraction,
+            timeout_seconds,
+        )
+
+
 def with_timeout(
     func: Callable[..., T], timeout_seconds: int, *args: Any, **kwargs: Any
 ) -> T:
@@ -36,21 +51,11 @@ def with_timeout(
         return func(*args, **kwargs)
 
     finished = threading.Event()
-
-    def warn_about_elapsed_time() -> None:
-        for fraction, interval in (
-            (50, timeout_seconds / 2),
-            (75, timeout_seconds / 4),
-        ):
-            if finished.wait(interval):
-                return
-            logger.warning(
-                "PSD conversion has used %s%% of its %s-second timeout.",
-                fraction,
-                timeout_seconds,
-            )
-
-    warning_thread = threading.Thread(target=warn_about_elapsed_time, daemon=True)
+    warning_thread = threading.Thread(
+        target=_warn_about_elapsed_time,
+        args=(finished, timeout_seconds),
+        daemon=True,
+    )
     warning_thread.start()
     try:
         return _run_with_timeout(func, timeout_seconds, *args, **kwargs)

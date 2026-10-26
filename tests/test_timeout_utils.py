@@ -12,10 +12,11 @@ import signal
 import threading
 import time
 from typing import Any
+from unittest.mock import Mock, call
 
 import pytest
 
-from psd2svg.timeout_utils import with_timeout
+from psd2svg.timeout_utils import _warn_about_elapsed_time, with_timeout
 
 
 class TestWithTimeoutBasicBehavior:
@@ -61,12 +62,17 @@ class TestWithTimeoutBasicBehavior:
     def test_warns_at_half_and_three_quarters_of_timeout(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
+        finished = Mock(spec=threading.Event)
+        finished.wait.return_value = False
+
         with caplog.at_level(logging.WARNING):
-            with_timeout(time.sleep, 2, 1.8)
+            _warn_about_elapsed_time(finished, 2)
 
         warnings = [record.message for record in caplog.records]
-        assert any("50%" in message for message in warnings)
-        assert any("75%" in message for message in warnings)
+        assert finished.wait.call_args_list == [call(1.0), call(0.5)]
+        assert len(warnings) == 2
+        assert "50%" in warnings[0]
+        assert "75%" in warnings[1]
 
     def test_with_timeout_disabled_returns_result(self) -> None:
         """Test with_timeout() executes normally when timeout is disabled (0)."""

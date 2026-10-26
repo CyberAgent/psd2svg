@@ -588,20 +588,7 @@ class TestCheckImageDimension:
             sum("Image dimension" in record.message for record in caplog.records) == 1
         )
         assert "90% of limit 100" in caplog.text
-
-    def test_reset_allows_warning_on_next_conversion(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        limits = ResourceLimits(max_image_dimension=100)
-
-        with caplog.at_level(logging.WARNING):
-            limits.check_image_dimension(90, 1, description="First")
-            limits.reset_warnings()
-            limits.check_image_dimension(90, 1, description="Second")
-
-        assert (
-            sum("Image dimension" in record.message for record in caplog.records) == 2
-        )
+        assert "Layer 'a'" in caplog.text
 
     def test_concurrent_conversions_with_shared_limits_warn_independently(
         self, caplog: pytest.LogCaptureFixture

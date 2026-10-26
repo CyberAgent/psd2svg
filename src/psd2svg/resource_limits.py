@@ -67,12 +67,14 @@ class ResourceLimits:
         default_factory=set, init=False, repr=False, compare=False
     )
 
-    def reset_warnings(self) -> None:
-        """Allow warnings to be emitted again for a new conversion."""
-        self._warned_limits.clear()
-
     def warn_near_limit(
-        self, name: str, value: int, limit: int, threshold: float
+        self,
+        name: str,
+        value: int,
+        limit: int,
+        threshold: float,
+        *,
+        description: str | None = None,
     ) -> None:
         """Log once per limit type when a valid value approaches its limit."""
         if (
@@ -83,11 +85,13 @@ class ResourceLimits:
         ):
             return
         self._warned_limits.add(name)
+        context = f" ({description})" if description else ""
         logger.warning(
-            "%s %s is %.0f%% of limit %s. "
+            "%s %s%s is %.0f%% of limit %s. "
             "Consider increasing the limit if conversion fails.",
             name,
             value,
+            context,
             100 * value / limit,
             limit,
         )
@@ -300,7 +304,13 @@ class ResourceLimits:
             return
         max_dim = self.max_image_dimension
         if width <= max_dim and height <= max_dim:
-            self.warn_near_limit("Image dimension", max(width, height), max_dim, 0.9)
+            self.warn_near_limit(
+                "Image dimension",
+                max(width, height),
+                max_dim,
+                0.9,
+                description=description,
+            )
             return
 
         suggested = max(width, height) + 1000
