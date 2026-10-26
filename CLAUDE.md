@@ -138,7 +138,7 @@ branch with `git rebase --signoff main`.
 
 - **Type hints**: Full type annotation coverage
 - **Linting**: Ruff for fast linting/formatting
-- **Python 3.10+**: Modern Python, no legacy code
+- **Python 3.11+**: Modern Python, no legacy code
 - **Abstract base classes**: Proper ABC usage for interfaces
 - **Import statements**: Prefer top-/module-level import over function-level import
 

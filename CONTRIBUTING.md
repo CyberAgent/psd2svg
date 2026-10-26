@@ -127,7 +127,7 @@ unexplained will be closed, whether or not it works.
 ## Code Quality Standards
 
 - **Type hints**: Full type annotation coverage required
-- **Modern Python**: Target Python 3.10+ features (e.g., `list[str]` not `List[str]`)
+- **Modern Python**: Target Python 3.11+ features (e.g., `list[str]` not `List[str]`)
 - **Linting**: Use Ruff for linting and formatting
 - **Style**: Follow existing code patterns, prefer module-level imports
 - **Testing**: Add tests for new features, ensure all tests pass

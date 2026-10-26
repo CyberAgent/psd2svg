@@ -492,7 +492,7 @@ ResvgRasterizer Issues
 .. code-block:: bash
 
    # Ensure compatible Python version
-   python --version  # Should be 3.10+
+   python --version  # Should be 3.11+
 
    # Upgrade pip
    pip install --upgrade pip
