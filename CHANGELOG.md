@@ -14,14 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Dropped Python 3.10 support** (#PR)
+- **Dropped Python 3.10 support** (#504)
   - Python 3.10 reaches end of life on 2026-10-31; the minimum is now 3.11.
 - **Expected limitations no longer log warnings by default** (#494)
   - Unsupported blend modes, approximated effects, and repaired values now log at DEBUG; the missing-font warning appears once per font.
 
 ### Security
 
-- **Pillow upgraded to 13.0.0** (#PR)
+- **Pillow upgraded to 13.0.0** (#504)
   - Resolves the open Pillow Dependabot advisories; the minimum is now `pillow>=13.0.0`.
 
 ### Fixed
