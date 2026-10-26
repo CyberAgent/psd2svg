@@ -30,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prefixed attributes and tags keep their declarations, including Unicode names and
     names beginning with `div`, `p`, or `span`.
 
-- **Stacked adjustment layers no longer render in exponential time in Chromium** (#497)
-  - Applies to unmasked, opaque, normal-blend adjustments; masked, clipped, translucent, and blended ones still double the render tree (#496).
+- **Stacked adjustment layers no longer render in exponential time in Chromium** (#497, #500)
+  - Only clipped adjustments still double the render tree; masked, translucent, and blended ones now also render correctly over a transparent backdrop.
 
 ## [0.14.0] - 2026-10-21
 
