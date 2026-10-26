@@ -140,6 +140,36 @@ class SVGDocument:
         else:
             resource_limits = dataclasses.replace(resource_limits)
 
+        return SVGDocument._from_psd_with_limits(
+            psdimage,
+            enable_live_shapes=enable_live_shapes,
+            enable_text=enable_text,
+            enable_title=enable_title,
+            enable_class=enable_class,
+            text_letter_spacing_offset=text_letter_spacing_offset,
+            text_wrapping_mode=text_wrapping_mode,
+            font_mapping=font_mapping,
+            resource_limits=resource_limits,
+            include_hidden_layers=include_hidden_layers,
+            crop_layers_to_canvas=crop_layers_to_canvas,
+        )
+
+    @staticmethod
+    def _from_psd_with_limits(
+        psdimage: PSDImage,
+        *,
+        enable_live_shapes: bool,
+        enable_text: bool,
+        enable_title: bool,
+        enable_class: bool,
+        text_letter_spacing_offset: float,
+        text_wrapping_mode: int,
+        font_mapping: dict[str, dict[str, float | str]] | None,
+        resource_limits: ResourceLimits,
+        include_hidden_layers: bool,
+        crop_layers_to_canvas: bool,
+    ) -> "SVGDocument":
+        """Convert using limits already owned by this conversion."""
         # Build SVG tree with original font names
         converter = Converter(
             psdimage,
@@ -1146,7 +1176,7 @@ def convert(
         )
 
     psdimage = PSDImage.open(input_path)
-    document = SVGDocument.from_psd(
+    document = SVGDocument._from_psd_with_limits(
         psdimage,
         enable_text=enable_text,
         enable_live_shapes=enable_live_shapes,
