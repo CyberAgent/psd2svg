@@ -14,8 +14,11 @@ import signal
 import subprocess
 import sys
 import sysconfig
+import threading
 import time
+import xml.etree.ElementTree as ET
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Protocol
 from unittest.mock import patch
@@ -159,6 +162,18 @@ class TestResourceLimitsDefaults:
 
 class TestFileSizeValidation:
     """Tests for file size limit enforcement."""
+
+    def test_warns_near_file_size_limit(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        input_path = get_fixture("layer-types/pixel-layer.psd")
+        file_size = os.path.getsize(input_path)
+        limits = ResourceLimits(max_file_size=file_size)
+
+        with caplog.at_level(logging.WARNING):
+            convert(input_path, str(tmp_path / "output.svg"), resource_limits=limits)
+
+        assert sum("File size" in record.message for record in caplog.records) == 1
 
     def test_convert_with_valid_file_size(self, tmp_path: Path) -> None:
         """Test convert() succeeds when file size is below limit."""
@@ -344,6 +359,20 @@ class TestTimeoutProtection:
 
 class TestLayerDepthValidation:
     """Tests for layer depth limit enforcement."""
+
+    def test_warns_once_near_layer_depth_limit(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        psdimage = PSDImage.open(get_fixture("layer-types/group.psd"))
+        converter = Converter(
+            psdimage, resource_limits=ResourceLimits(max_layer_depth=10)
+        )
+
+        with caplog.at_level(logging.WARNING):
+            converter.add_children(psdimage, depth=8)
+            converter.add_children(psdimage, depth=8)
+
+        assert sum("Layer depth" in record.message for record in caplog.records) == 1
 
     def test_from_psd_with_shallow_layers(self) -> None:
         """Test SVGDocument.from_psd() succeeds with shallow layer nesting."""
@@ -544,6 +573,58 @@ class TestImageDimensionValidation:
 
 class TestCheckImageDimension:
     """Tests for ResourceLimits.check_image_dimension()."""
+
+    def test_warns_once_at_ninety_percent(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        limits = ResourceLimits(max_image_dimension=100)
+
+        with caplog.at_level(logging.WARNING):
+            limits.check_image_dimension(89, 1, description="Layer 'a'")
+            limits.check_image_dimension(90, 1, description="Layer 'a'")
+            limits.check_image_dimension(100, 1, description="Layer 'b'")
+
+        assert (
+            sum("Image dimension" in record.message for record in caplog.records) == 1
+        )
+        assert "90% of limit 100" in caplog.text
+        assert "Layer 'a'" in caplog.text
+
+    def test_concurrent_conversions_with_shared_limits_warn_independently(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        limits = ResourceLimits(timeout=0, max_image_dimension=100)
+        psdimage = PSDImage.open(get_fixture("layer-types/pixel-layer.psd"))
+        barrier = threading.Barrier(2)
+        conversion_limits: list[ResourceLimits] = []
+
+        def build(converter: Converter) -> None:
+            assert converter.resource_limits is not None
+            conversion_limits.append(converter.resource_limits)
+            barrier.wait(timeout=5)
+            converter.resource_limits.check_image_dimension(
+                90, 1, description="Concurrent conversion"
+            )
+            converter.svg = ET.Element("svg")
+
+        with patch.object(Converter, "build", build):
+            with caplog.at_level(logging.WARNING):
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    futures = [
+                        executor.submit(
+                            SVGDocument.from_psd, psdimage, resource_limits=limits
+                        )
+                        for _ in range(2)
+                    ]
+                    for future in futures:
+                        future.result(timeout=10)
+
+        assert len(conversion_limits) == 2
+        assert all(item is not limits for item in conversion_limits)
+        assert conversion_limits[0] is not conversion_limits[1]
+        assert (
+            sum("Image dimension" in record.message for record in caplog.records) == 2
+        )
 
     def test_within_limit_passes(self) -> None:
         """Test dimensions at or below the limit are accepted."""

@@ -1,10 +1,27 @@
 """Timeout utilities for resource-limited operations."""
 
+import logging
 import signal
 import threading
 from typing import Any, Callable, TypeVar
 
 T = TypeVar("T")
+logger = logging.getLogger(__name__)
+
+
+def _warn_about_elapsed_time(finished: threading.Event, timeout_seconds: int) -> None:
+    """Warn at the two timeout milestones unless the conversion has finished."""
+    for fraction, interval in (
+        (50, timeout_seconds / 2),
+        (75, timeout_seconds / 4),
+    ):
+        if finished.wait(interval):
+            return
+        logger.warning(
+            "PSD conversion has used %s%% of its %s-second timeout.",
+            fraction,
+            timeout_seconds,
+        )
 
 
 def with_timeout(
@@ -28,9 +45,29 @@ def with_timeout(
     Note:
         - On Unix/macOS: Uses signal.SIGALRM for reliable timeout
         - On Windows: Uses threading (may not interrupt native C code)
+        - Logs warnings at 50% and 75% of the allotted time.
     """
     if timeout_seconds <= 0:
         return func(*args, **kwargs)
+
+    finished = threading.Event()
+    warning_thread = threading.Thread(
+        target=_warn_about_elapsed_time,
+        args=(finished, timeout_seconds),
+        daemon=True,
+    )
+    warning_thread.start()
+    try:
+        return _run_with_timeout(func, timeout_seconds, *args, **kwargs)
+    finally:
+        # A logging handler may block; the daemon monitor must not delay the result.
+        finished.set()
+
+
+def _run_with_timeout(
+    func: Callable[..., T], timeout_seconds: int, *args: Any, **kwargs: Any
+) -> T:
+    """Run the platform-specific timeout after warning monitoring has started."""
 
     # Try signal-based timeout (Unix/macOS)
     if hasattr(signal, "SIGALRM"):
