@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Playwright rasterization loads resolved fonts in Chromium** (#511)
+  - Playwright embeds the used glyph subsets as data URIs; Resvg continues to use local font files.
+
 - **XHTML namespace declarations survive unrevised names in `foreignObject`** (#495)
   - Prefixed attributes and tags keep their declarations, including Unicode names and
     names beginning with `div`, `p`, or `span`.
