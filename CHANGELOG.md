@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI `-v`/`-vv`/`-q` verbosity flags** (#494)
   - `-v` logs INFO, `-vv` DEBUG, `-q` errors only; `--loglevel` overrides them.
 
+- **Total and output pixel limits** (#PR)
+  - `ResourceLimits.max_total_pixels` (`PSD2SVG_MAX_TOTAL_PIXELS`, `--max-total-pixels`) caps pixels summed over all decoded bitmaps; `max_output_pixels` (`PSD2SVG_MAX_OUTPUT_PIXELS`) is the default cap on a rasterized image, also set per rasterizer via `max_output_pixels=`.
+
 ### Changed
 
 - **Dropped Python 3.10 support** (#504)

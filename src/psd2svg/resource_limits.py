@@ -15,6 +15,8 @@ DEFAULT_MAX_FILE_SIZE = 2147483648  # 2GB (typical for professional PSD files)
 DEFAULT_TIMEOUT = 180  # 3 minutes
 DEFAULT_MAX_LAYER_DEPTH = 100  # Maximum layer nesting depth
 DEFAULT_MAX_IMAGE_DIMENSION = 16383  # WebP hard limit for image dimensions
+DEFAULT_MAX_TOTAL_PIXELS = 2**30  # Pixels across all decoded bitmaps (4GiB as RGBA)
+DEFAULT_MAX_OUTPUT_PIXELS = 2**28  # Pixels in one rasterized output (1GiB as RGBA)
 
 # Deprecated: Use DEFAULT_MAX_IMAGE_DIMENSION instead
 WEBP_MAX_DIMENSION = DEFAULT_MAX_IMAGE_DIMENSION
@@ -29,6 +31,8 @@ class ResourceLimits:
     - Conversion timeout (prevents CPU exhaustion)
     - Layer depth (prevents exponential processing time)
     - Image dimensions (prevents memory exhaustion from large images)
+    - Total pixels (prevents memory exhaustion from many large images)
+    - Output pixels (prevents memory exhaustion when rasterizing)
 
     Limits can be configured via environment variables or constructor parameters.
     Constructor parameters take precedence over environment variables.
@@ -39,6 +43,10 @@ class ResourceLimits:
         PSD2SVG_MAX_LAYER_DEPTH: Maximum layer nesting depth (default: 100)
         PSD2SVG_MAX_IMAGE_DIMENSION: Maximum image dimension in pixels
             (default: 16383 = WebP limit)
+        PSD2SVG_MAX_TOTAL_PIXELS: Maximum pixels summed over all decoded bitmaps
+            (default: 1073741824 = 2**30)
+        PSD2SVG_MAX_OUTPUT_PIXELS: Default cap on the pixels of a rasterized
+            image, applied by the rasterizers (default: 268435456 = 2**28)
 
     Example:
         >>> # Use default limits
@@ -60,6 +68,8 @@ class ResourceLimits:
     timeout: int = DEFAULT_TIMEOUT
     max_layer_depth: int = DEFAULT_MAX_LAYER_DEPTH
     max_image_dimension: int = DEFAULT_MAX_IMAGE_DIMENSION
+    max_total_pixels: int = DEFAULT_MAX_TOTAL_PIXELS
+    max_output_pixels: int = DEFAULT_MAX_OUTPUT_PIXELS
 
     @classmethod
     def default(cls) -> "ResourceLimits":
@@ -88,6 +98,12 @@ class ResourceLimits:
             max_image_dimension=cls._parse_env_int(
                 "PSD2SVG_MAX_IMAGE_DIMENSION", DEFAULT_MAX_IMAGE_DIMENSION
             ),
+            max_total_pixels=cls._parse_env_int(
+                "PSD2SVG_MAX_TOTAL_PIXELS", DEFAULT_MAX_TOTAL_PIXELS
+            ),
+            max_output_pixels=cls._parse_env_int(
+                "PSD2SVG_MAX_OUTPUT_PIXELS", DEFAULT_MAX_OUTPUT_PIXELS
+            ),
         )
 
     @classmethod
@@ -97,6 +113,7 @@ class ResourceLimits:
         timeout: int | None = None,
         max_layer_depth: int | None = None,
         max_image_dimension: int | None = None,
+        max_total_pixels: int | None = None,
         unlimited: bool = False,
     ) -> "ResourceLimits":
         """Create ResourceLimits from CLI arguments with proper precedence.
@@ -110,6 +127,8 @@ class ResourceLimits:
             max_layer_depth: CLI flag value for max layer depth
                 (None if not provided).
             max_image_dimension: CLI flag value for max image dimension
+                (None if not provided).
+            max_total_pixels: CLI flag value for max total pixels
                 (None if not provided).
             unlimited: Whether --unlimited-resources flag was set.
 
@@ -133,6 +152,8 @@ class ResourceLimits:
                 conflicting.append("--max-layer-depth")
             if max_image_dimension is not None:
                 conflicting.append("--max-image-dimension")
+            if max_total_pixels is not None:
+                conflicting.append("--max-total-pixels")
 
             if conflicting:
                 raise ValueError(
@@ -158,6 +179,10 @@ class ResourceLimits:
         if max_image_dimension is not None:
             limits.max_image_dimension = cls._validate_cli_limit(
                 max_image_dimension, "max_image_dimension"
+            )
+        if max_total_pixels is not None:
+            limits.max_total_pixels = cls._validate_cli_limit(
+                max_total_pixels, "max_total_pixels"
             )
 
         return limits
@@ -232,6 +257,8 @@ class ResourceLimits:
             timeout=0,
             max_layer_depth=0,
             max_image_dimension=0,
+            max_total_pixels=0,
+            max_output_pixels=0,
         )
 
     def is_file_size_limited(self) -> bool:
@@ -249,6 +276,63 @@ class ResourceLimits:
     def is_image_dimension_limited(self) -> bool:
         """Check if image dimension limit is enabled."""
         return self.max_image_dimension > 0
+
+    def is_total_pixels_limited(self) -> bool:
+        """Check if the total pixel budget is enabled."""
+        return self.max_total_pixels > 0
+
+    def is_output_pixels_limited(self) -> bool:
+        """Check if the rasterized output pixel cap is enabled."""
+        return self.max_output_pixels > 0
+
+    def check_total_pixels(
+        self, used: int, width: int, height: int, *, description: str
+    ) -> None:
+        """Raise ValueError if adding a bitmap would exceed max_total_pixels.
+
+        Args:
+            used: Pixels already held by registered bitmaps.
+            width: Width in pixels of the bitmap to add.
+            height: Height in pixels of the bitmap to add.
+            description: What the bitmap is, used to open the error message.
+
+        Raises:
+            ValueError: If ``used + width * height`` exceeds the budget.
+        """
+        if not self.is_total_pixels_limited():
+            return
+        total = used + width * height
+        if total <= self.max_total_pixels:
+            return
+        raise ValueError(
+            f"{description} ({width}x{height}) brings the total decoded pixels "
+            f"to {total}, above limit {self.max_total_pixels}. "
+            f"To process: set PSD2SVG_MAX_TOTAL_PIXELS={total + 1000000} "
+            f"environment variable, or use "
+            f"ResourceLimits(max_total_pixels={total + 1000000}) in Python API."
+        )
+
+    def check_output_pixels(self, width: float, height: float) -> None:
+        """Raise ValueError if a rasterized output would exceed max_output_pixels.
+
+        Args:
+            width: Output width in device pixels.
+            height: Output height in device pixels.
+
+        Raises:
+            ValueError: If ``width * height`` exceeds the cap.
+        """
+        if not self.is_output_pixels_limited():
+            return
+        pixels = width * height
+        if pixels <= self.max_output_pixels:
+            return
+        raise ValueError(
+            f"Rasterized output {width:g}x{height:g} ({pixels:g} pixels) exceeds "
+            f"limit {self.max_output_pixels}. Lower the dpi, or set "
+            f"PSD2SVG_MAX_OUTPUT_PIXELS, or use "
+            f"ResourceLimits(max_output_pixels=...) in Python API."
+        )
 
     def check_image_dimension(
         self, width: int, height: int, *, description: str

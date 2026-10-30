@@ -150,6 +150,7 @@ class PlaywrightRasterizer(BaseRasterizer):
         launch_args: Sequence[str] | None = None,
         launch_kwargs: dict[str, Any] | None = None,
         timeout: float | None = None,
+        max_output_pixels: int | None = None,
     ) -> None:
         """Initialize the Playwright rasterizer.
 
@@ -170,6 +171,10 @@ class PlaywrightRasterizer(BaseRasterizer):
                 set by ``launch_args``, and ``headless`` is always True.
             timeout: Timeout in milliseconds for loading and screenshotting a
                 page. ``None`` keeps Playwright's default (30 s).
+            max_output_pixels: Largest output, in pixels, that a document may
+                render to at ``dpi``; larger ones raise ``ValueError``. 0
+                disables the cap. ``None`` uses ``PSD2SVG_MAX_OUTPUT_PIXELS``
+                (default 2**28).
 
         Raises:
             ValueError: If ``launch_kwargs`` contains ``args`` or ``headless``.
@@ -179,6 +184,7 @@ class PlaywrightRasterizer(BaseRasterizer):
         self.launch_args = list(launch_args) if launch_args else []
         self.launch_kwargs = dict(launch_kwargs or {})
         self.timeout = timeout
+        self.max_output_pixels = self._resolve_max_output_pixels(max_output_pixels)
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._executor: Any = None  # ThreadPoolExecutor if running in event loop
@@ -310,6 +316,7 @@ class PlaywrightRasterizer(BaseRasterizer):
         if root is None or dimensions is None:
             raise ValueError("Could not determine SVG dimensions")
         css_width, css_height = dimensions
+        self._check_output_pixels(dimensions)
 
         # A root that sizes itself keeps that size, so an explicit zero still
         # renders nothing. Only a relative or missing size is resolved here,

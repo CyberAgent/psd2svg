@@ -45,6 +45,8 @@ class TestResourceLimitsDefaults:
         assert limits.timeout == 180  # 3 minutes
         assert limits.max_layer_depth == 100
         assert limits.max_image_dimension == WEBP_MAX_DIMENSION
+        assert limits.max_total_pixels == 2**30
+        assert limits.max_output_pixels == 2**28
 
     def test_unlimited_limits(self) -> None:
         """Test ResourceLimits.unlimited() disables all limits."""
@@ -53,6 +55,8 @@ class TestResourceLimitsDefaults:
         assert limits.timeout == 0
         assert limits.max_layer_depth == 0
         assert limits.max_image_dimension == 0
+        assert limits.max_total_pixels == 0
+        assert limits.max_output_pixels == 0
 
     def test_custom_limits(self) -> None:
         """Test creating ResourceLimits with custom values."""
@@ -1241,3 +1245,74 @@ class TestFromCLIArgs:
         assert limits.timeout == 0
         assert limits.max_layer_depth == 0
         assert limits.max_image_dimension == 0
+
+
+class TestTotalPixelBudget:
+    """Tests for the max_total_pixels budget accumulated across bitmaps."""
+
+    def test_env_and_cli_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test the environment sets the budget and a CLI value wins."""
+        monkeypatch.setenv("PSD2SVG_MAX_TOTAL_PIXELS", "1000")
+        monkeypatch.setenv("PSD2SVG_MAX_OUTPUT_PIXELS", "2000")
+        limits = ResourceLimits.default()
+        assert (limits.max_total_pixels, limits.max_output_pixels) == (1000, 2000)
+        assert ResourceLimits.from_cli_args(max_total_pixels=5).max_total_pixels == 5
+
+    def test_unlimited_conflicts_with_flag(self) -> None:
+        """Test --unlimited-resources rejects --max-total-pixels."""
+        with pytest.raises(ValueError, match="--max-total-pixels"):
+            ResourceLimits.from_cli_args(unlimited=True, max_total_pixels=1)
+
+    def test_check_total_pixels(self) -> None:
+        """Test the check counts already-used pixels and honors 0 as disabled."""
+        limits = ResourceLimits(max_total_pixels=100)
+        limits.check_total_pixels(50, 5, 10, description="Layer 'a'")
+        with pytest.raises(ValueError, match=r"Layer 'a' \(5x11\).*total decoded"):
+            limits.check_total_pixels(50, 5, 11, description="Layer 'a'")
+        ResourceLimits(max_total_pixels=0).check_total_pixels(
+            10**12, 10**6, 10**6, description="Layer 'a'"
+        )
+
+    def test_budget_accumulates_across_bitmaps(self) -> None:
+        """Test bitmaps that each fit together exhaust the budget."""
+        psdimage = PSDImage.frompil(Image.new("RGB", (8, 8)))
+        converter = Converter(
+            psdimage, resource_limits=ResourceLimits(max_total_pixels=100)
+        )
+        converter.register_image(Image.new("RGBA", (10, 6)), description="first")
+        with pytest.raises(ValueError, match=r"second \(6x7\).*total decoded"):
+            converter.register_image(Image.new("RGBA", (6, 7)), description="second")
+        converter.register_image(Image.new("RGBA", (5, 8)), description="third")
+
+    def test_budget_rejects_before_decoding(self) -> None:
+        """Test a bitmap over the budget is never decoded."""
+        psdimage = PSDImage.open(get_fixture("layer-types/pixel-layer.psd"))
+        with patch.object(PixelLayer, "topil", side_effect=AssertionError("decoded")):
+            with pytest.raises(ValueError, match="total decoded pixels"):
+                SVGDocument.from_psd(
+                    psdimage, resource_limits=ResourceLimits(max_total_pixels=1)
+                )
+
+    def test_budget_disabled_converts(self) -> None:
+        """Test a disabled budget leaves conversion unchanged."""
+        psdimage = PSDImage.open(get_fixture("layer-types/pixel-layer.psd"))
+        document = SVGDocument.from_psd(
+            psdimage, resource_limits=ResourceLimits(max_total_pixels=0)
+        )
+        assert document.images
+
+    def test_cli_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test --max-total-pixels reaches ResourceLimits."""
+        captured: list[ResourceLimits] = []
+
+        def fake_convert(*args: object, **kwargs: object) -> None:
+            limits = kwargs["resource_limits"]
+            assert isinstance(limits, ResourceLimits)
+            captured.append(limits)
+
+        monkeypatch.setattr("psd2svg.__main__.convert", fake_convert)
+        monkeypatch.setattr(
+            sys, "argv", ["psd2svg", "in.psd", "out.svg", "--max-total-pixels", "42"]
+        )
+        main()
+        assert captured[0].max_total_pixels == 42

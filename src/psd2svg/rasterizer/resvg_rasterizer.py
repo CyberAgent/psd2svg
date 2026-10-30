@@ -46,7 +46,7 @@ class ResvgRasterizer(BaseRasterizer):
         >>> image.save('output.png')
     """
 
-    def __init__(self, dpi: int = 0) -> None:
+    def __init__(self, dpi: int = 0, max_output_pixels: int | None = None) -> None:
         """Initialize the resvg rasterizer.
 
         Args:
@@ -54,8 +54,13 @@ class ResvgRasterizer(BaseRasterizer):
                 screen resolution); 0 also means 96 DPI. Higher values produce
                 larger, higher resolution images (e.g., 300 DPI for print
                 quality).
+            max_output_pixels: Largest output, in pixels, that a document may
+                render to at ``dpi``; larger ones raise ``ValueError``. 0
+                disables the cap. ``None`` uses ``PSD2SVG_MAX_OUTPUT_PIXELS``
+                (default 2**28).
         """
         self.dpi = dpi
+        self.max_output_pixels = self._resolve_max_output_pixels(max_output_pixels)
 
     def _render_width(self, dimensions: tuple[float, float] | None) -> int | None:
         """Pixel width that renders a document of this size at ``self.dpi``.
@@ -159,13 +164,13 @@ class ResvgRasterizer(BaseRasterizer):
         Raises:
             ValueError: If the SVG file does not exist or the content is invalid.
         """
+        dimensions = self._svg_file_dimensions(filepath, intrinsic=True)
+        self._check_output_pixels(dimensions)
         try:
             png_bytes = resvg_py.svg_to_bytes(
                 svg_path=filepath,
                 dpi=DEFAULT_DPI,
-                width=self._render_width(
-                    self._svg_file_dimensions(filepath, intrinsic=True)
-                ),
+                width=self._render_width(dimensions),
                 font_files=font_files,
             )
             image = Image.open(BytesIO(png_bytes))
@@ -209,13 +214,13 @@ class ResvgRasterizer(BaseRasterizer):
             if font_files:
                 logger.debug(f"Extracted {len(font_files)} font file(s) from SVG")
 
+        dimensions = self._svg_dimensions(svg_string, intrinsic=True)
+        self._check_output_pixels(dimensions)
         try:
             png_bytes = resvg_py.svg_to_bytes(
                 svg_string=svg_string,
                 dpi=DEFAULT_DPI,
-                width=self._render_width(
-                    self._svg_dimensions(svg_string, intrinsic=True)
-                ),
+                width=self._render_width(dimensions),
                 font_files=font_files,
             )
             image = Image.open(BytesIO(png_bytes))
