@@ -6,6 +6,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from html import escape
 from typing import NoReturn
+from unittest.mock import patch
 
 import pytest
 from PIL import Image
@@ -661,3 +662,19 @@ def test_output_pixel_cap_huge_finite_size_is_value_error() -> None:
     with PlaywrightRasterizer() as rasterizer:
         with pytest.raises(ValueError, match="exceeds limit"):
             rasterizer.from_string(svg)
+
+
+@requires_playwright
+def test_rasterizer_blocks_service_workers_and_downloads(simple_svg: str) -> None:
+    """Pages are created with service workers blocked and downloads refused."""
+    from playwright.sync_api import Browser  # noqa: PLC0415
+
+    original = Browser.new_page
+    with patch.object(
+        Browser, "new_page", autospec=True, side_effect=original
+    ) as new_page:
+        with PlaywrightRasterizer() as rasterizer:
+            rasterizer.from_string(simple_svg)
+    kwargs = new_page.call_args.kwargs
+    assert kwargs["service_workers"] == "block"
+    assert kwargs["accept_downloads"] is False

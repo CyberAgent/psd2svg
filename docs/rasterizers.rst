@@ -278,8 +278,8 @@ Basic Usage
 Isolation
 ~~~~~~~~~
 
-Pages render with JavaScript disabled and the browser offline; ``data:`` URIs
-still load. SVG that references external images,
+Pages render with JavaScript disabled and the browser offline, with service
+workers blocked and downloads refused; ``data:`` URIs still load. SVG that references external images,
 stylesheets or fonts renders without them. Playwright launches Chromium without
 its sandbox by default; enable it with
 ``PlaywrightRasterizer(launch_kwargs={"chromium_sandbox": True})``. Run untrusted
