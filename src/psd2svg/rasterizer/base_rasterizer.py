@@ -96,8 +96,8 @@ class BaseRasterizer(ABC):
             ValueError: If ``width * height`` exceeds ``self.max_output_pixels``.
         """
         ResourceLimits(max_output_pixels=self.max_output_pixels).check_output_pixels(
-            math.ceil(width) if math.isfinite(width) else width,
-            math.ceil(height) if math.isfinite(height) else height,
+            float(math.ceil(width)) if math.isfinite(width) else width,
+            float(math.ceil(height)) if math.isfinite(height) else height,
         )
 
     @staticmethod

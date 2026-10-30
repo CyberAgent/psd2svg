@@ -113,8 +113,8 @@ class ResourceLimits:
         timeout: int | None = None,
         max_layer_depth: int | None = None,
         max_image_dimension: int | None = None,
-        max_total_pixels: int | None = None,
         unlimited: bool = False,
+        max_total_pixels: int | None = None,
     ) -> "ResourceLimits":
         """Create ResourceLimits from CLI arguments with proper precedence.
 
@@ -128,9 +128,9 @@ class ResourceLimits:
                 (None if not provided).
             max_image_dimension: CLI flag value for max image dimension
                 (None if not provided).
+            unlimited: Whether --unlimited-resources flag was set.
             max_total_pixels: CLI flag value for max total pixels
                 (None if not provided).
-            unlimited: Whether --unlimited-resources flag was set.
 
         Returns:
             ResourceLimits instance with validated values.

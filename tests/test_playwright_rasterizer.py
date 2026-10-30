@@ -652,3 +652,12 @@ def test_output_pixel_cap_counts_viewport_rounding(fractional_svg: str) -> None:
             rasterizer.from_string(fractional_svg)
     with PlaywrightRasterizer(max_output_pixels=rounded) as rasterizer:
         rasterizer.from_string(fractional_svg)
+
+
+@requires_playwright
+def test_output_pixel_cap_huge_finite_size_is_value_error() -> None:
+    """Test a huge finite size is rejected as ValueError, not OverflowError."""
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1e200" height="1e200"/>'
+    with PlaywrightRasterizer() as rasterizer:
+        with pytest.raises(ValueError, match="exceeds limit"):
+            rasterizer.from_string(svg)
