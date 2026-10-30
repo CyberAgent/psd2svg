@@ -648,7 +648,8 @@ Embedding Modes
 ~~~~~~~~~~~~~~~
 
 - ``tostring()``/``save()``: Data URIs (portable files)
-- ``rasterize()`` with PlaywrightRasterizer: file:// URLs (60-80% faster)
+- ``rasterize()`` with PlaywrightRasterizer: subset data URIs (loaded from its ``about:blank`` page)
+- ``rasterize()`` with ResvgRasterizer: local ``file://`` URLs passed to the native loader
 
 Key API Methods
 ~~~~~~~~~~~~~~~

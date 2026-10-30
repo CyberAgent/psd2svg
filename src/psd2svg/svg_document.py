@@ -11,7 +11,7 @@ from psd2svg import image_utils, svg_utils
 from psd2svg.core import font_utils
 from psd2svg.core.converter import Converter
 from psd2svg.core.font_utils import FontInfo
-from psd2svg.rasterizer import BaseRasterizer, ResvgRasterizer
+from psd2svg.rasterizer import BaseRasterizer, PlaywrightRasterizer, ResvgRasterizer
 from psd2svg.resource_limits import ResourceLimits
 from psd2svg.timeout_utils import with_timeout
 
@@ -383,9 +383,9 @@ class SVGDocument:
             PIL Image object in RGBA mode containing the rasterized SVG.
 
         Note:
-            When using PlaywrightRasterizer, fonts are automatically embedded
-            using local file:// URLs for optimal performance (60-80% faster
-            than data URIs, 99% smaller SVG strings).
+            PlaywrightRasterizer embeds subset fonts as data URIs so Chromium can
+            load them from the page created by ``set_content()``. ResvgRasterizer
+            continues to receive local file URLs for its native font loader.
 
         Example:
             >>> # Default resvg rasterization
@@ -394,7 +394,7 @@ class SVGDocument:
             >>> # High DPI rasterization
             >>> image = document.rasterize(dpi=300)
 
-            >>> # Browser-based rasterization (fonts auto-embedded with file URLs)
+            >>> # Browser-based rasterization (font subsets embedded as data URIs)
             >>> from psd2svg.rasterizer import PlaywrightRasterizer
             >>> browser_rasterizer = PlaywrightRasterizer(dpi=96)
             >>> image = document.rasterize(rasterizer=browser_rasterizer)
@@ -402,20 +402,19 @@ class SVGDocument:
         if rasterizer is None:
             rasterizer = ResvgRasterizer(dpi=dpi)
 
-        # Unified path: Prepare SVG with fonts embedded as file:// URLs
-        # This allows both PlaywrightRasterizer and ResvgRasterizer to handle
-        # fonts appropriately. ResvgRasterizer will extract font paths from
-        # the @font-face CSS rules and pass them via its font_files API.
+        # Playwright renders SVG in an about:blank page, where file URLs do not
+        # load. Resvg instead extracts local font paths for its native loader.
+        use_data_uri_for_fonts = isinstance(rasterizer, PlaywrightRasterizer)
         svg = self._prepare_svg_for_output(
             embed_images=True,
             embed_fonts=True,
-            subset_fonts=False,  # No subsetting for file URLs (faster)
-            font_format="ttf",  # Not used for file URLs
+            subset_fonts=use_data_uri_for_fonts,
+            font_format="ttf",
             image_prefix=None,
             image_format=image_format,
             optimize=False,  # No optimization needed for rasterization
             svg_filepath=None,
-            use_data_uri_for_fonts=False,  # Use file:// URLs for better performance
+            use_data_uri_for_fonts=use_data_uri_for_fonts,
         )
         svg_str = svg_utils.tostring(svg, indent="")
         return rasterizer.from_string(svg_str)
