@@ -580,3 +580,48 @@ def test_rasterizer_rejects_reserved_launch_kwargs(key: str) -> None:
     """Test that launch_kwargs cannot override launch_args or headless."""
     with pytest.raises(ValueError, match="launch_kwargs"):
         PlaywrightRasterizer(launch_kwargs={key: True})
+
+
+@requires_playwright
+def test_rasterizer_does_not_run_scripts() -> None:
+    """Scripts in the SVG do not run."""
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+    <rect width="20" height="20" fill="red"/>
+    <script>document.querySelector('rect').setAttribute('fill', 'blue')</script>
+</svg>"""
+    with PlaywrightRasterizer() as rasterizer:
+        image = rasterizer.from_string(svg)
+    assert image.getpixel((10, 10)) == (255, 0, 0, 255)
+
+
+@requires_playwright
+def test_rasterizer_blocks_network_requests() -> None:
+    """Network requests are aborted; data: URIs still load."""
+    import http.server  # noqa: PLC0415
+    import threading  # noqa: PLC0415
+
+    hits: list[str] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            hits.append(self.path)
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+    <image href="http://127.0.0.1:{server.server_port}/probe.png"
+           width="20" height="20"/>
+</svg>"""
+        with PlaywrightRasterizer() as rasterizer:
+            rasterizer.from_string(svg)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert hits == []

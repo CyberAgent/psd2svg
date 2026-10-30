@@ -19,9 +19,19 @@ from PIL import Image
 from .base_rasterizer import BaseRasterizer
 
 if TYPE_CHECKING:
-    from playwright.sync_api import Browser, Playwright, ViewportSize
+    from playwright.sync_api import Browser, Playwright, Route, ViewportSize
 
 logger = logging.getLogger(__name__)
+
+_LOCAL_URL_SCHEMES = ("data:", "about:", "blob:")
+
+
+def _block_network(route: "Route") -> None:
+    """Abort every request that does not target an in-page resource."""
+    if route.request.url.startswith(_LOCAL_URL_SCHEMES):
+        route.continue_()
+    else:
+        route.abort()
 
 
 class PlaywrightRasterizer(BaseRasterizer):
@@ -31,6 +41,10 @@ class PlaywrightRasterizer(BaseRasterizer):
     providing accurate support for advanced SVG features including vertical text,
     text-orientation, dominant-baseline, and other SVG 2.0 features that may not
     be supported by native rasterizers.
+
+    Scripts are disabled and requests other than ``data:``, ``about:`` and
+    ``blob:`` URLs are blocked, so the SVG renders without active content or
+    network access.
 
     Note:
         Requires Playwright to be installed: `uv sync --group browser`
@@ -338,7 +352,9 @@ class PlaywrightRasterizer(BaseRasterizer):
             page = self._browser.new_page(
                 viewport=viewport,
                 device_scale_factor=self._dpi_scale(self.dpi),
+                java_script_enabled=False,
             )
+            page.route("**/*", _block_network)
             if self.timeout is not None:
                 page.set_default_timeout(self.timeout)
         except Exception:

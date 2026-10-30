@@ -275,6 +275,15 @@ Basic Usage
        image = rasterizer.from_file('input.svg')
        image.save('output.png')
 
+Isolation
+~~~~~~~~~
+
+Pages render with JavaScript disabled, and every request other than ``data:``,
+``about:`` and ``blob:`` URLs is aborted. SVG that references external images,
+stylesheets or fonts renders without them. Chromium's own sandbox stays on, but
+the rasterizer is not a substitute for container or process isolation when
+rasterizing untrusted SVG.
+
 Launch Options and Recovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
