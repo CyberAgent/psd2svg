@@ -316,7 +316,10 @@ class PlaywrightRasterizer(BaseRasterizer):
         if root is None or dimensions is None:
             raise ValueError("Could not determine SVG dimensions")
         css_width, css_height = dimensions
-        self._check_output_pixels(dimensions)
+        scale = self._dpi_scale(self.dpi)
+        self._check_output_pixels(
+            math.ceil(css_width) * scale, math.ceil(css_height) * scale
+        )
 
         # A root that sizes itself keeps that size, so an explicit zero still
         # renders nothing. Only a relative or missing size is resolved here,

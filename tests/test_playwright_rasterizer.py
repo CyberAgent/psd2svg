@@ -638,3 +638,17 @@ def test_output_pixel_cap_rejects_before_launching_page(simple_svg: str) -> None
             rasterizer.from_string(simple_svg)
     with PlaywrightRasterizer(max_output_pixels=100 * 100) as rasterizer:
         assert rasterizer.from_string(simple_svg).size == (100, 100)
+
+
+@requires_playwright
+def test_output_pixel_cap_counts_viewport_rounding(fractional_svg: str) -> None:
+    """Test the cap applies to the viewport rounded up, not the fractional size."""
+    root = ET.fromstring(fractional_svg)
+    width, height = float(root.get("width", 0)), float(root.get("height", 0))
+    assert width != int(width) or height != int(height)
+    rounded = int(-(-width // 1)) * int(-(-height // 1))
+    with PlaywrightRasterizer(max_output_pixels=rounded - 1) as rasterizer:
+        with pytest.raises(ValueError, match="exceeds limit"):
+            rasterizer.from_string(fractional_svg)
+    with PlaywrightRasterizer(max_output_pixels=rounded) as rasterizer:
+        rasterizer.from_string(fractional_svg)

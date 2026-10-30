@@ -101,6 +101,15 @@ class ResvgRasterizer(BaseRasterizer):
         # backends give the same size for the same document.
         return max(1, math.floor(target + 0.5))
 
+    def _check_render_size(
+        self, dimensions: tuple[float, float] | None, render_width: int | None
+    ) -> None:
+        """Check the size resvg will allocate, with its derived height."""
+        if dimensions is None:
+            return
+        width = render_width if render_width is not None else dimensions[0]
+        self._check_output_pixels(width, dimensions[1] * width / dimensions[0])
+
     @staticmethod
     def _extract_font_file_paths(svg_content: str) -> list[str]:
         """Extract font file paths from @font-face CSS rules in SVG.
@@ -165,12 +174,13 @@ class ResvgRasterizer(BaseRasterizer):
             ValueError: If the SVG file does not exist or the content is invalid.
         """
         dimensions = self._svg_file_dimensions(filepath, intrinsic=True)
-        self._check_output_pixels(dimensions)
+        render_width = self._render_width(dimensions)
+        self._check_render_size(dimensions, render_width)
         try:
             png_bytes = resvg_py.svg_to_bytes(
                 svg_path=filepath,
                 dpi=DEFAULT_DPI,
-                width=self._render_width(dimensions),
+                width=render_width,
                 font_files=font_files,
             )
             image = Image.open(BytesIO(png_bytes))
@@ -215,12 +225,13 @@ class ResvgRasterizer(BaseRasterizer):
                 logger.debug(f"Extracted {len(font_files)} font file(s) from SVG")
 
         dimensions = self._svg_dimensions(svg_string, intrinsic=True)
-        self._check_output_pixels(dimensions)
+        render_width = self._render_width(dimensions)
+        self._check_render_size(dimensions, render_width)
         try:
             png_bytes = resvg_py.svg_to_bytes(
                 svg_string=svg_string,
                 dpi=DEFAULT_DPI,
-                width=self._render_width(dimensions),
+                width=render_width,
                 font_files=font_files,
             )
             image = Image.open(BytesIO(png_bytes))

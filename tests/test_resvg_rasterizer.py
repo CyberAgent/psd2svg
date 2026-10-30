@@ -891,3 +891,14 @@ def test_output_pixel_cap_default_and_disabled(
         100,
         100,
     )
+
+
+def test_output_pixel_cap_counts_backend_rounding(simple_svg: str) -> None:
+    """Test the cap applies to the rounded size resvg renders, not the exact one."""
+    # 100px at 300 DPI is 312.5, which resvg rounds up to 313x313.
+    size = ResvgRasterizer(dpi=300, max_output_pixels=313 * 313).from_string(simple_svg)
+    assert size.size == (313, 313)
+    with pytest.raises(ValueError, match="exceeds limit"):
+        ResvgRasterizer(dpi=300, max_output_pixels=313 * 313 - 1).from_string(
+            simple_svg
+        )

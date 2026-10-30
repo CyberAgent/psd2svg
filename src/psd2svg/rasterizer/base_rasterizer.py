@@ -85,20 +85,19 @@ class BaseRasterizer(ABC):
         """
         raise NotImplementedError
 
-    def _check_output_pixels(self, dimensions: tuple[float, float] | None) -> None:
-        """Reject a document whose output at ``self.dpi`` exceeds the pixel cap.
+    def _check_output_pixels(self, width: float, height: float) -> None:
+        """Reject an output of this size in device pixels over the pixel cap.
 
         Args:
-            dimensions: CSS pixel size of the document, or None if unknown.
+            width: Output width the backend will allocate, after its rounding.
+            height: Output height the backend will allocate, after its rounding.
 
         Raises:
-            ValueError: If the scaled size exceeds ``self.max_output_pixels``.
+            ValueError: If ``width * height`` exceeds ``self.max_output_pixels``.
         """
-        if dimensions is None:
-            return
-        scale = self._dpi_scale(self.dpi)
         ResourceLimits(max_output_pixels=self.max_output_pixels).check_output_pixels(
-            dimensions[0] * scale, dimensions[1] * scale
+            math.ceil(width) if math.isfinite(width) else width,
+            math.ceil(height) if math.isfinite(height) else height,
         )
 
     @staticmethod

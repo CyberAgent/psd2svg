@@ -330,8 +330,8 @@ class ResourceLimits:
         raise ValueError(
             f"Rasterized output {width:g}x{height:g} ({pixels:g} pixels) exceeds "
             f"limit {self.max_output_pixels}. Lower the dpi, or set "
-            f"PSD2SVG_MAX_OUTPUT_PIXELS, or use "
-            f"ResourceLimits(max_output_pixels=...) in Python API."
+            f"PSD2SVG_MAX_OUTPUT_PIXELS, or pass max_output_pixels=... to "
+            f"the rasterizer in Python API."
         )
 
     def check_image_dimension(
