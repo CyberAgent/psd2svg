@@ -200,3 +200,6 @@ Temporary Items
 
 tmp/
 *.ipynb
+
+# Personal Claude Code instructions
+*.local.md
