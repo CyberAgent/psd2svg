@@ -236,7 +236,7 @@ def test_rasterizer_dpi_oversized_document(caplog: pytest.LogCaptureFixture) -> 
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(ValueError, match="Failed to rasterize SVG content"):
-            ResvgRasterizer(dpi=192).from_string(svg)
+            ResvgRasterizer(dpi=192, max_output_pixels=0).from_string(svg)
 
     assert "exceed" in caplog.text
 
@@ -260,7 +260,7 @@ def test_rasterizer_dpi_tall_document(caplog: pytest.LogCaptureFixture) -> None:
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(ValueError, match="Failed to rasterize SVG content"):
-            ResvgRasterizer(dpi=192).from_string(svg)
+            ResvgRasterizer(dpi=192, max_output_pixels=0).from_string(svg)
 
     assert "exceed" in caplog.text
 
@@ -276,7 +276,7 @@ def test_rasterizer_dpi_overflows_when_scaled(
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(ValueError, match="Failed to rasterize SVG content"):
-            ResvgRasterizer(dpi=300).from_string(svg)
+            ResvgRasterizer(dpi=300, max_output_pixels=0).from_string(svg)
 
     assert "exceed" in caplog.text
 
@@ -861,3 +861,44 @@ class TestFontFilePathValidation:
         assert len(paths) == len(valid_extensions)
         for font_file in font_files:
             assert str(font_file) in paths
+
+
+def test_output_pixel_cap_rejects_before_rendering(simple_svg: str) -> None:
+    """Test a document over the cap is rejected, including after DPI scaling."""
+    ResvgRasterizer(dpi=96, max_output_pixels=100 * 100).from_string(simple_svg)
+    with pytest.raises(ValueError, match="exceeds limit 9999"):
+        ResvgRasterizer(max_output_pixels=100 * 100 - 1).from_string(simple_svg)
+    with pytest.raises(ValueError, match="exceeds limit"):
+        ResvgRasterizer(dpi=192, max_output_pixels=100 * 100).from_string(simple_svg)
+
+
+def test_output_pixel_cap_applies_to_files(simple_svg: str, tmp_path: Path) -> None:
+    """Test from_file applies the same cap."""
+    path = tmp_path / "in.svg"
+    path.write_text(simple_svg)
+    with pytest.raises(ValueError, match="exceeds limit"):
+        ResvgRasterizer(max_output_pixels=10).from_file(str(path))
+
+
+def test_output_pixel_cap_default_and_disabled(
+    simple_svg: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test the cap defaults to the environment and 0 disables it."""
+    monkeypatch.setenv("PSD2SVG_MAX_OUTPUT_PIXELS", "10")
+    with pytest.raises(ValueError, match="exceeds limit 10"):
+        ResvgRasterizer().from_string(simple_svg)
+    assert ResvgRasterizer(max_output_pixels=0).from_string(simple_svg).size == (
+        100,
+        100,
+    )
+
+
+def test_output_pixel_cap_counts_backend_rounding(simple_svg: str) -> None:
+    """Test the cap applies to the rounded size resvg renders, not the exact one."""
+    # 100px at 300 DPI is 312.5, which resvg rounds up to 313x313.
+    size = ResvgRasterizer(dpi=300, max_output_pixels=313 * 313).from_string(simple_svg)
+    assert size.size == (313, 313)
+    with pytest.raises(ValueError, match="exceeds limit"):
+        ResvgRasterizer(dpi=300, max_output_pixels=313 * 313 - 1).from_string(
+            simple_svg
+        )

@@ -178,6 +178,17 @@ def parse_args() -> tuple[argparse.Namespace, argparse.ArgumentParser]:
         ),
     )
     parser.add_argument(
+        "--max-total-pixels",
+        metavar="PIXELS",
+        type=int,
+        default=None,
+        help=(
+            "Maximum pixels summed over all decoded bitmaps. "
+            "Default: 1073741824 (2**30). Set to 0 to disable. "
+            "Overrides PSD2SVG_MAX_TOTAL_PIXELS environment variable."
+        ),
+    )
+    parser.add_argument(
         "--unlimited-resources",
         dest="unlimited_resources",
         action="store_true",
@@ -215,6 +226,7 @@ def main() -> None:
             timeout=args.timeout,
             max_layer_depth=args.max_layer_depth,
             max_image_dimension=args.max_image_dimension,
+            max_total_pixels=args.max_total_pixels,
             unlimited=args.unlimited_resources,
         )
     except ValueError as e:

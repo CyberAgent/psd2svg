@@ -343,6 +343,8 @@ Resource limits can be configured via environment variables to set custom defaul
    export PSD2SVG_TIMEOUT=120               # 2 minutes (default: 3 minutes)
    export PSD2SVG_MAX_LAYER_DEPTH=75        # 75 levels (default: 100)
    export PSD2SVG_MAX_IMAGE_DIMENSION=12000 # 12K pixels (default: 16K)
+   export PSD2SVG_MAX_TOTAL_PIXELS=536870912 # 2**29 pixels over all bitmaps (default: 2**30)
+   export PSD2SVG_MAX_OUTPUT_PIXELS=67108864 # 2**26 pixels per rasterized image (default: 2**28)
 
 .. code-block:: python
 

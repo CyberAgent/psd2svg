@@ -9,6 +9,8 @@ from typing import Union, cast
 
 from PIL import Image
 
+from psd2svg.resource_limits import ResourceLimits
+
 logger = logging.getLogger(__name__)
 
 #: DPI at which one CSS pixel is one device pixel.
@@ -41,6 +43,9 @@ class BaseRasterizer(ABC):
     to raster images (PIL Image objects). Subclasses must implement the
     `from_file` method to provide the actual rasterization logic.
     """
+
+    dpi: int
+    max_output_pixels: int
 
     def from_string(self, svg_content: Union[str, bytes]) -> Image.Image:
         """Rasterize SVG content from a string or bytes to a PIL Image.
@@ -79,6 +84,28 @@ class BaseRasterizer(ABC):
             PIL Image object containing the rasterized SVG.
         """
         raise NotImplementedError
+
+    def _check_output_pixels(self, width: float, height: float) -> None:
+        """Reject an output of this size in device pixels over the pixel cap.
+
+        Args:
+            width: Output width the backend will allocate, after its rounding.
+            height: Output height the backend will allocate, after its rounding.
+
+        Raises:
+            ValueError: If ``width * height`` exceeds ``self.max_output_pixels``.
+        """
+        ResourceLimits(max_output_pixels=self.max_output_pixels).check_output_pixels(
+            float(math.ceil(width)) if math.isfinite(width) else width,
+            float(math.ceil(height)) if math.isfinite(height) else height,
+        )
+
+    @staticmethod
+    def _resolve_max_output_pixels(max_output_pixels: int | None) -> int:
+        """Pixel cap for a rasterizer: the argument, else the environment default."""
+        if max_output_pixels is None:
+            return ResourceLimits.default().max_output_pixels
+        return max(max_output_pixels, 0)
 
     @staticmethod
     def _dpi_scale(dpi: int) -> float:

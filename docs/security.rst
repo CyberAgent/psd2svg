@@ -94,7 +94,7 @@ By default, resource limits are **automatically enabled** with sensible defaults
     # Option 1: Using convert() - limits applied automatically
     convert("input.psd", "output.svg")
     # Applies default limits: 2GB file size, 3 minute timeout,
-    # 100 layer depth, 16K image dimension
+    # 100 layer depth, 16K image dimension, 2**30 total pixels
 
     # Option 2: Using from_psd() - limits applied automatically
     psdimage = PSDImage.open("input.psd")
@@ -117,7 +117,8 @@ For untrusted input, use stricter limits:
         max_file_size=500 * 1024 * 1024,  # 500MB (vs 2GB default)
         timeout=60,                        # 1 minute (vs 3 minutes default)
         max_layer_depth=50,                # 50 levels (vs 100 default)
-        max_image_dimension=8192           # 8K (vs 16K default)
+        max_image_dimension=8192,          # 8K (vs 16K default)
+        max_total_pixels=2**28             # 256M pixels (vs 2**30 default)
     )
 
     # Use with convert()
@@ -126,6 +127,16 @@ For untrusted input, use stricter limits:
     # Or with from_psd()
     psdimage = PSDImage.open("untrusted.psd")
     document = SVGDocument.from_psd(psdimage, resource_limits=limits)
+
+The rasterizers do not read ``ResourceLimits``; cap the rasterized output on the
+rasterizer itself (default 2**28 pixels, or ``PSD2SVG_MAX_OUTPUT_PIXELS``):
+
+.. code-block:: python
+
+    from psd2svg.rasterizer import ResvgRasterizer
+
+    rasterizer = ResvgRasterizer(dpi=300, max_output_pixels=2**26)
+    image = document.rasterize(rasterizer=rasterizer)
 
 Default Limits (Trusted Input)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -142,6 +153,8 @@ The default limits are designed for professional PSD files from trusted sources:
     # - timeout: 180 seconds (3 minutes)
     # - max_layer_depth: 100 layers deep
     # - max_image_dimension: 16383 pixels (WebP hard limit)
+    # - max_total_pixels: 2**30 pixels summed over all decoded bitmaps
+    # - max_output_pixels: 2**28 pixels in a rasterized image (rasterizer default)
 
 Disabling Limits (Use with Caution)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
