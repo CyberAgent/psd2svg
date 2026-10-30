@@ -455,6 +455,15 @@ class SVGDocument:
             as a separate parameter.
         """
         svg_node = ET.fromstring(svg)
+        svg_namespace = f"{{{svg_utils.NAMESPACE}}}"
+        root_uses_svg_namespace = svg_node.tag == f"{svg_namespace}svg"
+        for node in svg_node.iter():
+            if isinstance(node.tag, str) and node.tag.startswith(svg_namespace):
+                node.tag = node.tag[len(svg_namespace) :]
+        if root_uses_svg_namespace:
+            # Converted documents use unqualified SVG tags plus this declaration.
+            # Keep that shape so tag-based passes work after loading and re-export.
+            svg_node.set("xmlns", svg_utils.NAMESPACE)
         images_dict = {
             image_id: image_utils.decode_image(img_bytes)
             for image_id, img_bytes in images.items()
