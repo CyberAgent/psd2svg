@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **PlaywrightRasterizer blocks service workers and downloads** (#513)
+
 - **PlaywrightRasterizer disables JavaScript and network access** (#508)
   - SVG that relies on scripts or external resources no longer renders them; `data:` URIs still work.
 
