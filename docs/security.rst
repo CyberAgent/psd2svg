@@ -450,6 +450,13 @@ Generated SVG files may contain:
 - Use Content Security Policy (CSP) when serving SVG files
 - Consider server-side rendering for untrusted content
 
+Playwright Rasterizer
+---------------------
+
+``PlaywrightRasterizer`` renders SVG in headless Chromium with JavaScript disabled
+and the network offline. Rasterize untrusted SVG inside a container or sandboxed process as well;
+see :doc:`rasterizers`.
+
 Security Checklist
 ==================
 

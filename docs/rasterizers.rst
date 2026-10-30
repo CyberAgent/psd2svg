@@ -275,6 +275,16 @@ Basic Usage
        image = rasterizer.from_file('input.svg')
        image.save('output.png')
 
+Isolation
+~~~~~~~~~
+
+Pages render with JavaScript disabled and the browser offline; ``data:`` URIs
+still load. SVG that references external images,
+stylesheets or fonts renders without them. Playwright launches Chromium without
+its sandbox by default; enable it with
+``PlaywrightRasterizer(launch_kwargs={"chromium_sandbox": True})``. Run untrusted
+SVG in a container or separate process as well.
+
 Launch Options and Recovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

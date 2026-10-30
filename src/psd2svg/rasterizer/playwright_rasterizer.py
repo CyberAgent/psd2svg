@@ -32,6 +32,9 @@ class PlaywrightRasterizer(BaseRasterizer):
     text-orientation, dominant-baseline, and other SVG 2.0 features that may not
     be supported by native rasterizers.
 
+    Pages render with scripts disabled and the network offline, so the SVG
+    cannot run active content or fetch external resources; ``data:`` URIs load.
+
     Note:
         Requires Playwright to be installed: `uv sync --group browser`
         After installation, run: `uv run playwright install chromium`
@@ -338,6 +341,8 @@ class PlaywrightRasterizer(BaseRasterizer):
             page = self._browser.new_page(
                 viewport=viewport,
                 device_scale_factor=self._dpi_scale(self.dpi),
+                java_script_enabled=False,
+                offline=True,
             )
             if self.timeout is not None:
                 page.set_default_timeout(self.timeout)
