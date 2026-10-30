@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "psd2svg"
-version = "0.14.0"
+version = "0.15.0"
 description = "Convert PSD file to SVG file"
 authors = [
     { name = "CyberAgent, Inc.", email = "yamaguchi_kota@cyberagent.co.jp" },

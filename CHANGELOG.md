@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-30
+
 ### Added
 
 - **CLI `-v`/`-vv`/`-q` verbosity flags** (#494)
@@ -40,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Stacked adjustment layers no longer render in exponential time in Chromium** (#497, #500)
   - Only clipped adjustments still double the render tree; masked, translucent, and blended ones now also render correctly over a transparent backdrop.
+
+### Dependencies
+
+- Lock file refreshes and CI action bumps (certifi, brotli, tornado, github/codeql-action)
 
 ## [0.14.0] - 2026-10-21
 
@@ -617,7 +623,8 @@ See [limitations.rst](https://psd2svg.readthedocs.io/en/latest/limitations.html)
 
 Previous releases - see git history for details.
 
-[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/CyberAgent/psd2svg/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/CyberAgent/psd2svg/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/CyberAgent/psd2svg/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/CyberAgent/psd2svg/compare/v0.12.0...v0.12.1
