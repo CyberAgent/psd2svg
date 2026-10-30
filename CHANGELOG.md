@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **PlaywrightRasterizer disables JavaScript and blocks network requests** (#PR)
+- **PlaywrightRasterizer disables JavaScript and blocks network requests** (#508)
   - SVG that relies on scripts or external resources no longer renders them; `data:` URIs still work.
 
 - **Pillow upgraded to 13.0.0** (#504)
