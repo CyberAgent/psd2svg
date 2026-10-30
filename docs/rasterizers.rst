@@ -280,9 +280,10 @@ Isolation
 
 Pages render with JavaScript disabled, and every request other than ``data:``,
 ``about:`` and ``blob:`` URLs is aborted. SVG that references external images,
-stylesheets or fonts renders without them. Chromium's own sandbox stays on, but
-the rasterizer is not a substitute for container or process isolation when
-rasterizing untrusted SVG.
+stylesheets or fonts renders without them. Playwright launches Chromium without
+its sandbox by default; enable it with
+``PlaywrightRasterizer(launch_kwargs={"chromium_sandbox": True})``. Run untrusted
+SVG in a container or separate process as well.
 
 Launch Options and Recovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
