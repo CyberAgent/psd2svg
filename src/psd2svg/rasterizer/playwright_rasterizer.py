@@ -34,6 +34,7 @@ class PlaywrightRasterizer(BaseRasterizer):
 
     Pages render with scripts disabled and the network offline, so the SVG
     cannot run active content or fetch external resources; ``data:`` URIs load.
+    Service workers are blocked and downloads are refused.
 
     Note:
         Requires Playwright to be installed: `uv sync --group browser`
@@ -353,6 +354,8 @@ class PlaywrightRasterizer(BaseRasterizer):
                 device_scale_factor=self._dpi_scale(self.dpi),
                 java_script_enabled=False,
                 offline=True,
+                service_workers="block",
+                accept_downloads=False,
             )
             if self.timeout is not None:
                 page.set_default_timeout(self.timeout)
