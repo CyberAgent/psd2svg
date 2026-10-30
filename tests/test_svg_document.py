@@ -291,6 +291,27 @@ class TestSVGDocumentImageHandling:
         assert 'href="#shape"' in result
         assert "data:image/webp;base64," in result
 
+    def test_load_round_trip_normalizes_svg_tags_and_preserves_xhtml(self) -> None:
+        """Round trips normalize SVG tags while preserving foreign namespaces."""
+        svg = ET.Element("svg", {"xmlns": svg_utils.NAMESPACE})
+        defs = ET.SubElement(svg, "defs")
+        ET.SubElement(defs, "linearGradient", {"id": "gradient"})
+        ET.SubElement(svg, "rect", {"fill": "url(#gradient)"})
+        foreign_object = ET.SubElement(svg, "foreignObject")
+        div = ET.SubElement(foreign_object, f"{{{svg_utils.XHTML_NAMESPACE}}}div")
+        ET.SubElement(div, f"{{{svg_utils.XHTML_NAMESPACE}}}p").text = "Hello"
+        document = SVGDocument(svg=svg, images={})
+
+        exported = document.export()
+        exported_svg = exported["svg"]
+        assert isinstance(exported_svg, str)
+        loaded = SVGDocument.load(exported_svg, {})
+
+        assert loaded.svg.tag == "svg"
+        assert loaded.svg.find("defs") is not None
+        assert loaded.svg.find(".//{http://www.w3.org/1999/xhtml}div") is not None
+        assert loaded.tostring() == document.tostring()
+
     def test_tostring_embed_images_false_no_prefix_raises_error(self) -> None:
         """Test tostring() with embed_images=False and no prefix raises error."""
         svg_elem = ET.Element("svg")
