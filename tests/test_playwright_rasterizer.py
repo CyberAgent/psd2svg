@@ -596,7 +596,7 @@ def test_rasterizer_does_not_run_scripts() -> None:
 
 @requires_playwright
 def test_rasterizer_blocks_network_requests() -> None:
-    """Network requests are aborted; data: URIs still load."""
+    """Network requests never leave the browser."""
     import http.server  # noqa: PLC0415
     import threading  # noqa: PLC0415
 

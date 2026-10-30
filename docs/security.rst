@@ -454,8 +454,7 @@ Playwright Rasterizer
 ---------------------
 
 ``PlaywrightRasterizer`` renders SVG in headless Chromium with JavaScript disabled
-and all network requests other than ``data:``, ``about:`` and ``blob:`` URLs
-blocked. Rasterize untrusted SVG inside a container or sandboxed process as well;
+and the network offline. Rasterize untrusted SVG inside a container or sandboxed process as well;
 see :doc:`rasterizers`.
 
 Security Checklist
