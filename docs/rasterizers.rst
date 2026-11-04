@@ -275,6 +275,16 @@ Basic Usage
        image = rasterizer.from_file('input.svg')
        image.save('output.png')
 
+Isolation
+~~~~~~~~~
+
+Pages render with JavaScript disabled and the browser offline, with service
+workers blocked and downloads refused; ``data:`` URIs still load. SVG that references external images,
+stylesheets or fonts renders without them. Playwright launches Chromium without
+its sandbox by default; enable it with
+``PlaywrightRasterizer(launch_kwargs={"chromium_sandbox": True})``. Run untrusted
+SVG in a container or separate process as well.
+
 Launch Options and Recovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -492,7 +502,7 @@ ResvgRasterizer Issues
 .. code-block:: bash
 
    # Ensure compatible Python version
-   python --version  # Should be 3.10+
+   python --version  # Should be 3.11+
 
    # Upgrade pip
    pip install --upgrade pip

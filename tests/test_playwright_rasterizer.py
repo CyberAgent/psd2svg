@@ -6,6 +6,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from html import escape
 from typing import NoReturn
+from unittest.mock import patch
 
 import pytest
 from PIL import Image
@@ -580,3 +581,100 @@ def test_rasterizer_rejects_reserved_launch_kwargs(key: str) -> None:
     """Test that launch_kwargs cannot override launch_args or headless."""
     with pytest.raises(ValueError, match="launch_kwargs"):
         PlaywrightRasterizer(launch_kwargs={key: True})
+
+
+@requires_playwright
+def test_rasterizer_does_not_run_scripts() -> None:
+    """Scripts in the SVG do not run."""
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+    <rect width="20" height="20" fill="red"/>
+    <script>document.querySelector('rect').setAttribute('fill', 'blue')</script>
+</svg>"""
+    with PlaywrightRasterizer() as rasterizer:
+        image = rasterizer.from_string(svg)
+    assert image.getpixel((10, 10)) == (255, 0, 0, 255)
+
+
+@requires_playwright
+def test_rasterizer_blocks_network_requests() -> None:
+    """Network requests never leave the browser."""
+    import http.server  # noqa: PLC0415
+    import threading  # noqa: PLC0415
+
+    hits: list[str] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            hits.append(self.path)
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+    <image href="http://127.0.0.1:{server.server_port}/probe.png"
+           width="20" height="20"/>
+</svg>"""
+        with PlaywrightRasterizer() as rasterizer:
+            rasterizer.from_string(svg)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert hits == []
+
+
+@requires_playwright
+def test_output_pixel_cap_rejects_before_launching_page(simple_svg: str) -> None:
+    """Test the viewport cap rejects an oversized document and DPI scaling."""
+    with PlaywrightRasterizer(max_output_pixels=100 * 100 - 1) as rasterizer:
+        with pytest.raises(ValueError, match="exceeds limit"):
+            rasterizer.from_string(simple_svg)
+    with PlaywrightRasterizer(dpi=192, max_output_pixels=100 * 100) as rasterizer:
+        with pytest.raises(ValueError, match="exceeds limit"):
+            rasterizer.from_string(simple_svg)
+    with PlaywrightRasterizer(max_output_pixels=100 * 100) as rasterizer:
+        assert rasterizer.from_string(simple_svg).size == (100, 100)
+
+
+@requires_playwright
+def test_output_pixel_cap_counts_viewport_rounding(fractional_svg: str) -> None:
+    """Test the cap applies to the viewport rounded up, not the fractional size."""
+    root = ET.fromstring(fractional_svg)
+    width, height = float(root.get("width", 0)), float(root.get("height", 0))
+    assert width != int(width) or height != int(height)
+    rounded = int(-(-width // 1)) * int(-(-height // 1))
+    with PlaywrightRasterizer(max_output_pixels=rounded - 1) as rasterizer:
+        with pytest.raises(ValueError, match="exceeds limit"):
+            rasterizer.from_string(fractional_svg)
+    with PlaywrightRasterizer(max_output_pixels=rounded) as rasterizer:
+        rasterizer.from_string(fractional_svg)
+
+
+@requires_playwright
+def test_output_pixel_cap_huge_finite_size_is_value_error() -> None:
+    """Test a huge finite size is rejected as ValueError, not OverflowError."""
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1e200" height="1e200"/>'
+    with PlaywrightRasterizer() as rasterizer:
+        with pytest.raises(ValueError, match="exceeds limit"):
+            rasterizer.from_string(svg)
+
+
+@requires_playwright
+def test_rasterizer_blocks_service_workers_and_downloads(simple_svg: str) -> None:
+    """Pages are created with service workers blocked and downloads refused."""
+    from playwright.sync_api import Browser  # noqa: PLC0415
+
+    original = Browser.new_page
+    with patch.object(
+        Browser, "new_page", autospec=True, side_effect=original
+    ) as new_page:
+        with PlaywrightRasterizer() as rasterizer:
+            rasterizer.from_string(simple_svg)
+    kwargs = new_page.call_args.kwargs
+    assert kwargs["service_workers"] == "block"
+    assert kwargs["accept_downloads"] is False

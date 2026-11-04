@@ -12,13 +12,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Warnings when conversion approaches resource limits** (#501)
   - Warn once per conversion at 80% of file-size and layer-depth limits, 90% of the image-dimension limit, and 50% and 75% of the timeout.
 
+## [0.15.0] - 2026-10-30
+
+### Added
+
 - **CLI `-v`/`-vv`/`-q` verbosity flags** (#494)
   - `-v` logs INFO, `-vv` DEBUG, `-q` errors only; `--loglevel` overrides them.
 
+- **Total and output pixel limits** (#512)
+  - `ResourceLimits.max_total_pixels` (`PSD2SVG_MAX_TOTAL_PIXELS`, `--max-total-pixels`) caps pixels summed over all decoded bitmaps; `max_output_pixels` (`PSD2SVG_MAX_OUTPUT_PIXELS`) is the default cap on a rasterized image, also set per rasterizer via `max_output_pixels=`.
+
 ### Changed
 
+- **Dropped Python 3.10 support** (#504)
+  - Python 3.10 reaches end of life on 2026-10-31; the minimum is now 3.11.
 - **Expected limitations no longer log warnings by default** (#494)
   - Unsupported blend modes, approximated effects, and repaired values now log at DEBUG; the missing-font warning appears once per font.
+
+### Security
+
+- **PlaywrightRasterizer blocks service workers and downloads** (#513)
+
+- **PlaywrightRasterizer disables JavaScript and network access** (#508)
+  - SVG that relies on scripts or external resources no longer renders them; `data:` URIs still work.
+
+- **Pillow upgraded to 13.0.0** (#504)
+  - Resolves the open Pillow Dependabot advisories; the minimum is now `pillow>=13.0.0`.
 
 ### Fixed
 
@@ -26,8 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prefixed attributes and tags keep their declarations, including Unicode names and
     names beginning with `div`, `p`, or `span`.
 
-- **Stacked adjustment layers no longer render in exponential time in Chromium** (#497)
-  - Applies to unmasked, opaque, normal-blend adjustments; masked, clipped, translucent, and blended ones still double the render tree (#496).
+- **Stacked adjustment layers no longer render in exponential time in Chromium** (#497, #500)
+  - Only clipped adjustments still double the render tree; masked, translucent, and blended ones now also render correctly over a transparent backdrop.
+
+### Dependencies
+
+- Lock file refreshes and CI action bumps (certifi, brotli, tornado, github/codeql-action)
 
 ## [0.14.0] - 2026-10-21
 
@@ -605,7 +628,8 @@ See [limitations.rst](https://psd2svg.readthedocs.io/en/latest/limitations.html)
 
 Previous releases - see git history for details.
 
-[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/CyberAgent/psd2svg/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/CyberAgent/psd2svg/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/CyberAgent/psd2svg/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/CyberAgent/psd2svg/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/CyberAgent/psd2svg/compare/v0.12.0...v0.12.1

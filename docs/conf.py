@@ -7,10 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib  # type: ignore
+import tomllib
 
 # Add the src directory to the path so autodoc can find the modules
 sys.path.insert(0, os.path.abspath("../src"))

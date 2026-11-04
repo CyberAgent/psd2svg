@@ -9,7 +9,7 @@ Development Setup
 Prerequisites
 ~~~~~~~~~~~~~
 
-* Python 3.10-3.14
+* Python 3.11-3.14
 * `uv <https://github.com/astral-sh/uv>`_ package manager
 * Git
 

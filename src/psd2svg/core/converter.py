@@ -137,6 +137,7 @@ class Converter(
             viewBox=svg_utils.seq2str([0, 0, psdimage.width, psdimage.height], sep=" "),
         )
         self.images: dict[str, Image.Image] = {}  # Store PIL images keyed by image ID.
+        self._registered_pixels = 0  # Pixels held in self.images.
         # Note: Font tracking removed - PostScript names are stored directly
         # in SVG font-family attributes
 
@@ -175,7 +176,7 @@ class Converter(
     def check_image_dimension(
         self, width: int, height: int, *, description: str
     ) -> None:
-        """Check a bitmap size against the configured image dimension limit.
+        """Check a bitmap size against the image dimension and total pixel limits.
 
         Call this before decoding whenever the size is known from metadata, so an
         oversized bitmap is rejected instead of allocated.
@@ -186,19 +187,23 @@ class Converter(
             description: What the bitmap is, used to open the error message.
 
         Raises:
-            ValueError: If either dimension exceeds the limit.
+            ValueError: If either dimension exceeds the limit, or the bitmap
+                would push the registered pixels over the total budget.
         """
         if self.resource_limits is not None:
             self.resource_limits.check_image_dimension(
                 width, height, description=description
+            )
+            self.resource_limits.check_total_pixels(
+                self._registered_pixels, width, height, description=description
             )
 
     def register_image(self, image: Image.Image, *, description: str) -> str:
         """Validate an image and store it, returning its generated element ID.
 
         Every bitmap that ends up in the SVG goes through here, so the dimension
-        limit applies to all of them. This does not create the ``<image>`` node;
-        the caller does that with the returned ID.
+        limit and the total pixel budget apply to all of them. This does not
+        create the ``<image>`` node; the caller does that with the returned ID.
 
         Args:
             image: The bitmap to store.
@@ -208,9 +213,11 @@ class Converter(
             The generated element ID to use for the ``<image>`` node.
 
         Raises:
-            ValueError: If either dimension exceeds the limit.
+            ValueError: If either dimension exceeds the limit, or the total pixel
+                budget is exhausted.
         """
         self.check_image_dimension(image.width, image.height, description=description)
+        self._registered_pixels += image.width * image.height
         image_id = self.auto_id("image")
         self.images[image_id] = image
         return image_id
