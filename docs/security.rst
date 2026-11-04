@@ -101,6 +101,12 @@ By default, resource limits are **automatically enabled** with sensible defaults
     document = SVGDocument.from_psd(psdimage)
     # Same default limits applied
 
+Conversions log a warning when file size or layer depth reaches 80% of its
+configured limit, or an image dimension reaches 90%. Each warning is logged
+once per conversion for that limit type. Timeout warnings are logged at 50%
+and 75% of the configured time if the conversion is still running. Disabled
+limits do not produce these warnings.
+
 **Important**: This is a breaking change from previous versions where no limits were enforced.
 
 Customizing Resource Limits

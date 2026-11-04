@@ -139,7 +139,39 @@ class SVGDocument:
         # Default to ResourceLimits.default() if not specified
         if resource_limits is None:
             resource_limits = ResourceLimits.default()
+        else:
+            resource_limits = dataclasses.replace(resource_limits)
 
+        return SVGDocument._from_psd_with_limits(
+            psdimage,
+            enable_live_shapes=enable_live_shapes,
+            enable_text=enable_text,
+            enable_title=enable_title,
+            enable_class=enable_class,
+            text_letter_spacing_offset=text_letter_spacing_offset,
+            text_wrapping_mode=text_wrapping_mode,
+            font_mapping=font_mapping,
+            resource_limits=resource_limits,
+            include_hidden_layers=include_hidden_layers,
+            crop_layers_to_canvas=crop_layers_to_canvas,
+        )
+
+    @staticmethod
+    def _from_psd_with_limits(
+        psdimage: PSDImage,
+        *,
+        enable_live_shapes: bool,
+        enable_text: bool,
+        enable_title: bool,
+        enable_class: bool,
+        text_letter_spacing_offset: float,
+        text_wrapping_mode: int,
+        font_mapping: dict[str, dict[str, float | str]] | None,
+        resource_limits: ResourceLimits,
+        include_hidden_layers: bool,
+        crop_layers_to_canvas: bool,
+    ) -> "SVGDocument":
+        """Convert using limits already owned by this conversion."""
         # Build SVG tree with original font names
         converter = Converter(
             psdimage,
@@ -1135,6 +1167,8 @@ def convert(
     # Default to ResourceLimits.default() if not specified
     if resource_limits is None:
         resource_limits = ResourceLimits.default()
+    else:
+        resource_limits = dataclasses.replace(resource_limits)
 
     # Validate file size before loading
     if resource_limits.is_file_size_limited():
@@ -1145,9 +1179,12 @@ def convert(
                 f"To process: set PSD2SVG_MAX_FILE_SIZE={file_size + 1024 * 1024 * 100} environment variable, "  # noqa: E501
                 f"or use ResourceLimits(max_file_size={file_size + 1024 * 1024 * 100}) in Python API."  # noqa: E501
             )
+        resource_limits.warn_near_limit(
+            "File size", file_size, resource_limits.max_file_size, 0.8
+        )
 
     psdimage = PSDImage.open(input_path)
-    document = SVGDocument.from_psd(
+    document = SVGDocument._from_psd_with_limits(
         psdimage,
         enable_text=enable_text,
         enable_live_shapes=enable_live_shapes,
