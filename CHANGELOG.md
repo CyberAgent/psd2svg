@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Warnings when conversion approaches resource limits** (#501)
   - Warn once per conversion at 80% of file-size and layer-depth limits, 90% of the image-dimension limit, and 50% and 75% of the timeout.
 
+### Fixed
+
+- **Restore SVG element names after loading an exported document** (#502)
+  - Export and load round trips retain unprefixed SVG tags and work with optimization and image handling.
+
 ## [0.15.0] - 2026-10-30
 
 ### Added

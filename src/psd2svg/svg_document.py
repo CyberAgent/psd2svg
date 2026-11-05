@@ -487,6 +487,22 @@ class SVGDocument:
             as a separate parameter.
         """
         svg_node = ET.fromstring(svg)
+        svg_tag_prefix = f"{{{svg_utils.NAMESPACE}}}"
+        if svg_node.tag == f"{svg_tag_prefix}svg":
+            # Converted documents use unqualified SVG tags and a literal xmlns
+            # attribute. ElementTree changes both when it parses the export.
+            svg_node.attrib = {"xmlns": svg_utils.NAMESPACE, **svg_node.attrib}
+        # Only unqualify SVG elements that inherit the root SVG namespace.
+        # An SVG nested inside XHTML needs its own namespace on serialization.
+        pending = [(svg_node, True)]
+        while pending:
+            node, in_svg_context = pending.pop()
+            is_svg_node = isinstance(node.tag, str) and node.tag.startswith(
+                svg_tag_prefix
+            )
+            pending.extend((child, in_svg_context and is_svg_node) for child in node)
+            if in_svg_context and is_svg_node:
+                node.tag = node.tag[len(svg_tag_prefix) :]
         images_dict = {
             image_id: image_utils.decode_image(img_bytes)
             for image_id, img_bytes in images.items()
