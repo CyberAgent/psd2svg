@@ -356,6 +356,28 @@ class TestSVGDocumentImageHandling:
             is not None
         )
 
+    def test_load_preserves_namespace_free_subtrees(self) -> None:
+        svg = (
+            f'<svg xmlns="{svg_utils.NAMESPACE}">'
+            '<metadata><payload xmlns=""><value>42</value></payload></metadata>'
+            '<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">'
+            '<payload xmlns=""><value>43</value></payload>'
+            "</div></foreignObject></svg>"
+        )
+
+        document = SVGDocument.load(svg, {})
+        reparsed = ET.fromstring(document.tostring())
+
+        metadata_value = reparsed.find(
+            f"{{{svg_utils.NAMESPACE}}}metadata/payload/value"
+        )
+        foreign_value = reparsed.find(
+            f"{{{svg_utils.NAMESPACE}}}foreignObject/"
+            f"{{{svg_utils.XHTML_NAMESPACE}}}div/payload/value"
+        )
+        assert metadata_value is not None and metadata_value.text == "42"
+        assert foreign_value is not None and foreign_value.text == "43"
+
     def test_tostring_embed_images_false_no_prefix_raises_error(self) -> None:
         """Test tostring() with embed_images=False and no prefix raises error."""
         svg_elem = ET.Element("svg")
