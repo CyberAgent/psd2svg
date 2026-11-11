@@ -291,6 +291,93 @@ class TestSVGDocumentImageHandling:
         assert 'href="#shape"' in result
         assert "data:image/webp;base64," in result
 
+    def test_export_load_round_trip_preserves_svg(self) -> None:
+        svg = svg_utils.create_node(
+            "svg", xmlns=svg_utils.NAMESPACE, width=32, height=32
+        )
+        defs = svg_utils.create_node("defs", parent=svg)
+        svg_utils.create_node("rect", parent=defs, id="shape", width=10, height=10)
+        svg_utils.create_node("use", parent=svg, href="#shape")
+        document = SVGDocument(svg)
+
+        exported = document.export()
+        svg_export = exported["svg"]
+        image_export = exported["images"]
+        assert isinstance(svg_export, str)
+        assert isinstance(image_export, dict)
+        loaded = SVGDocument.load(svg_export, image_export)
+
+        assert loaded.svg.tag == "svg"
+        assert loaded.svg.get("xmlns") == svg_utils.NAMESPACE
+        assert loaded.tostring() == document.tostring()
+
+    def test_load_preserves_other_namespaces(self) -> None:
+        svg = (
+            f'<svg xmlns="{svg_utils.NAMESPACE}" '
+            'xmlns:xlink="http://www.w3.org/1999/xlink">'
+            '<defs><use xlink:href="#source"/></defs>'
+            '<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">'
+            "<span>text</span></div></foreignObject></svg>"
+        )
+
+        document = SVGDocument.load(svg, {})
+
+        use = document.svg.find("defs/use")
+        assert use is not None
+        assert use.get("{http://www.w3.org/1999/xlink}href") == "#source"
+        assert (
+            document.svg.find(f"foreignObject/{{{svg_utils.XHTML_NAMESPACE}}}div")
+            is not None
+        )
+        result = document.tostring()
+        assert "<ns0:svg" not in result
+        assert (
+            ET.fromstring(result).find(f".//{{{svg_utils.XHTML_NAMESPACE}}}span")
+            is not None
+        )
+
+    def test_load_preserves_svg_nested_in_xhtml(self) -> None:
+        svg = (
+            f'<svg xmlns="{svg_utils.NAMESPACE}"><foreignObject>'
+            f'<div xmlns="{svg_utils.XHTML_NAMESPACE}">'
+            f'<svg xmlns="{svg_utils.NAMESPACE}"><rect width="1" height="1" />'
+            "</svg></div></foreignObject></svg>"
+        )
+
+        document = SVGDocument.load(svg, {})
+        result = document.tostring()
+        reparsed = ET.fromstring(result)
+
+        assert (
+            reparsed.find(
+                f".//{{{svg_utils.XHTML_NAMESPACE}}}div/"
+                f"{{{svg_utils.NAMESPACE}}}svg/{{{svg_utils.NAMESPACE}}}rect"
+            )
+            is not None
+        )
+
+    def test_load_preserves_namespace_free_subtrees(self) -> None:
+        svg = (
+            f'<svg xmlns="{svg_utils.NAMESPACE}">'
+            '<metadata><payload xmlns=""><value>42</value></payload></metadata>'
+            '<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">'
+            '<payload xmlns=""><value>43</value></payload>'
+            "</div></foreignObject></svg>"
+        )
+
+        document = SVGDocument.load(svg, {})
+        reparsed = ET.fromstring(document.tostring())
+
+        metadata_value = reparsed.find(
+            f"{{{svg_utils.NAMESPACE}}}metadata/payload/value"
+        )
+        foreign_value = reparsed.find(
+            f"{{{svg_utils.NAMESPACE}}}foreignObject/"
+            f"{{{svg_utils.XHTML_NAMESPACE}}}div/payload/value"
+        )
+        assert metadata_value is not None and metadata_value.text == "42"
+        assert foreign_value is not None and foreign_value.text == "43"
+
     def test_tostring_embed_images_false_no_prefix_raises_error(self) -> None:
         """Test tostring() with embed_images=False and no prefix raises error."""
         svg_elem = ET.Element("svg")
