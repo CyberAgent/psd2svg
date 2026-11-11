@@ -822,12 +822,13 @@ class TextConverter(ConverterProtocol):
                 paragraph_node = self._add_paragraph(
                     text_setting,
                     paragraph,
+                    baseline_paragraph=paragraphs[0],
                     first_paragraph=(i == 0),
                     advance=advance,
                     uses_native_positioning=uses_native_positioning,
                 )
-                origin_x, origin_y, _ = self._compute_paragraph_position(
-                    text_setting, paragraph.get_text_anchor()
+                origin_x, origin_y = self._compute_paragraph_position(
+                    text_setting, paragraph.get_text_anchor(), paragraphs[0]
                 )
                 if uses_native_positioning:
                     origin_x += transform.tx
@@ -838,16 +839,8 @@ class TextConverter(ConverterProtocol):
                 origin_y += paragraph_offset_y
                 previous_font_size: float | None = None
                 final_span: EmittedSpan | None = None
-                # Box text is placed by a hanging dominant-baseline, which
-                # already aligns runs of different sizes by their hanging
-                # baseline rather than by the Roman one. An offset measured from
-                # the Roman baseline would compound that, so character alignment
-                # is left to the <foreignObject> path for box text. See
-                # GitHub issue #443.
-                alignment_reference_size = (
-                    None
-                    if text_setting.shape_type == ShapeType.BOUNDING_BOX
-                    else self._alignment_reference_size(paragraph, text_setting)
+                alignment_reference_size = self._alignment_reference_size(
+                    paragraph, text_setting
                 )
                 for span in paragraph:
                     emitted = self._add_text_span(
@@ -958,17 +951,17 @@ class TextConverter(ConverterProtocol):
         # for "start", "middle" and "end" alike, so point text keeps the exact path
         # even when its paragraphs are justified differently.
         anchors = {
-            self._compute_paragraph_position(text_setting, paragraph.get_text_anchor())[
-                0 if is_horizontal else 1
-            ]
+            self._compute_paragraph_position(
+                text_setting, paragraph.get_text_anchor(), paragraphs[0]
+            )[0 if is_horizontal else 1]
             for paragraph in paragraphs
         }
         if len(anchors) != 1:
             return None
 
         horizontal_scale, vertical_scale = scale
-        x, y, _ = self._compute_paragraph_position(
-            text_setting, paragraphs[0].get_text_anchor()
+        x, y = self._compute_paragraph_position(
+            text_setting, paragraphs[0].get_text_anchor(), paragraphs[0]
         )
         if uses_native_positioning:
             x += text_setting.transform.tx
@@ -1068,6 +1061,7 @@ class TextConverter(ConverterProtocol):
         self,
         text_setting: TypeSetting,
         paragraph: Paragraph,
+        baseline_paragraph: Paragraph,
         first_paragraph: bool,
         advance: tuple[float | None, float | None],
         uses_native_positioning: bool = False,
@@ -1076,12 +1070,14 @@ class TextConverter(ConverterProtocol):
 
         ``advance`` is the block-axis move from the previous paragraph, as
         ``_paragraph_advance`` returns it, and is ``(None, None)`` for the first.
+        The first paragraph fixes the box's baseline origin for the whole text
+        element; later paragraphs move from it by their leading.
         """
         text_anchor = paragraph.get_text_anchor()
 
         # Calculate positioning based on shape type and writing direction
-        x, y, dominant_baseline = self._compute_paragraph_position(
-            text_setting, text_anchor
+        x, y = self._compute_paragraph_position(
+            text_setting, text_anchor, baseline_paragraph
         )
 
         # Create paragraph node
@@ -1091,7 +1087,6 @@ class TextConverter(ConverterProtocol):
             y,
             advance,
             text_anchor,
-            dominant_baseline,
             first_paragraph,
             uses_native_positioning,
         )
@@ -1105,45 +1100,46 @@ class TextConverter(ConverterProtocol):
         self,
         text_setting: TypeSetting,
         text_anchor: str | None,
-    ) -> tuple[float, float, str | None]:
+        baseline_paragraph: Paragraph,
+    ) -> tuple[float, float]:
         """Compute paragraph position based on justification, shape type,
         and writing direction.
 
         Args:
             text_setting: Type setting object containing bounds and writing direction.
             text_anchor: SVG text-anchor value ("start", "middle", "end", or None).
+            baseline_paragraph: First paragraph, whose largest em box sets the
+                baseline origin for the whole text element.
 
         Returns:
-            Tuple of (x, y, dominant_baseline) for positioning the paragraph.
+            Tuple of (x, y) for positioning the paragraph.
         """
         x = 0.0
         y = 0.0
-        dominant_baseline = None
-
         if text_setting.shape_type == ShapeType.BOUNDING_BOX:
-            # Use "hanging" baseline for bounding box text, which aligns text to
-            # the hanging baseline (top of most glyphs). This provides the closest
-            # match to Photoshop's bounding box text positioning, though subtle
-            # differences may remain due to font rendering variations between
-            # Photoshop and browsers.
-            dominant_baseline = "hanging"
+            reference_em = self._alignment_reference_size(
+                baseline_paragraph, text_setting
+            )
             if text_setting.writing_direction == WritingDirection.HORIZONTAL_TB:
+                # Place the alphabetic baseline explicitly. Photoshop's box top
+                # is relative to the em box, whose lower 12% is below that baseline.
+                y = text_setting.bounds.top + reference_em * (
+                    1.0 - EM_BOX_DESCENT_RATIO
+                )
                 if text_anchor == "end":
                     x = text_setting.bounds.right
                 elif text_anchor == "middle":
                     x = (text_setting.bounds.left + text_setting.bounds.right) / 2
             elif text_setting.writing_direction == WritingDirection.VERTICAL_RL:
-                logger.debug(
-                    "Dominant baseline may not be supported by SVG renderers "
-                    "for vertical text."
-                )
-                x = text_setting.bounds.right
+                # SVG centres vertical glyphs on the default baseline. Shift by
+                # half the em so the first column starts at the box's right edge.
+                x = text_setting.bounds.right - reference_em / 2.0
                 if text_anchor == "end":
                     y = text_setting.bounds.bottom
                 elif text_anchor == "middle":
                     y = (text_setting.bounds.top + text_setting.bounds.bottom) / 2
 
-        return x, y, dominant_baseline
+        return x, y
 
     def _create_paragraph_node(
         self,
@@ -1152,7 +1148,6 @@ class TextConverter(ConverterProtocol):
         y: float,
         advance: tuple[float | None, float | None],
         text_anchor: str | None,
-        dominant_baseline: str | None,
         first_paragraph: bool,
         uses_native_positioning: bool,
     ) -> ET.Element:
@@ -1169,7 +1164,6 @@ class TextConverter(ConverterProtocol):
             y: Base y position.
             advance: Block-axis (dx, dy) move from the previous paragraph.
             text_anchor: SVG text-anchor value.
-            dominant_baseline: SVG dominant-baseline value.
             first_paragraph: Whether this is the first paragraph.
             uses_native_positioning: Whether native x/y positioning is used.
 
@@ -1198,10 +1192,7 @@ class TextConverter(ConverterProtocol):
 
         advance_x, advance_y = advance
 
-        # Create paragraph node with positioning and baseline attributes.
-        # The dominant-baseline="hanging" provides the closest match to Photoshop's
-        # bounding box text positioning, though subtle differences may remain due to
-        # font rendering variations between Photoshop and browsers.
+        # Create paragraph node with explicit positioning.
         return self.create_node(
             "tspan",
             text_anchor=text_anchor,
@@ -1209,7 +1200,6 @@ class TextConverter(ConverterProtocol):
             y=y if should_set_y else None,
             dx=advance_x,
             dy=advance_y,
-            dominant_baseline=dominant_baseline,
         )
 
     def _apply_justification(

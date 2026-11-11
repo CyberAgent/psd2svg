@@ -39,7 +39,12 @@ from psd2svg.core.typesetting import (
 )
 from psd2svg.eval import compare_raster_images
 from psd2svg.rasterizer import PlaywrightRasterizer, ResvgRasterizer
-from tests.conftest import get_fixture, requires_playwright
+from tests.conftest import (
+    get_fixture,
+    requires_arial,
+    requires_noto_sans_cjk,
+    requires_playwright,
+)
 
 
 def convert_psd_to_svg(psd_file: str) -> ET.Element:
@@ -2325,28 +2330,46 @@ def test_text_multiple_paragraphs_different_alignments() -> None:
     assert tspan_x_values[0] > tspan_x_values[1] > tspan_x_values[2]
 
 
-def test_text_bounding_box_dominant_baseline() -> None:
-    """Test that bounding box text (ShapeType=1) uses dominant-baseline="hanging".
-
-    Bounding box text should set dominant-baseline="hanging" which aligns text
-    to the hanging baseline (top of capital letters), providing better visual
-    alignment with Photoshop's rendering compared to "text-before-edge".
-    """
-    # Test with a bounding box left-aligned text
+def test_text_bounding_box_uses_explicit_baseline() -> None:
+    """Box text uses an explicit position without shifting mixed-size runs."""
     svg = convert_psd_to_svg("texts/paragraph-shapetype1-justification0.psd")
     text_node = svg.find(".//text")
     assert text_node is not None
+    assert text_node.attrib.get("dominant-baseline") is None
+    assert text_node.attrib.get("y") is not None
 
-    # Should have dominant-baseline="hanging" for bounding box text
-    assert text_node.attrib.get("dominant-baseline") == "hanging"
-
-    # Test with multiple paragraphs
     svg = convert_psd_to_svg("texts/paragraph-shapetype1-multiple.psd")
     text_node = svg.find(".//text")
     assert text_node is not None
+    assert text_node.attrib.get("dominant-baseline") is None
+    first_paragraph = text_node.find("tspan")
+    assert first_paragraph is not None
+    assert first_paragraph.attrib.get("y") is not None
 
-    # Should also have dominant-baseline="hanging"
-    assert text_node.attrib.get("dominant-baseline") == "hanging"
+
+@requires_arial
+def test_box_text_first_line_matches_photoshop() -> None:
+    """The explicit baseline keeps the first horizontal line at the PSD ink."""
+    psd = PSDImage.open(get_fixture("texts/paragraph-shapetype1-multiple.psd"))
+    rendered = SVGDocument.from_psd(psd).rasterize()
+    assert abs(_ink_row_tops(rendered)[0] - _ink_row_tops(psd.composite())[0]) <= 2
+
+
+@requires_arial
+def test_vertical_box_text_first_column_matches_photoshop() -> None:
+    """The explicit vertical baseline keeps the first column at the PSD ink."""
+    psd = PSDImage.open(
+        get_fixture(
+            "texts/shapetype1-writingdirection2-baselinedirection2-justification0.psd"
+        )
+    )
+    rendered = SVGDocument.from_psd(psd).rasterize()
+
+    def leftmost_ink(image: Image.Image) -> int:
+        pixels = np.asarray(image.convert("RGB")).mean(axis=2)
+        return int(np.flatnonzero((pixels < 80).any(axis=0))[0])
+
+    assert abs(leftmost_ink(rendered) - leftmost_ink(psd.composite())) <= 3
 
 
 def test_text_point_type_no_dominant_baseline() -> None:
@@ -4509,16 +4532,51 @@ def test_character_alignment_defaults_differ_by_writing_direction() -> None:
     )
 
 
-def test_character_alignment_skips_native_box_text() -> None:
-    """Test that native box text keeps the position it has today.
-
-    The hanging ``dominant-baseline`` that places box text already displaces
-    mixed-size runs, so the native path leaves them alone; see the call site in
-    ``core/text.py`` and GitHub issue #443.
-    """
+def test_character_alignment_applies_to_native_box_text() -> None:
+    """Native box text aligns mixed-size runs on the alphabetic baseline."""
     svg = convert_psd_to_svg("texts/style-run-alignment-3-shapetype1.psd")
-    assert svg.find('.//*[@dominant-baseline="hanging"]') is not None
-    assert _emitted_baseline_shifts("texts/style-run-alignment-3-shapetype1.psd") == []
+    assert svg.find('.//*[@dominant-baseline="hanging"]') is None
+    assert _emitted_baseline_shifts(
+        "texts/style-run-alignment-3-shapetype1.psd"
+    ) == pytest.approx([12.16])
+
+
+@requires_noto_sans_cjk
+def test_native_box_text_mixed_size_ink_matches_photoshop() -> None:
+    """A smaller run lands at the same relative height as in the PSD."""
+    psd = PSDImage.open(get_fixture("texts/style-run-alignment-3-shapetype1.psd"))
+    rendered = SVGDocument.from_psd(psd).rasterize()
+    _assert_mixed_size_box_text_ink(psd.composite(), rendered)
+
+
+@requires_noto_sans_cjk
+@requires_playwright
+def test_native_box_text_mixed_size_ink_matches_photoshop_in_chromium() -> None:
+    """The explicit baseline also aligns the runs in Chromium."""
+    psd = PSDImage.open(get_fixture("texts/style-run-alignment-3-shapetype1.psd"))
+    document = SVGDocument.from_psd(psd)
+    with PlaywrightRasterizer() as rasterizer:
+        rendered = rasterizer.from_string(document.tostring(embed_fonts=True))
+    _assert_mixed_size_box_text_ink(psd.composite(), rendered)
+
+
+def _assert_mixed_size_box_text_ink(
+    reference: Image.Image, rendered: Image.Image
+) -> None:
+    """Compare the two glyphs' ink bottoms in the fixture's separate regions."""
+
+    def ink_bottom(image: Image.Image, left: int, right: int) -> int:
+        pixels = np.asarray(image.convert("RGB")).mean(axis=2)
+        rows = np.flatnonzero((pixels[:, left:right] < 80).any(axis=1))
+        assert rows.size > 0
+        return int(rows[-1])
+
+    reference_first = ink_bottom(reference, 30, 85)
+    rendered_first = ink_bottom(rendered, 30, 85)
+    assert abs(rendered_first - reference_first) <= 2
+    expected = ink_bottom(reference, 95, 125) - reference_first
+    actual = ink_bottom(rendered, 95, 125) - rendered_first
+    assert abs(actual - expected) <= 1
 
 
 def test_character_alignment_skips_scripts() -> None:
