@@ -2347,6 +2347,45 @@ def test_text_bounding_box_uses_explicit_baseline() -> None:
     assert first_paragraph.attrib.get("y") is not None
 
 
+@pytest.mark.parametrize(
+    ("fixture", "axis"),
+    [
+        ("texts/paragraph-shapetype1-justification0.psd", "y"),
+        (
+            "texts/shapetype1-writingdirection2-baselinedirection2-justification0.psd",
+            "x",
+        ),
+    ],
+)
+def test_blank_first_box_paragraph_keeps_styled_baseline(
+    fixture: str, axis: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A blank first paragraph still positions later box text by its em size."""
+    psd = PSDImage.open(get_fixture(fixture))
+    original_text = SVGDocument.from_psd(psd).svg.find(".//text")
+    assert original_text is not None
+    original_position = float(original_text.attrib[axis])
+
+    layer = next(layer for layer in psd.descendants() if isinstance(layer, TypeLayer))
+    first_paragraph = list(TypeSetting(layer._data))[0]
+    blank_paragraph = Paragraph(
+        first_paragraph.style,
+        [Span(0, 1, "\r", first_paragraph.spans[0].style)],
+    )
+    original_iter = TypeSetting.__iter__
+
+    def prepend_blank(self: TypeSetting) -> Iterator[Paragraph]:
+        yield blank_paragraph
+        yield from original_iter(self)
+
+    monkeypatch.setattr(TypeSetting, "__iter__", prepend_blank)
+    text = SVGDocument.from_psd(psd).svg.find(".//text")
+    assert text is not None
+    blank_tspan = text.find("tspan")
+    assert blank_tspan is not None
+    assert float(blank_tspan.attrib[axis]) == pytest.approx(original_position, abs=0.01)
+
+
 @requires_arial
 def test_box_text_first_line_matches_photoshop() -> None:
     """The explicit baseline keeps the first horizontal line at the PSD ink."""

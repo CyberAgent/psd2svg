@@ -1120,6 +1120,13 @@ class TextConverter(ConverterProtocol):
             reference_em = self._alignment_reference_size(
                 baseline_paragraph, text_setting
             )
+            if reference_em == 0.0 and baseline_paragraph.spans:
+                # A blank first paragraph still has a styled em box that places
+                # later text, although it has no glyph to align with another run.
+                reference_em = max(
+                    self._cross_axis_em(span, text_setting)
+                    for span in baseline_paragraph.spans
+                )
             if text_setting.writing_direction == WritingDirection.HORIZONTAL_TB:
                 # Place the alphabetic baseline explicitly. Photoshop's box top
                 # is relative to the em box, whose lower 12% is below that baseline.
