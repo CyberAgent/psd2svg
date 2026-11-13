@@ -3,13 +3,16 @@ import math
 import re
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
+from copy import deepcopy
 
 import numpy as np
 import pytest
 from PIL import Image
 from psd_tools import PSDImage
 from psd_tools.api.layers import TypeLayer
-from psd_tools.psd.engine_data import Integer
+from psd_tools.psd.descriptor import String as DescriptorString
+from psd_tools.psd.engine_data import Float, Integer
+from psd_tools.psd.engine_data import String as EngineString
 
 from psd2svg import SVGDocument
 from psd2svg.core import text as text_module
@@ -2348,42 +2351,61 @@ def test_text_bounding_box_uses_explicit_baseline() -> None:
 
 
 @pytest.mark.parametrize(
-    ("fixture", "axis"),
+    ("fixture", "axis", "blank_font_size"),
     [
-        ("texts/paragraph-shapetype1-justification0.psd", "y"),
+        ("texts/paragraph-shapetype1-justification0.psd", "y", 32.0),
+        ("texts/paragraph-shapetype1-justification0.psd", "y", 16.0),
         (
             "texts/shapetype1-writingdirection2-baselinedirection2-justification0.psd",
             "x",
+            32.0,
+        ),
+        (
+            "texts/shapetype1-writingdirection2-baselinedirection2-justification0.psd",
+            "x",
+            16.0,
         ),
     ],
 )
 def test_blank_first_box_paragraph_keeps_styled_baseline(
-    fixture: str, axis: str, monkeypatch: pytest.MonkeyPatch
+    fixture: str,
+    axis: str,
+    blank_font_size: float,
 ) -> None:
-    """A blank first paragraph still positions later box text by its em size."""
+    """A PSD's empty first line uses its own size, even when later text differs."""
     psd = PSDImage.open(get_fixture(fixture))
     original_text = SVGDocument.from_psd(psd).svg.find(".//text")
     assert original_text is not None
     original_position = float(original_text.attrib[axis])
-
     layer = next(layer for layer in psd.descendants() if isinstance(layer, TypeLayer))
-    first_paragraph = list(TypeSetting(layer._data))[0]
-    blank_paragraph = Paragraph(
-        first_paragraph.style,
-        [Span(0, 1, "\r", first_paragraph.spans[0].style)],
-    )
-    original_iter = TypeSetting.__iter__
-
-    def prepend_blank(self: TypeSetting) -> Iterator[Paragraph]:
-        yield blank_paragraph
-        yield from original_iter(self)
-
-    monkeypatch.setattr(TypeSetting, "__iter__", prepend_blank)
+    setting = TypeSetting(layer._data)
+    original_style = list(setting)[0].spans[0].style
+    original_content = setting.text
+    setting.engine_dict["Editor"]["Text"] = EngineString("\r" + original_content)
+    layer._data.text_data["Txt "] = DescriptorString("\r" + original_content)
+    for run_name in ("ParagraphRun", "StyleRun"):
+        run = setting.engine_dict[run_name]
+        run["RunLengthArray"]._items[:] = [Integer(1), Integer(len(original_content))]
+        run["RunArray"]._items.insert(0, deepcopy(run["RunArray"][0]))
+    blank_style_data = setting.engine_dict["StyleRun"]["RunArray"][0]["StyleSheet"][
+        "StyleSheetData"
+    ]
+    blank_style_data["FontSize"] = Float(blank_font_size)
+    paragraphs = list(TypeSetting(layer._data))
+    assert paragraphs[0].spans[0].text == "\r"
+    assert paragraphs[0].spans[0].style.font_size == blank_font_size
+    assert paragraphs[1].spans[0].style.font_size == original_style.font_size
     text = SVGDocument.from_psd(psd).svg.find(".//text")
     assert text is not None
     blank_tspan = text.find("tspan")
     assert blank_tspan is not None
-    assert float(blank_tspan.attrib[axis]) == pytest.approx(original_position, abs=0.01)
+    expected_position = (
+        original_position
+        + (blank_font_size - original_style.font_size) * (1.0 - EM_BOX_DESCENT_RATIO)
+        if axis == "y"
+        else original_position - (blank_font_size - original_style.font_size) / 2.0
+    )
+    assert float(blank_tspan.attrib[axis]) == pytest.approx(expected_position, abs=0.01)
 
 
 @requires_arial
@@ -2395,14 +2417,28 @@ def test_box_text_first_line_matches_photoshop() -> None:
 
 
 @requires_arial
-def test_vertical_box_text_first_column_matches_photoshop() -> None:
+@pytest.mark.parametrize(
+    "rasterizer_factory",
+    [
+        pytest.param(ResvgRasterizer, id="resvg"),
+        pytest.param(PlaywrightRasterizer, id="chromium", marks=requires_playwright),
+    ],
+)
+def test_vertical_box_text_first_column_matches_photoshop(
+    rasterizer_factory: type,
+) -> None:
     """The explicit vertical baseline keeps the first column at the PSD ink."""
     psd = PSDImage.open(
         get_fixture(
             "texts/shapetype1-writingdirection2-baselinedirection2-justification0.psd"
         )
     )
-    rendered = SVGDocument.from_psd(psd).rasterize()
+    rasterizer = rasterizer_factory()
+    try:
+        rendered = SVGDocument.from_psd(psd).rasterize(rasterizer=rasterizer)
+    finally:
+        if isinstance(rasterizer, PlaywrightRasterizer):
+            rasterizer.close()
 
     def leftmost_ink(image: Image.Image) -> int:
         pixels = np.asarray(image.convert("RGB")).mean(axis=2)
