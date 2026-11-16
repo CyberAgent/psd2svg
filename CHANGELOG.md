@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Restore SVG element names after loading an exported document** (#502)
   - Export and load round trips retain unprefixed SVG tags and work with optimization and image handling.
+- **Mixed-size runs in native bounding box text align to Photoshop's baseline** (#519)
+  - Place the first baseline explicitly so runs with different font sizes keep their alignment.
 
 ## [0.15.0] - 2026-10-30
 
