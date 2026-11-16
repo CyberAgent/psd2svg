@@ -320,9 +320,12 @@ When ``enable_text=True`` (default), text layers are converted to native SVG ``<
   family has one, instead of shearing the specified face)
 * Character alignment against the ideographic character face, ``StyleRunAlignment``
   1 and 4 (`#440 <https://github.com/CyberAgent/psd2svg/issues/440>`_)
-* Character alignment uses one em box descent for every face, the 88/12 box that
-  Japanese faces are drawn to, because conversion reads no font metrics; faces
-  built to other proportions are offset approximately
+* Character alignment and the first baseline of native bounding box text use
+  one em box descent for every face, the 88/12 box that Japanese faces are
+  drawn to, because conversion reads no font metrics; faces built to other
+  proportions are offset approximately. The first baseline also uses the
+  largest em in the entire first paragraph, which can differ from the first
+  rendered line when that paragraph wraps.
 
 **Text Warp Effects (Experimental):**
 

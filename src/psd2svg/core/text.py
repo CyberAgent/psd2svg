@@ -763,6 +763,15 @@ class TextConverter(ConverterProtocol):
         )
 
         paragraphs = list(text_setting)
+        baseline_reference_em = self._alignment_reference_size(
+            paragraphs[0], text_setting
+        )
+        if baseline_reference_em == 0.0 and paragraphs[0].spans:
+            # A blank first paragraph has no glyph to align, but its styled
+            # em box still places the baseline of the whole text element.
+            baseline_reference_em = max(
+                self._cross_axis_em(span, text_setting) for span in paragraphs[0].spans
+            )
 
         # Check if any span needs whitespace preservation
         needs_preserve = any(
@@ -790,7 +799,11 @@ class TextConverter(ConverterProtocol):
         # Non-uniform scaling shared by every span is applied to the <text> element,
         # where transforms are honored by all renderers.
         text_element_scale = self._apply_text_element_scaling(
-            text_setting, text_node, paragraphs, uses_native_positioning
+            text_setting,
+            text_node,
+            paragraphs,
+            uses_native_positioning,
+            baseline_reference_em,
         )
 
         container_node = text_node
@@ -822,13 +835,13 @@ class TextConverter(ConverterProtocol):
                 paragraph_node = self._add_paragraph(
                     text_setting,
                     paragraph,
-                    baseline_paragraph=paragraphs[0],
+                    baseline_reference_em=baseline_reference_em,
                     first_paragraph=(i == 0),
                     advance=advance,
                     uses_native_positioning=uses_native_positioning,
                 )
                 origin_x, origin_y = self._compute_paragraph_position(
-                    text_setting, paragraph.get_text_anchor(), paragraphs[0]
+                    text_setting, paragraph.get_text_anchor(), baseline_reference_em
                 )
                 if uses_native_positioning:
                     origin_x += transform.tx
@@ -902,6 +915,7 @@ class TextConverter(ConverterProtocol):
         text_node: ET.Element,
         paragraphs: list[Paragraph],
         uses_native_positioning: bool,
+        baseline_reference_em: float,
     ) -> float | None:
         """Apply layer-wide non-uniform text scaling to the <text> element.
 
@@ -921,6 +935,7 @@ class TextConverter(ConverterProtocol):
             text_node: The ``<text>`` element to scale.
             paragraphs: Paragraphs of the text layer.
             uses_native_positioning: Whether native x/y positioning is used.
+            baseline_reference_em: First paragraph's em size for box positioning.
 
         Returns:
             The inline-axis scale factor applied to the ``<text>`` element, meaning
@@ -952,7 +967,7 @@ class TextConverter(ConverterProtocol):
         # even when its paragraphs are justified differently.
         anchors = {
             self._compute_paragraph_position(
-                text_setting, paragraph.get_text_anchor(), paragraphs[0]
+                text_setting, paragraph.get_text_anchor(), baseline_reference_em
             )[0 if is_horizontal else 1]
             for paragraph in paragraphs
         }
@@ -961,7 +976,7 @@ class TextConverter(ConverterProtocol):
 
         horizontal_scale, vertical_scale = scale
         x, y = self._compute_paragraph_position(
-            text_setting, paragraphs[0].get_text_anchor(), paragraphs[0]
+            text_setting, paragraphs[0].get_text_anchor(), baseline_reference_em
         )
         if uses_native_positioning:
             x += text_setting.transform.tx
@@ -1061,7 +1076,7 @@ class TextConverter(ConverterProtocol):
         self,
         text_setting: TypeSetting,
         paragraph: Paragraph,
-        baseline_paragraph: Paragraph,
+        baseline_reference_em: float,
         first_paragraph: bool,
         advance: tuple[float | None, float | None],
         uses_native_positioning: bool = False,
@@ -1077,7 +1092,7 @@ class TextConverter(ConverterProtocol):
 
         # Calculate positioning based on shape type and writing direction
         x, y = self._compute_paragraph_position(
-            text_setting, text_anchor, baseline_paragraph
+            text_setting, text_anchor, baseline_reference_em
         )
 
         # Create paragraph node
@@ -1100,7 +1115,7 @@ class TextConverter(ConverterProtocol):
         self,
         text_setting: TypeSetting,
         text_anchor: str | None,
-        baseline_paragraph: Paragraph,
+        baseline_reference_em: float,
     ) -> tuple[float, float]:
         """Compute paragraph position based on justification, shape type,
         and writing direction.
@@ -1108,8 +1123,8 @@ class TextConverter(ConverterProtocol):
         Args:
             text_setting: Type setting object containing bounds and writing direction.
             text_anchor: SVG text-anchor value ("start", "middle", "end", or None).
-            baseline_paragraph: First paragraph, whose largest em box sets the
-                baseline origin for the whole text element.
+            baseline_reference_em: First paragraph's largest em box, which sets
+                the baseline origin for the whole text element.
 
         Returns:
             Tuple of (x, y) for positioning the paragraph.
@@ -1117,20 +1132,10 @@ class TextConverter(ConverterProtocol):
         x = 0.0
         y = 0.0
         if text_setting.shape_type == ShapeType.BOUNDING_BOX:
-            reference_em = self._alignment_reference_size(
-                baseline_paragraph, text_setting
-            )
-            if reference_em == 0.0 and baseline_paragraph.spans:
-                # A blank first paragraph still has a styled em box that places
-                # later text, although it has no glyph to align with another run.
-                reference_em = max(
-                    self._cross_axis_em(span, text_setting)
-                    for span in baseline_paragraph.spans
-                )
             if text_setting.writing_direction == WritingDirection.HORIZONTAL_TB:
                 # Place the alphabetic baseline explicitly. Photoshop's box top
                 # is relative to the em box, whose lower 12% is below that baseline.
-                y = text_setting.bounds.top + reference_em * (
+                y = text_setting.bounds.top + baseline_reference_em * (
                     1.0 - EM_BOX_DESCENT_RATIO
                 )
                 if text_anchor == "end":
@@ -1140,7 +1145,7 @@ class TextConverter(ConverterProtocol):
             elif text_setting.writing_direction == WritingDirection.VERTICAL_RL:
                 # SVG centres vertical glyphs on the default baseline. Shift by
                 # half the em so the first column starts at the box's right edge.
-                x = text_setting.bounds.right - reference_em / 2.0
+                x = text_setting.bounds.right - baseline_reference_em / 2.0
                 if text_anchor == "end":
                     y = text_setting.bounds.bottom
                 elif text_anchor == "middle":
