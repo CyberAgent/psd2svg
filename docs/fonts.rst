@@ -519,7 +519,10 @@ Performance Tips
 Rasterization Performance
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using ``rasterize()`` with PlaywrightRasterizer, psd2svg automatically optimizes font handling for 60-80% faster performance:
+Playwright renders SVG content in an ``about:blank`` page, so local ``file://``
+font URLs do not load there. During ``rasterize()`` with PlaywrightRasterizer,
+psd2svg embeds the used glyphs as data URIs so Chromium can load the resolved font.
+ResvgRasterizer continues to receive local font paths for its native loader.
 
 .. code-block:: python
 
@@ -530,33 +533,17 @@ When using ``rasterize()`` with PlaywrightRasterizer, psd2svg automatically opti
    psdimage = PSDImage.open("input.psd")
    document = SVGDocument.from_psd(psdimage)
 
-   # Automatic optimization: uses file:// URLs instead of data URIs
+   # Resolved font glyphs are embedded as data URIs for Chromium.
    rasterizer = PlaywrightRasterizer(dpi=144)
    image = document.rasterize(rasterizer)
    image.save("output.png")
 
-**How it works:**
+**Font handling:**
 
-* For saved SVG files (``save()``/``tostring()``), fonts are embedded as base64 data URIs (portable but slower to generate)
-* For transient rasterization (``rasterize()`` with PlaywrightRasterizer), fonts use local ``file://`` URLs (no encoding overhead)
-* Optimization is automatic, transparent, and requires no configuration
-* Font resolution and fallback chains work identically in both modes
-
-**Performance impact:**
-
-* **60-80% faster rasterization** - Skips font encoding/subsetting overhead
-* **99% smaller SVG strings** - No base64 encoding (transient SVG only, not saved files)
-* **Lower memory usage** - No font data caching needed for rasterization
-* **More robust** - Avoids potential font subsetting errors during rasterization
-
-**When optimization applies:**
-
-* ✅ Using ``rasterize()`` method with ``PlaywrightRasterizer``
-* ✅ Document has text elements with font-family attributes
-* ✅ Fonts successfully resolved to system font files
-* ❌ Does NOT apply to ``save()`` or ``tostring()`` (those still use data URIs for portability)
-
-**Note:** This optimization only affects the internal SVG representation used for rasterization. Saved SVG files (``save()``/``tostring()``) continue to use data URIs for maximum portability and self-containment.
+* ``save()``/``tostring()``: data URIs for portable SVG files
+* Playwright rasterization: subset data URIs that load from the browser page
+* Resvg rasterization: local ``file://`` URLs passed to the native font loader
+* Font resolution and fallback chains are shared across both rasterizers
 
 Best Practices
 ~~~~~~~~~~~~~~
@@ -566,7 +553,7 @@ Best Practices
 3. **Cache font files** - If using external fonts, leverage HTTP caching
 4. **Limit font families** - Each font adds to file size
 5. **Consider system fonts** - For non-critical text, use web-safe fonts
-6. **Use PlaywrightRasterizer for faster rasterization** - Automatic 60-80% speedup for font-heavy documents
+6. **Choose a rasterizer for its rendering support** - Playwright supports browser SVG behavior; Resvg uses its native renderer
 
 Comparison: Embedded vs External
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
