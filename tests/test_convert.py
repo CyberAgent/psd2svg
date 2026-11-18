@@ -278,6 +278,47 @@ def test_enable_live_shapes_flag() -> None:
     )
 
 
+def test_live_line_shape_uses_native_svg_line() -> None:
+    psdimage = PSDImage.open(get_fixture("shapes/line-1.psd"))
+    converter = Converter(psdimage)
+    converter.build()
+
+    line = converter.svg.find(".//line")
+    assert line is not None
+    assert (line.get("x1"), line.get("y1")) == ("21", "24")
+    assert (line.get("x2"), line.get("y2")) == ("103", "106")
+    assert line.get("stroke") == "#000000"
+    assert line.get("stroke-width") == "9"
+    assert converter.svg.find(".//path") is None
+
+
+def test_live_line_with_arrowheads_keeps_outline() -> None:
+    psdimage = PSDImage.open(get_fixture("shapes/line-2.psd"))
+    converter = Converter(psdimage)
+    converter.build()
+
+    assert converter.svg.find(".//line") is None
+    assert converter.svg.find(".//path") is not None
+
+
+def test_live_line_fill_paints_svg_stroke() -> None:
+    psdimage = PSDImage.open(get_fixture("shapes/line-1.psd"))
+    layer = next(layer for layer in psdimage.descendants() if layer.kind == "shape")
+    assert layer.stroke is not None
+    # Exercise the fill-only variant using the fixture's live line and fill.
+    layer.stroke._data[b"strokeEnabled"] = False
+    layer.stroke._data[b"fillEnabled"] = True
+
+    converter = Converter(psdimage)
+    converter.build()
+
+    line = converter.svg.find(".//line")
+    assert line is not None
+    assert line.get("stroke") == "#00ff00"
+    assert line.get("stroke-width") == "1"
+    assert line.get("fill") is None
+
+
 def test_enable_title_flag() -> None:
     """Test that enabling title elements works."""
     psdimage = PSDImage.open(get_fixture("layer-types/group.psd"))

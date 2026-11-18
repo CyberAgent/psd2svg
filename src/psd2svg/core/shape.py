@@ -18,7 +18,7 @@ from typing import Any, Iterator, Literal
 
 import numpy as np
 from psd_tools.api import layers
-from psd_tools.api.shape import Ellipse, Rectangle, RoundedRectangle
+from psd_tools.api.shape import Ellipse, Line, Rectangle, RoundedRectangle
 from psd_tools.constants import Tag
 from psd_tools.psd.descriptor import Descriptor
 from psd_tools.psd.vector import Subpath
@@ -300,14 +300,58 @@ class ShapeConverter(ConverterProtocol):
             elif isinstance(origination, Ellipse):
                 node = self.create_origination_ellipse(origination, reference, **attrib)
                 node = self.apply_origination_transform(layer, origination, node)
+            elif isinstance(origination, Line) and self.can_create_origination_line(
+                layer, origination
+            ):
+                node = self.create_origination_line(origination, **attrib)
             else:
                 # Fallback to path creation.
-                # TODO: Support line shapes.
                 logger.debug(f"Unsupported shape type: {origination}")
                 node = self.create_path(path, **attrib)
         else:
             node = self.create_path(path, **attrib)
 
+        return node
+
+    def can_create_origination_line(
+        self, layer: layers.ShapeLayer, origination: Line
+    ) -> bool:
+        """Keep outlines when a straight SVG line cannot represent the shape."""
+        stroke = layer.stroke if layer.has_stroke() else None
+        transform = origination._data.get(b"Trnf")
+        has_transform = transform is not None and tuple(
+            float(transform[key]) for key in (b"xx", b"xy", b"yx", b"yy", b"tx", b"ty")
+        ) != (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+        return (
+            not origination.arrow_start
+            and not origination.arrow_end
+            and origination.line_start is not None
+            and origination.line_end is not None
+            and origination.line_weight > 0
+            and self.current.tag != "clipPath"
+            and not self.has_separate_fill(layer)
+            and not (stroke and stroke.enabled and stroke.fill_enabled)
+            and not (stroke and stroke.enabled and origination.line_weight != 1)
+            and not has_transform
+            and tuple(layer.tagged_blocks.get_data(Tag.REFERENCE_POINT, (0.0, 0.0)))
+            == (0.0, 0.0)
+        )
+
+    def create_origination_line(self, origination: Line, **attrib: Any) -> ET.Element:
+        """Create an SVG line from Photoshop's live endpoints."""
+        start, end = origination.line_start, origination.line_end
+        node = self.create_node(
+            "line",
+            x1=float(start[b"Hrzn"]),
+            y1=float(start[b"Vrtc"]),
+            x2=float(end[b"Hrzn"]),
+            y2=float(end[b"Vrtc"]),
+            stroke_width=origination.line_weight,
+            **attrib,
+        )
+        if "fill" in node.attrib:
+            # A line has no fill area; a mask's explicit fill paints its stroke.
+            node.set("stroke", node.attrib.pop("fill"))
         return node
 
     def create_origination_rectangle(
