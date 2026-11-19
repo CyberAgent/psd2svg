@@ -22,6 +22,7 @@ from psd_tools.api.shape import Ellipse, Line, Rectangle, RoundedRectangle
 from psd_tools.constants import Tag
 from psd_tools.psd.descriptor import Descriptor
 from psd_tools.psd.vector import Subpath
+from psd_tools.terminology import Key
 
 from psd2svg import svg_utils
 from psd2svg.core.base import ConverterProtocol
@@ -318,6 +319,12 @@ class ShapeConverter(ConverterProtocol):
     ) -> bool:
         """Keep outlines when a straight SVG line cannot represent the shape."""
         stroke = layer.stroke if layer.has_stroke() else None
+        start, end = origination.line_start, origination.line_end
+        if start is None or end is None:
+            return False
+        axis_aligned = float(start[b"Hrzn"]) == float(end[b"Hrzn"]) or float(
+            start[b"Vrtc"]
+        ) == float(end[b"Vrtc"])
         transform = origination._data.get(b"Trnf")
         has_transform = transform is not None and tuple(
             float(transform[key]) for key in (b"xx", b"xy", b"yx", b"yy", b"tx", b"ty")
@@ -325,13 +332,15 @@ class ShapeConverter(ConverterProtocol):
         return (
             not origination.arrow_start
             and not origination.arrow_end
-            and origination.line_start is not None
-            and origination.line_end is not None
             and origination.line_weight > 0
-            and self.current.tag != "clipPath"
+            and self.current.tag not in ("clipPath", "defs")
             and not self.has_separate_fill(layer)
             and not (stroke and stroke.enabled and stroke.fill_enabled)
             and not (stroke and stroke.enabled and origination.line_weight != 1)
+            and not (
+                axis_aligned
+                and (self.has_raster_mask(layer) or _has_aligned_gradient(layer))
+            )
             and not has_transform
             and tuple(layer.tagged_blocks.get_data(Tag.REFERENCE_POINT, (0.0, 0.0)))
             == (0.0, 0.0)
@@ -630,3 +639,30 @@ def get_origin_scale(
         scale_y = (xy**2 + yy**2) ** 0.5
         return (scale_x, scale_y)
     return (1.0, 1.0)
+
+
+def _has_aligned_gradient(layer: layers.ShapeLayer) -> bool:
+    """Whether active line paint uses an object-bounding-box gradient."""
+    stroke = layer.stroke if layer.has_stroke() else None
+    if stroke is None or stroke.fill_enabled:
+        if Tag.VECTOR_STROKE_CONTENT_DATA in layer.tagged_blocks:
+            fill = layer.tagged_blocks.get_data(Tag.VECTOR_STROKE_CONTENT_DATA)
+            if fill is not None and Key.Gradient in fill and _is_aligned_gradient(fill):
+                return True
+        elif Tag.GRADIENT_FILL_SETTING in layer.tagged_blocks:
+            fill = layer.tagged_blocks.get_data(Tag.GRADIENT_FILL_SETTING)
+            if fill is not None and _is_aligned_gradient(fill):
+                return True
+    if stroke is not None and stroke.enabled:
+        content = stroke.content
+        if (
+            content is not None
+            and content.classID == b"gradientLayer"
+            and _is_aligned_gradient(content)
+        ):
+            return True
+    return False
+
+
+def _is_aligned_gradient(setting: Descriptor) -> bool:
+    return Key.Alignment not in setting or setting[Key.Alignment].value is True
