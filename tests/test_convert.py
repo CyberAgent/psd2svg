@@ -2,12 +2,15 @@ import logging
 import os
 from pathlib import Path
 from typing import Callable, cast
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 from psd_tools import PSDImage
+from psd_tools.api import layers
 from psd_tools.api.adjustments import ColorBalance, Curves, Invert, Levels
-from psd_tools.constants import BlendMode
+from psd_tools.api.shape import Line
+from psd_tools.constants import BlendMode, Tag
 from psd_tools.psd.adjustments import CurvesExtraItem
 
 from psd2svg import SVGDocument, convert
@@ -276,6 +279,184 @@ def test_enable_live_shapes_flag() -> None:
     assert converter.svg.find(".//path") is not None, (
         "Expected <path> element in SVG with live shapes disabled."
     )
+
+
+def test_live_line_with_stroke_keeps_outline() -> None:
+    psdimage = PSDImage.open(get_fixture("shapes/line-1.psd"))
+    converter = Converter(psdimage)
+    converter.build()
+
+    assert converter.svg.find(".//line") is None
+    assert converter.svg.find(".//path") is not None
+    assert compute_conversion_quality(psdimage, "MSE") < 0.0005
+
+
+def test_live_line_with_arrowheads_keeps_outline() -> None:
+    psdimage = PSDImage.open(get_fixture("shapes/line-2.psd"))
+    converter = Converter(psdimage)
+    converter.build()
+
+    assert converter.svg.find(".//line") is None
+    assert converter.svg.find(".//path") is not None
+
+
+def test_live_line_fill_paints_svg_stroke() -> None:
+    psdimage = PSDImage.open(get_fixture("shapes/line-1.psd"))
+    layer = next(layer for layer in psdimage.descendants() if layer.kind == "shape")
+    assert layer.stroke is not None
+    # Exercise the fill-only variant using the fixture's live line and fill.
+    layer.stroke._data[b"strokeEnabled"] = False
+    layer.stroke._data[b"fillEnabled"] = True
+
+    converter = Converter(psdimage)
+    converter.build()
+
+    line = converter.svg.find(".//line")
+    assert line is not None
+    assert line.get("stroke") == "#00ff00"
+    assert line.get("stroke-width") == "1"
+    assert line.get("fill") is None
+
+
+def _axis_aligned_line(axis: str) -> tuple[PSDImage, layers.ShapeLayer]:
+    psdimage = PSDImage.open(get_fixture("shapes/line-1.psd"))
+    layer = next(layer for layer in psdimage.descendants() if layer.kind == "shape")
+    assert isinstance(layer, layers.ShapeLayer)
+    origin = layer.origination[0]
+    assert isinstance(origin, Line)
+    coordinate = b"Vrtc" if axis == "horizontal" else b"Hrzn"
+    origin.line_end[coordinate] = origin.line_start[coordinate]
+    assert layer.stroke is not None
+    layer.stroke._data[b"strokeEnabled"] = False
+    layer.stroke._data[b"fillEnabled"] = True
+    return psdimage, layer
+
+
+@pytest.mark.parametrize("axis", ["horizontal", "vertical"])
+def test_live_axis_aligned_line_with_solid_fill_is_native(axis: str) -> None:
+    psdimage, layer = _axis_aligned_line(axis)
+
+    converter = Converter(psdimage)
+    assert converter.create_shape(layer).tag == "line"
+
+
+@pytest.mark.parametrize("axis", ["horizontal", "vertical"])
+@pytest.mark.parametrize(
+    "gradient_file, expected_tag",
+    [
+        ("paint/linear-gradient-3-align.psd", "path"),
+        ("paint/linear-gradient-3-no-align.psd", "line"),
+    ],
+)
+def test_live_axis_aligned_line_with_gradient_fill(
+    axis: str, gradient_file: str, expected_tag: str
+) -> None:
+    psdimage, layer = _axis_aligned_line(axis)
+    assert layer.stroke is not None
+    layer.stroke._data[b"strokeEnabled"] = False
+    layer.stroke._data[b"fillEnabled"] = True
+
+    gradient_psd = PSDImage.open(get_fixture(gradient_file))
+    gradient_layer = next(
+        layer for layer in gradient_psd.descendants() if layer.kind == "shape"
+    )
+    fill = layer.tagged_blocks.get_data(Tag.VECTOR_STROKE_CONTENT_DATA)
+    fill.clear()
+    fill.update(gradient_layer.tagged_blocks.get_data(Tag.VECTOR_STROKE_CONTENT_DATA))
+
+    converter = Converter(psdimage)
+    assert converter.create_shape(layer).tag == expected_tag
+
+
+@pytest.mark.parametrize("axis", ["horizontal", "vertical"])
+def test_live_axis_aligned_line_with_gradient_stroke_keeps_outline(axis: str) -> None:
+    psdimage, layer = _axis_aligned_line(axis)
+    assert layer.stroke is not None
+    layer.stroke._data[b"strokeEnabled"] = True
+    layer.stroke._data[b"fillEnabled"] = False
+
+    gradient_psd = PSDImage.open(get_fixture("paint/stroke-1-gradient.psd"))
+    gradient_layer = next(
+        layer for layer in gradient_psd.descendants() if layer.kind == "shape"
+    )
+    assert gradient_layer.stroke is not None
+    layer.stroke._data[b"strokeStyleContent"] = gradient_layer.stroke.content
+
+    converter = Converter(psdimage)
+    assert converter.create_shape(layer).tag == "path"
+
+
+@pytest.mark.parametrize("axis", ["horizontal", "vertical"])
+def test_live_axis_aligned_line_with_raster_mask_keeps_outline(axis: str) -> None:
+    psdimage, layer = _axis_aligned_line(axis)
+
+    converter = Converter(psdimage)
+    with patch.object(converter, "has_raster_mask", return_value=True):
+        assert converter.create_shape(layer).tag == "path"
+
+
+@pytest.mark.parametrize("axis", ["horizontal", "vertical"])
+def test_live_axis_aligned_line_clipped_to_pixel_layer_keeps_outline(axis: str) -> None:
+    psdimage, layer = _axis_aligned_line(axis)
+    origin = layer.origination[0]
+    assert isinstance(origin, Line)
+    start, end = ((45, 64), (85, 64)) if axis == "horizontal" else ((64, 45), (64, 85))
+    origin.line_start[b"Hrzn"], origin.line_start[b"Vrtc"] = start
+    origin.line_end[b"Hrzn"], origin.line_end[b"Vrtc"] = end
+    clipping_psd = PSDImage.open(
+        get_fixture("clipping/clipping-1-raster-with-transform.psd")
+    )
+    pixel_base = next(
+        candidate
+        for candidate in clipping_psd.descendants()
+        if candidate.kind == "pixel" and candidate.has_clip_layers()
+    )
+    converter = Converter(psdimage)
+
+    with converter.add_clipping_target(pixel_base) as attrib:
+        assert attrib is not None and "mask" in attrib
+        node = converter.add_shape(layer, **attrib)
+
+    assert node is not None
+    assert node.tag == "path"
+    assert node.get("mask") == attrib["mask"]
+    assert converter.svg.find(".//line") is None
+
+
+def test_live_zero_length_line_keeps_outline() -> None:
+    psdimage = PSDImage.open(get_fixture("shapes/line-1.psd"))
+    layer = next(layer for layer in psdimage.descendants() if layer.kind == "shape")
+    assert isinstance(layer, layers.ShapeLayer)
+    assert layer.stroke is not None
+    layer.stroke._data[b"strokeEnabled"] = False
+    layer.stroke._data[b"fillEnabled"] = True
+    origin = layer.origination[0]
+    assert isinstance(origin, Line)
+    origin.line_end[b"Hrzn"] = origin.line_start[b"Hrzn"]
+    origin.line_end[b"Vrtc"] = origin.line_start[b"Vrtc"]
+
+    converter = Converter(psdimage)
+    assert converter.create_shape(layer).tag == "path"
+
+
+def test_live_line_in_reusable_definition_keeps_outline() -> None:
+    psdimage = PSDImage.open(get_fixture("shapes/line-1.psd"))
+    layer = next(layer for layer in psdimage.descendants() if layer.kind == "shape")
+    assert isinstance(layer, layers.ShapeLayer)
+    assert layer.vector_mask is not None
+    converter = Converter(psdimage)
+
+    defs = converter.create_node("defs")
+    with converter.set_current(defs):
+        previous = converter.create_node("mask", id="previous")
+        with converter.set_current(previous):
+            converter.create_node("rect", fill="#ffffff", width="100%", height="100%")
+        converter.apply_xor_operation(
+            layer, [layer.vector_mask.paths[0]], previous, previous, "fill-rule"
+        )
+
+    assert len(defs.findall(".//path")) == 1
+    assert defs.find(".//line") is None
 
 
 def test_enable_title_flag() -> None:

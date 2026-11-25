@@ -433,6 +433,12 @@ class LayerConverter(ConverterProtocol):
                 layer, title=layer.name, class_=layer.kind, **attrib
             )
             self.set_fill(layer, node)
+            if node.tag == "line" and node.get("fill") != "none":
+                # Photoshop's line body is a filled shape; SVG lines paint
+                # their body with a stroke instead.
+                node.set("stroke", node.attrib.pop("fill", "black"))
+                if "fill-opacity" in node.attrib:
+                    node.set("stroke-opacity", node.attrib.pop("fill-opacity"))
             self.set_stroke(layer, node)
             self.set_layer_attributes(layer, node)
             node = self.apply_mask(layer, node)

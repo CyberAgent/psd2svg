@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Native SVG lines for simple Photoshop line shapes** (#522)
+  - Stroked and zero-length lines, plus lines needing full outlines for paint, masks (including clipping), or shape operations, remain paths.
+
 - **Warnings when conversion approaches resource limits** (#501)
   - Warn once per conversion at 80% of file-size and layer-depth limits, 90% of the image-dimension limit, and 50% and 75% of the timeout.
 

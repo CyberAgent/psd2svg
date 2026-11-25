@@ -18,10 +18,11 @@ from typing import Any, Iterator, Literal
 
 import numpy as np
 from psd_tools.api import layers
-from psd_tools.api.shape import Ellipse, Rectangle, RoundedRectangle
+from psd_tools.api.shape import Ellipse, Line, Rectangle, RoundedRectangle
 from psd_tools.constants import Tag
 from psd_tools.psd.descriptor import Descriptor
 from psd_tools.psd.vector import Subpath
+from psd_tools.terminology import Key
 
 from psd2svg import svg_utils
 from psd2svg.core.base import ConverterProtocol
@@ -300,14 +301,72 @@ class ShapeConverter(ConverterProtocol):
             elif isinstance(origination, Ellipse):
                 node = self.create_origination_ellipse(origination, reference, **attrib)
                 node = self.apply_origination_transform(layer, origination, node)
+            elif isinstance(origination, Line) and self.can_create_origination_line(
+                layer, origination, mask=attrib.get("mask")
+            ):
+                node = self.create_origination_line(origination, **attrib)
             else:
                 # Fallback to path creation.
-                # TODO: Support line shapes.
                 logger.debug(f"Unsupported shape type: {origination}")
                 node = self.create_path(path, **attrib)
         else:
             node = self.create_path(path, **attrib)
 
+        return node
+
+    def can_create_origination_line(
+        self, layer: layers.ShapeLayer, origination: Line, mask: str | None = None
+    ) -> bool:
+        """Keep outlines when a straight SVG line cannot represent the shape."""
+        stroke = layer.stroke if layer.has_stroke() else None
+        start, end = origination.line_start, origination.line_end
+        if start is None or end is None:
+            return False
+        start_x, start_y = float(start[b"Hrzn"]), float(start[b"Vrtc"])
+        end_x, end_y = float(end[b"Hrzn"]), float(end[b"Vrtc"])
+        if (start_x, start_y) == (end_x, end_y):
+            return False
+        axis_aligned = start_x == end_x or start_y == end_y
+        transform = origination._data.get(b"Trnf")
+        has_transform = transform is not None and tuple(
+            float(transform[key]) for key in (b"xx", b"xy", b"yx", b"yy", b"tx", b"ty")
+        ) != (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+        return (
+            not origination.arrow_start
+            and not origination.arrow_end
+            and origination.line_weight > 0
+            and self.current.tag not in ("clipPath", "defs")
+            and not self.has_separate_fill(layer)
+            # Strokes on the centerline lose the body's width and alignment.
+            and not (stroke and stroke.enabled)
+            and not (
+                axis_aligned
+                and (
+                    self.has_raster_mask(layer)
+                    or _has_aligned_gradient(layer)
+                    or mask is not None
+                )
+            )
+            and not has_transform
+            and tuple(layer.tagged_blocks.get_data(Tag.REFERENCE_POINT, (0.0, 0.0)))
+            == (0.0, 0.0)
+        )
+
+    def create_origination_line(self, origination: Line, **attrib: Any) -> ET.Element:
+        """Create an SVG line from Photoshop's live endpoints."""
+        start, end = origination.line_start, origination.line_end
+        node = self.create_node(
+            "line",
+            x1=float(start[b"Hrzn"]),
+            y1=float(start[b"Vrtc"]),
+            x2=float(end[b"Hrzn"]),
+            y2=float(end[b"Vrtc"]),
+            stroke_width=origination.line_weight,
+            **attrib,
+        )
+        if "fill" in node.attrib:
+            # A line has no fill area; a mask's explicit fill paints its stroke.
+            node.set("stroke", node.attrib.pop("fill"))
         return node
 
     def create_origination_rectangle(
@@ -586,3 +645,30 @@ def get_origin_scale(
         scale_y = (xy**2 + yy**2) ** 0.5
         return (scale_x, scale_y)
     return (1.0, 1.0)
+
+
+def _has_aligned_gradient(layer: layers.ShapeLayer) -> bool:
+    """Whether active line paint uses an object-bounding-box gradient."""
+    stroke = layer.stroke if layer.has_stroke() else None
+    if stroke is None or stroke.fill_enabled:
+        if Tag.VECTOR_STROKE_CONTENT_DATA in layer.tagged_blocks:
+            fill = layer.tagged_blocks.get_data(Tag.VECTOR_STROKE_CONTENT_DATA)
+            if fill is not None and Key.Gradient in fill and _is_aligned_gradient(fill):
+                return True
+        elif Tag.GRADIENT_FILL_SETTING in layer.tagged_blocks:
+            fill = layer.tagged_blocks.get_data(Tag.GRADIENT_FILL_SETTING)
+            if fill is not None and _is_aligned_gradient(fill):
+                return True
+    if stroke is not None and stroke.enabled:
+        content = stroke.content
+        if (
+            content is not None
+            and content.classID == b"gradientLayer"
+            and _is_aligned_gradient(content)
+        ):
+            return True
+    return False
+
+
+def _is_aligned_gradient(setting: Descriptor) -> bool:
+    return Key.Alignment not in setting or setting[Key.Alignment].value is True
