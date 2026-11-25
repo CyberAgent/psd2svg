@@ -281,18 +281,14 @@ def test_enable_live_shapes_flag() -> None:
     )
 
 
-def test_live_line_shape_uses_native_svg_line() -> None:
+def test_live_line_with_stroke_keeps_outline() -> None:
     psdimage = PSDImage.open(get_fixture("shapes/line-1.psd"))
     converter = Converter(psdimage)
     converter.build()
 
-    line = converter.svg.find(".//line")
-    assert line is not None
-    assert (line.get("x1"), line.get("y1")) == ("21", "24")
-    assert (line.get("x2"), line.get("y2")) == ("103", "106")
-    assert line.get("stroke") == "#000000"
-    assert line.get("stroke-width") == "9"
-    assert converter.svg.find(".//path") is None
+    assert converter.svg.find(".//line") is None
+    assert converter.svg.find(".//path") is not None
+    assert compute_conversion_quality(psdimage, "MSE") < 0.0005
 
 
 def test_live_line_with_arrowheads_keeps_outline() -> None:
@@ -330,11 +326,14 @@ def _axis_aligned_line(axis: str) -> tuple[PSDImage, layers.ShapeLayer]:
     assert isinstance(origin, Line)
     coordinate = b"Vrtc" if axis == "horizontal" else b"Hrzn"
     origin.line_end[coordinate] = origin.line_start[coordinate]
+    assert layer.stroke is not None
+    layer.stroke._data[b"strokeEnabled"] = False
+    layer.stroke._data[b"fillEnabled"] = True
     return psdimage, layer
 
 
 @pytest.mark.parametrize("axis", ["horizontal", "vertical"])
-def test_live_axis_aligned_line_with_solid_stroke_is_native(axis: str) -> None:
+def test_live_axis_aligned_line_with_solid_fill_is_native(axis: str) -> None:
     psdimage, layer = _axis_aligned_line(axis)
 
     converter = Converter(psdimage)
@@ -373,6 +372,8 @@ def test_live_axis_aligned_line_with_gradient_fill(
 def test_live_axis_aligned_line_with_gradient_stroke_keeps_outline(axis: str) -> None:
     psdimage, layer = _axis_aligned_line(axis)
     assert layer.stroke is not None
+    layer.stroke._data[b"strokeEnabled"] = True
+    layer.stroke._data[b"fillEnabled"] = False
 
     gradient_psd = PSDImage.open(get_fixture("paint/stroke-1-gradient.psd"))
     gradient_layer = next(
@@ -420,6 +421,22 @@ def test_live_axis_aligned_line_clipped_to_pixel_layer_keeps_outline(axis: str) 
     assert node.tag == "path"
     assert node.get("mask") == attrib["mask"]
     assert converter.svg.find(".//line") is None
+
+
+def test_live_zero_length_line_keeps_outline() -> None:
+    psdimage = PSDImage.open(get_fixture("shapes/line-1.psd"))
+    layer = next(layer for layer in psdimage.descendants() if layer.kind == "shape")
+    assert isinstance(layer, layers.ShapeLayer)
+    assert layer.stroke is not None
+    layer.stroke._data[b"strokeEnabled"] = False
+    layer.stroke._data[b"fillEnabled"] = True
+    origin = layer.origination[0]
+    assert isinstance(origin, Line)
+    origin.line_end[b"Hrzn"] = origin.line_start[b"Hrzn"]
+    origin.line_end[b"Vrtc"] = origin.line_start[b"Vrtc"]
+
+    converter = Converter(psdimage)
+    assert converter.create_shape(layer).tag == "path"
 
 
 def test_live_line_in_reusable_definition_keeps_outline() -> None:

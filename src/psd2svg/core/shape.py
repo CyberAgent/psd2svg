@@ -322,9 +322,11 @@ class ShapeConverter(ConverterProtocol):
         start, end = origination.line_start, origination.line_end
         if start is None or end is None:
             return False
-        axis_aligned = float(start[b"Hrzn"]) == float(end[b"Hrzn"]) or float(
-            start[b"Vrtc"]
-        ) == float(end[b"Vrtc"])
+        start_x, start_y = float(start[b"Hrzn"]), float(start[b"Vrtc"])
+        end_x, end_y = float(end[b"Hrzn"]), float(end[b"Vrtc"])
+        if (start_x, start_y) == (end_x, end_y):
+            return False
+        axis_aligned = start_x == end_x or start_y == end_y
         transform = origination._data.get(b"Trnf")
         has_transform = transform is not None and tuple(
             float(transform[key]) for key in (b"xx", b"xy", b"yx", b"yy", b"tx", b"ty")
@@ -335,8 +337,8 @@ class ShapeConverter(ConverterProtocol):
             and origination.line_weight > 0
             and self.current.tag not in ("clipPath", "defs")
             and not self.has_separate_fill(layer)
-            and not (stroke and stroke.enabled and stroke.fill_enabled)
-            and not (stroke and stroke.enabled and origination.line_weight != 1)
+            # Strokes on the centerline lose the body's width and alignment.
+            and not (stroke and stroke.enabled)
             and not (
                 axis_aligned
                 and (
