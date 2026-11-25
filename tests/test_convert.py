@@ -394,6 +394,34 @@ def test_live_axis_aligned_line_with_raster_mask_keeps_outline(axis: str) -> Non
         assert converter.create_shape(layer).tag == "path"
 
 
+@pytest.mark.parametrize("axis", ["horizontal", "vertical"])
+def test_live_axis_aligned_line_clipped_to_pixel_layer_keeps_outline(axis: str) -> None:
+    psdimage, layer = _axis_aligned_line(axis)
+    origin = layer.origination[0]
+    assert isinstance(origin, Line)
+    start, end = ((45, 64), (85, 64)) if axis == "horizontal" else ((64, 45), (64, 85))
+    origin.line_start[b"Hrzn"], origin.line_start[b"Vrtc"] = start
+    origin.line_end[b"Hrzn"], origin.line_end[b"Vrtc"] = end
+    clipping_psd = PSDImage.open(
+        get_fixture("clipping/clipping-1-raster-with-transform.psd")
+    )
+    pixel_base = next(
+        candidate
+        for candidate in clipping_psd.descendants()
+        if candidate.kind == "pixel" and candidate.has_clip_layers()
+    )
+    converter = Converter(psdimage)
+
+    with converter.add_clipping_target(pixel_base) as attrib:
+        assert attrib is not None and "mask" in attrib
+        node = converter.add_shape(layer, **attrib)
+
+    assert node is not None
+    assert node.tag == "path"
+    assert node.get("mask") == attrib["mask"]
+    assert converter.svg.find(".//line") is None
+
+
 def test_live_line_in_reusable_definition_keeps_outline() -> None:
     psdimage = PSDImage.open(get_fixture("shapes/line-1.psd"))
     layer = next(layer for layer in psdimage.descendants() if layer.kind == "shape")

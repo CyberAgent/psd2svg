@@ -302,7 +302,7 @@ class ShapeConverter(ConverterProtocol):
                 node = self.create_origination_ellipse(origination, reference, **attrib)
                 node = self.apply_origination_transform(layer, origination, node)
             elif isinstance(origination, Line) and self.can_create_origination_line(
-                layer, origination
+                layer, origination, mask=attrib.get("mask")
             ):
                 node = self.create_origination_line(origination, **attrib)
             else:
@@ -315,7 +315,7 @@ class ShapeConverter(ConverterProtocol):
         return node
 
     def can_create_origination_line(
-        self, layer: layers.ShapeLayer, origination: Line
+        self, layer: layers.ShapeLayer, origination: Line, mask: str | None = None
     ) -> bool:
         """Keep outlines when a straight SVG line cannot represent the shape."""
         stroke = layer.stroke if layer.has_stroke() else None
@@ -339,7 +339,11 @@ class ShapeConverter(ConverterProtocol):
             and not (stroke and stroke.enabled and origination.line_weight != 1)
             and not (
                 axis_aligned
-                and (self.has_raster_mask(layer) or _has_aligned_gradient(layer))
+                and (
+                    self.has_raster_mask(layer)
+                    or _has_aligned_gradient(layer)
+                    or mask is not None
+                )
             )
             and not has_transform
             and tuple(layer.tagged_blocks.get_data(Tag.REFERENCE_POINT, (0.0, 0.0)))
